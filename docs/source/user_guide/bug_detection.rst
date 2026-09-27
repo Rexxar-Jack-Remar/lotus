@@ -1,7 +1,8 @@
 Bug Detection with Lotus
 =========================
 
-Lotus provides comprehensive bug detection capabilities for finding security vulnerabilities and safety issues in C/C++ programs.
+Lotus detects security vulnerabilities and safety issues in C/C++ programs
+through the ``lotus-check`` frontend.
 
 Overview
 --------
@@ -632,7 +633,7 @@ CI/CD Pipeline
    clang -emit-llvm -c -g source.c -o source.bc
    
    # Run checkers via the unified lotus-check frontend
-   ./build/bin/lotus-check --engine=kint source.ll --checks=all > kint_results.txt
+   ./build/bin/lotus-check --engine=kint source.bc --checks=all > kint_results.txt
    ./build/bin/lotus-check --engine=taint source.bc > taint_results.txt
    
    # Check for bugs

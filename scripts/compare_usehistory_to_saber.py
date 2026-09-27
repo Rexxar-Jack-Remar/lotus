@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure one double-free check per SPEC2006 process against Lotus Saber.
+"""Compare Lotus UseHistory with Lotus Saber on one SPEC2006 double-free check.
 
 This records observed outcomes as well as time and memory. Different models or
 Unknown results prevent a like-for-like accuracy or performance claim.

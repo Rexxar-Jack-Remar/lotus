@@ -1,12 +1,13 @@
 Architecture Overview
 =====================
 
-This document provides a comprehensive overview of the Lotus architecture, describing how the different components interact and how they are organized.
+This document describes the Lotus architecture, component organization, and
+interaction between subsystems.
 
 System Architecture
 -------------------
 
-Lotus is organized into several major subsystems that work together to provide a comprehensive program analysis framework:
+Lotus is organized into several major subsystems:
 
 .. code-block:: text
 
@@ -331,8 +332,8 @@ Standalone Tools
 ~~~~~~~~~~~~~~~~
 
 Each major component has standalone command-line tools. The bug-detection
-frontends have been unified under a single ``lotus-check`` binary with an
-explicit ``--engine=<name>`` selector:
+frontends are driven by the ``lotus-check`` binary with an explicit
+``--engine=<name>`` selector:
 
 **Alias analysis:**
 - ``lotus-alias-aser-aa``, ``lotus-alias-dyck-aa``, ``lotus-alias-lotus-aa``
@@ -388,10 +389,9 @@ Adding New Analyses
 Adding New Checkers
 ~~~~~~~~~~~~~~~~~~~
 
-1. Extend ``BugDetectorPass`` base class
-2. Implement checker logic
-3. Report bugs via ``BugReportMgr``
-4. Add a ``lotus-check`` engine runner or create a new tool
+1. Implement checker logic as an LLVM pass or analysis class
+2. Register bug types and report findings via ``BugReportMgr``
+3. Wire the engine into ``lotus-check`` (e.g., via ``include/Checker/Framework/Subcommands.h``)
 
 Adding New Abstract Domains
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -46,12 +46,12 @@ a module, using optional MemorySSA-backed summaries for more precise results.
    lotus::analysis::purity::FunctionPurityAnalysis purity(M);
    purity.run();
 
-   if (purity.isConst(F)) { /* ... */ }
-   if (purity.isPure(F))  { /* ... */ }
-   if (purity.isKnown(F)) { /* ... */ }
+   if (purity.isConst(&F)) { /* ... */ }
+   if (purity.isPure(&F))  { /* ... */ }
+   if (purity.isKnown(&F)) { /* ... */ }
 
-   PurityKind k = purity.getPurity(F);
-   FunctionEffectSummary fx = purity.getEffects(F);
+   PurityKind k = purity.getPurity(&F);
+   FunctionEffectSummary fx = purity.getEffects(&F);
 
 **Configuration** (``FunctionPurityAnalysisOptions``):
 

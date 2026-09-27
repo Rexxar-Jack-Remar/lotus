@@ -210,21 +210,22 @@ The SSI transformation accepts several command-line options:
 
    #include "IR/SSI/SSI.h"
    
+   SSIfy &ssify = ...;
    Instruction *I = ...;
    
-   if (SSIfy::is_SSIphi(I)) {
+   if (ssify.is_SSIphi(I)) {
        // I is an SSI phi function
    }
    
-   if (SSIfy::is_SSIsigma(I)) {
+   if (ssify.is_SSIsigma(I)) {
        // I is an SSI sigma function
    }
    
-   if (SSIfy::is_SSIcopy(I)) {
+   if (ssify.is_SSIcopy(I)) {
        // I is an SSI copy instruction
    }
    
-   if (SSIfy::is_actual(I)) {
+   if (ssify.is_actual(I)) {
        // I is not an SSI-created instruction (actual program instruction)
    }
 
@@ -250,9 +251,4 @@ SSI is used by several analyses and transformations in Lotus:
 * **Constraint-Based Analyses**: Analyses that construct constraint systems
   benefit from SSI's ability to associate values with the conditions that
   guard them, allowing for more precise constraint generation.
-
-The SSI transformation provides a foundation for analyses that require
-path-sensitive and condition-sensitive reasoning, making it easier to prove
-properties about programs with complex control flow and conditional
-dependencies.
 

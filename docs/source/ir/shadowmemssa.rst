@@ -211,13 +211,5 @@ ShadowMem SSA is used by various analyses and optimizations in Lotus:
 * **IPDeadStoreElimination**: Interprocedural dead store elimination pass that uses
   ShadowMem SSA to track memory def-use chains across function boundaries to identify
   and eliminate dead stores.
-
-* **Memory Analysis**: Provides foundation for memory-aware analyses that need to
-  understand memory dependencies and def-use relationships.
-
-* **Optimization Passes**: Enables memory-aware optimizations that can reason about
-  memory side effects of function calls.
-
-The ShadowMem SSA infrastructure provides a convenient abstraction over Sea-DSA's
-shadow memory instrumentation, making it easier to write analyses that need to
-understand memory operations and their dependencies across function boundaries.
+* **Memory Analysis**: Extracts memory def-use relationships and side-effect
+  models across function boundaries.

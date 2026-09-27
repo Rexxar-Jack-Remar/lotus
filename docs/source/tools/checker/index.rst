@@ -7,7 +7,7 @@ For feature-oriented examples, see :doc:`../../user_guide/bug_detection`.
 Unified Frontend
 ----------------
 
-Lotus now builds a single checker binary:
+Lotus provides a single checker binary:
 
 * **Binary**: ``lotus-check``
 * **Directory**: ``tools/checker/``

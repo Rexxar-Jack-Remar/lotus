@@ -3,8 +3,8 @@ Solver Tools
 
 This page documents the command-line front-ends under ``tools/solver/``.
 ``lotus-solver-datalog`` is built by default, while ``lotus-solver-owl`` requires
-``-DLOTUS_ENABLE_OWL=ON``. ``lotus-solver-staub`` remains a source-present
-experimental tool; ``lotus-solver-smt-stabilizer`` requires
+``-DLOTUS_ENABLE_OWL=ON``. ``lotus-solver-staub`` is an experimental tool
+(not built by default); ``lotus-solver-smt-stabilizer`` requires
 ``-DLOTUS_ENABLE_SMT_STABILIZER=ON`` (GMP/MPFR). SMT↔LLVM translation is provided
 by TUNA under ``lib/Solvers/SMT/TUNA``.
 
@@ -28,8 +28,7 @@ canonical JSON relation rows and runtime statistics.
 lotus-solver-owl – SMT/Model Checking Front-End
 -----------------------------------------------
 
-``lotus-solver-owl`` is the supported solver front-end currently built from this
-directory. It feeds SAT or SMT problems to the configured solver stack.
+``lotus-solver-owl`` feeds SAT or SMT problems to the configured solver stack.
 
 **Binary**: ``lotus-solver-owl``
 **Location**: ``tools/solver/lotus-solver-owl.cpp``
@@ -60,8 +59,7 @@ before translation or solving.
 
 **Source**: ``tools/solver/lotus-solver-staub.cpp``
 
-This front-end is kept in the tree as an experimental source tool, not as a
-default-built binary.
+This tool is not built by default.
 
 Basic usage:
 

@@ -8,22 +8,23 @@ Overview
 --------
 
 The WPDS backend provides algorithms for reasoning about weighted pushdown
-systems, which can encode interprocedural programs with call/return structure.
+systems, which model interprocedural programs with call/return structure.
 
 **Location**: ``third-party/WPDS/``
 
-**Main capabilities**:
+Features
+--------
 
-- Representation of pushdown rules and stacks.
-- Extensible weight domains for dataflow information.
-- Reachability and summary computation algorithms.
+- Representation of pushdown rules and configuration stacks.
+- Extensible weight domains (semirings) for dataflow facts.
+- Generalized pushdown reachability and summary computation.
 
 Typical Use Cases
 -----------------
 
-- Context-sensitive dataflow analysis with summaries.
+- Context-sensitive dataflow analysis with procedure summaries.
 - Path-sensitive reasoning over call/return structure.
-- Experiments with weighted pushdown-system based formulations.
+- Interprocedural program reachability.
 
 Basic Usage (C\+\+)
 -------------------
@@ -34,18 +35,9 @@ Basic Usage (C\+\+)
 
    // Instantiate wpds::WPDS<T> with an analysis-specific semiring weight.
 
-Features
---------
-
-- **Weighted automata** – Weighted transition systems over pushdown rules.
-- **Pushdown model** – Stack-based semantics for modeling function calls and
-  returns.
-- **Path analysis** – Algorithms for computing summary weights and reachability
-  information.
-
 Integration Notes
 -----------------
 
-The WPDS backend is typically used by higher-level analyses that require
-interprocedural reasoning with explicit call stacks. See :doc:`index` for a
+The WPDS backend is used by higher-level analyses that require interprocedural
+reasoning with explicit call stacks (such as APA). See :doc:`index` for a
 high-level overview of where WPDS fits in the solver architecture.

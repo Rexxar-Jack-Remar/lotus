@@ -1,7 +1,7 @@
 Tutorials and Examples
 ======================
 
-This section provides hands-on tutorials for using Lotus to analyze real programs.
+Hands-on tutorials for analyzing programs with Lotus tools.
 For optimization passes that can reshape IR before analysis, see
 :doc:`../optimization/index` and the :doc:`../optimization/swprefetching` guide.
 
@@ -75,7 +75,7 @@ This adds call-site sensitivity for better precision while maintaining good perf
 
 .. code-block:: bash
 
-   ./build/bin/lotus-alias-dyck-aa -print-alias-set-info example1.bc
+   ./build/bin/lotus-alias-dyck-aa -v example1.bc
 
 Produces the most precise alias sets using Dyck-CFL reachability.
 

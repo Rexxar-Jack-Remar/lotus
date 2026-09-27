@@ -8,7 +8,7 @@ over the same LLVM IR input.
 Overview
 --------
 
-The current front-ends focus on intraprocedural or IFDS-style benchmark runs and
+The front-ends focus on intraprocedural or IFDS-style benchmark runs and
 emit machine-readable summaries that are easy to diff in tests.
 
 lotus-dfa
@@ -108,7 +108,7 @@ both intraprocedural and interprocedural analyses.
 - ``--solver <name>``: string, default "newton", newton or kleene (inter analyses require newton)
 - ``--linear-solver <name>``: string, default "scc", scc, adaptive_scc, or tensor
 
-NPA execution is serial. Shared Lotus libraries may still register the global
+NPA execution is serial. Shared Lotus libraries register the global
 ``-nworkers`` option in the binary, but it does not control NPA scheduling.
 
 Intraprocedural analyses:

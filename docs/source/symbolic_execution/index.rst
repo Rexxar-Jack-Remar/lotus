@@ -1,7 +1,7 @@
 Symbolic Execution
 ==================
 
-This section documents the top-level symbolic execution engine that backs the
+The top-level symbolic execution engine in Lotus backs the
 ``lotus-check --engine=symex`` checker and other path-sensitive analyses.
 
 **Headers**: ``include/SymbolicExecution/``
@@ -134,7 +134,7 @@ added to a pass pipeline like other Lotus passes:
    #include "SymbolicExecution/Integration/SymbolicExecutionWrapper.h"
 
    // Within a pass manager setup:
-   auto *seWrapper = new SymbolicExecutionWrapperPass();
+   auto *seWrapper = new llvm::SymbolicExecutionWrapper();
    pm.add(seWrapper);
 
 Tests

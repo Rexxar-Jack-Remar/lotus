@@ -1,13 +1,15 @@
 Annotation Framework
 ====================
 
-Lotus provides annotation frameworks for specifying and analyzing program behavior. The annotation system is organized into several components for tracking argument positions, modification/reference effects, pointer effects, and taint analysis.
+Lotus provides annotations and summary tables for modeling library and external
+function behavior across alias, taint, and bug-checking analyses.
 
 Dedicated module pages:
 
 - :doc:`modref` for external mod/ref summaries
 - :doc:`pointer_effects` for pointer-side-effect specifications
 - :doc:`taint_config` for taint source, sink, and propagation specs
+- :doc:`api_spec` for the unified API specification loader
 
 Position Tracking
 -----------------

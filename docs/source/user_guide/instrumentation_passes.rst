@@ -1,7 +1,8 @@
 Instrumentation Passes
-=======================
+======================
 
-Lotus provides several LLVM instrumentation passes for preparing programs for verification.
+Lotus provides LLVM transformation passes in ``include/Verification/Transform/``
+and ``lib/Verification/Transform/`` for preparing programs for verification.
 
 Available Passes
 ----------------
@@ -9,15 +10,8 @@ Available Passes
 BreakCritLoops
 ~~~~~~~~~~~~~~
 
-Breaks critical loops for better slicing and control dependence analysis.
-
-**Usage:**
-
-.. code-block:: bash
-
-   lotus-opt input.bc -break-crit-loops -o output.bc
-
-**What it does:**
+Header: ``include/Verification/Transform/BreakCritLoops.h``
+Pass: ``BreakCritLoopsPass``
 
 * Identifies basic blocks that jump back to themselves via critical edges
 * Splits these blocks to improve control dependence computation
@@ -26,15 +20,8 @@ Breaks critical loops for better slicing and control dependence analysis.
 DeleteUndefined
 ~~~~~~~~~~~~~~~
 
-Deletes calls to undefined functions and replaces non-void undefined functions with nondeterministic values.
-
-**Usage:**
-
-.. code-block:: bash
-
-   lotus-opt input.bc -delete-undefined -o output.bc
-
-**What it does:**
+Header: ``include/Verification/Transform/DeleteUndefined.h``
+Pass: ``DeleteUndefinedPass``
 
 * Removes calls to undefined void functions
 * Replaces undefined non-void functions with ``verifier.nondet.undef.*`` calls
@@ -44,15 +31,8 @@ Deletes calls to undefined functions and replaces non-void undefined functions w
 InitializeUninitialized
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Initializes stack-allocated variables with nondeterministic values.
-
-**Usage:**
-
-.. code-block:: bash
-
-   lotus-opt input.bc -init-uninit -o output.bc
-
-**What it does:**
+Header: ``include/Verification/Transform/InitializeUninitialized.h``
+Pass: ``InitializeUninitializedPass``
 
 * Finds all ``alloca`` instructions in function entry blocks
 * Replaces uninitialized uses with calls to ``verifier.nondet.init.*`` functions
@@ -61,89 +41,57 @@ Initializes stack-allocated variables with nondeterministic values.
 MakeNondet
 ~~~~~~~~~~
 
-Replaces selected input functions with nondeterministic value generators.
-
-**Usage:**
-
-.. code-block:: bash
-
-   lotus-opt input.bc -make-nondet -o output.bc
-
-**Configuration:**
-
-The pass accepts a comma-separated list of function names to replace:
-
-.. code-block:: bash
-
-   lotus-opt input.bc -make-nondet \
-     --make-nondet-targets=rand,getchar,fgetc,scanf \
-     -o output.bc
-
-**What it does:**
+Header: ``include/Verification/Transform/MakeNondet.h``
+Pass: ``MakeNondetPass``
 
 * Replaces calls to specified functions (e.g., ``rand()``, ``getchar()``) with nondeterministic values
+* Supports the ``--make-nondet-targets`` option for configuring target functions
 * Preserves return type semantics
 * Useful for abstracting away I/O and random number generation
 
 PrepareOverflows
 ~~~~~~~~~~~~~~~~
 
-Instruments signed arithmetic operations with explicit overflow checks.
-
-**Usage:**
-
-.. code-block:: bash
-
-   lotus-opt input.bc -prep-overflows -o output.bc
-
-**What it does:**
+Header: ``include/Verification/Transform/PrepareOverflows.h``
+Pass: ``PrepareOverflowsPass``
 
 * Finds signed integer arithmetic operations (add, sub, mul)
 * Replaces them with overflow-checking intrinsics (``llvm.sadd.with.overflow``, etc.)
 * Calls ``__VERIFIER_error()`` if overflow detected
 * Useful for overflow property checking
 
-Example Workflow
-----------------
+Programmatic Usage
+------------------
 
-A typical verification workflow:
+These passes can be constructed and scheduled via
+``include/Verification/Transform/Instrumentation.h``:
 
-.. code-block:: bash
+.. code-block:: cpp
 
-   # 1. Initialize uninitialized variables
-   lotus-opt input.bc -init-uninit -o step1.bc
+   #include "Verification/Transform/Instrumentation.h"
+   #include <llvm/IR/LegacyPassManager.h>
+   #include <llvm/IR/PassManager.h>
 
-   # 2. Replace I/O with nondet
-   lotus-opt step1.bc -make-nondet -o step2.bc
+   using namespace lotus::verification::transform;
 
-   # 3. Instrument overflow checks
-   lotus-opt step2.bc -prep-overflows -o prepared.bc
+   // Legacy pass manager
+   llvm::legacy::PassManager PM;
+   PM.add(createInitializeUninitializedPass());
+   PM.add(createMakeNondetPass());
+   PM.add(createDeleteUndefinedPass());
 
-   # 4. Verify
-   lotus-verify prepared.bc --property overflow --backend clam --run
-
-All Passes Together
--------------------
-
-You can enable all instrumentation passes at once:
-
-.. code-block:: bash
-
-   lotus-opt input.bc -init-uninit -make-nondet -prep-overflows -o output.bc
-
-Or use the convenience flag (if available):
-
-.. code-block:: bash
-
-   lotus-opt input.bc -ip-all -o output.bc
+   // New pass manager
+   llvm::FunctionPassManager FPM;
+   FPM.addPass(createBreakCritLoopsPass());
+   FPM.addPass(createPrepareOverflowsPass());
 
 Integration with Verification
 -----------------------------
 
-These passes are designed to work with Lotus's verification backends:
+These passes are designed to prepare IR for Lotus's verification backends:
 
 * **InitializeUninitialized**: Prepares programs for abstract interpretation (CLAM)
-* **MakeNondet**: Essential for symbolic execution (SeaHorn, Sifa)
-* **PrepareOverflows**: Required for overflow property checking
+* **MakeNondet**: Normalizes external inputs for symbolic execution (SeaHorn, Sifa)
+* **PrepareOverflows**: Exposes explicit overflow assertions for verification
 
-See :doc:`verification_backends` for more information on using these with verification tools.
+See :doc:`verification_backends` for verification driver usage.

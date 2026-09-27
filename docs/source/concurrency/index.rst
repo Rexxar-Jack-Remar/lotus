@@ -20,7 +20,7 @@ The module supports multiple concurrency models:
 
 - **POSIX threads (pthreads)**: standard pthread APIs
 - **Modern C++ concurrency**: ``std::thread``, mutexes, condition variables,
-  futures/promises, atomics, and several C++20 primitives that are recognized
+  futures/promises, atomics, and C++20 synchronization primitives
 - **OpenMP**: parallel regions, barriers, tasks, and lock operations
   (see ``lib/Concurrency/OpenMP/``)
 - **MPI**: a separate SPMD communication analysis in ``Concurrency/MPI/``
@@ -48,8 +48,8 @@ The source tree is grouped by subdirectory under ``include/Concurrency/`` and
 - ``Runtime/``: ``APIRegistry``, ``RuntimeKind``, and language runtime abstractions
 - ``Thread/``: Core thread model and reasoning:
   - ``Model/``: ``ThreadModel``, ``ThreadModelBuilder``, and ``ThreadCreationTree``
-  - ``Join/``: ``JoinTargetAnalysis`` (previously ``JoinTarget/``)
-  - ``Sharing/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis`` (previously ``Memory/``)
+  - ``Join/``: ``JoinTargetAnalysis``
+  - ``Sharing/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis``
 - ``Utils/``: ``ThreadAPI``, ``ThreadFlowGraph``, vector-clock utilities,
   RAII lock tracking, and language models for C++, OpenMP, MPI, and Linux kernel
   APIs

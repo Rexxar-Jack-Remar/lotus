@@ -61,6 +61,7 @@ Usage
 .. code-block:: cpp
 
    #include "IR/GSA/GSA.h"
+   using namespace gsa;
 
    auto *cda = createControlDependenceAnalysisPass();
    auto *ga = createGateAnalysisPass();

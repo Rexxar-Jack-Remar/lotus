@@ -79,4 +79,4 @@ See Also
 --------
 
 - :doc:`../optimization/swprefetching` — Profile-guided software prefetching
-- :doc:`../optimization/index` — Optimisation passes consuming profile data
+- :doc:`../optimization/index` — Optimization passes consuming profile data

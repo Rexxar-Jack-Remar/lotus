@@ -1,7 +1,8 @@
 Annotations
 ===========
 
-This section covers the annotation system for specifying analysis properties.
+Lotus provides annotation systems and specification loaders for modeling external
+API behaviors, mod/ref effects, pointer operations, and taint propagation.
 
 .. toctree::
    :maxdepth: 2

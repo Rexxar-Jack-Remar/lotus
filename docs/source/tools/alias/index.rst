@@ -21,7 +21,8 @@ See :doc:`../../alias/gpg` for architecture and options.
 SparrowAA (lotus-alias-sparrow-aa)
 ----------------------------------
 
-Inclusion-based points-to analysis (flow-insensitive, context-insensitive, context-sensitive).
+Inclusion-based points-to analysis (flow-insensitive, field-sensitive, with
+context-insensitive and k-CFA variants).
 
 **Binary**: ``lotus-alias-sparrow-aa``  
 **Location**: ``tools/alias/lotus-alias-sparrow-aa.cpp``
@@ -34,10 +35,10 @@ Inclusion-based points-to analysis (flow-insensitive, context-insensitive, conte
 
 **Notes**:
 
-- Flow-insensitive, context-insensitive, context-sensitive
+- Flow-insensitive, field-sensitive pointer analysis
+- Supports context-insensitive and context-sensitive (k-CFA) modes
 - No on-the-fly call graph construction
-- Good default when you need quick alias information
-- Note: this tool have some redundancies with aserpta, and reuses some header files from it (from context abstraction).
+- Fast baseline for points-to and alias queries
 
 TPA (lotus-alias-tpa)
 ---------------------

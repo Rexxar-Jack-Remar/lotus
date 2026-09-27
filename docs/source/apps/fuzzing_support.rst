@@ -7,27 +7,21 @@ driven instrumentation.
 Overview
 --------
 
-The fuzzing tree re-implements the directed fuzzing analyses used by AFLGo,
-Hawkeye, and DAFL in a modular form. The analysis layer is active under
-``lib/Fuzzing/Analysis/``, while the AFLGo compiler and linker plugins remain in
-the source tree as integration pieces that are not wired into the top-level
-``lib/Fuzzing/CMakeLists.txt``.
+The fuzzing tree implements directed fuzzing analyses based on AFLGo,
+Hawkeye, and DAFL in a modular form. The core analyses live under
+``lib/Fuzzing/Analysis/``, with complementary compile-time and link-time
+plugins under ``lib/Fuzzing/AFLGoCompiler/`` and ``lib/Fuzzing/AFLGoLinker/``.
 
 **Location**: ``lib/Fuzzing/``, ``include/Fuzzing/``
 
 **Components**: distance analyses, target detection, target generation,
-path profiling, and source-present AFLGo compiler or linker plugin code.
+path profiling, and AFLGo compiler and linker plugin code.
 
 Detailed module pages:
 
 - :doc:`fuzzing_analysis`
 - :doc:`aflgo_compiler`
 - :doc:`aflgo_linker`
-
-**Algorithms represented in the analysis code**:
-* **AFLGo (CCS 17)**: basic block and call graph distance computation
-* **Hawkeye (CCS 18)**: function-level distance computation
-* **DAFL (USENIX Security 23)**: data-dependence guided weighting
 
 Directed Greybox Fuzzing Algorithms
 ------------------------------------
@@ -72,9 +66,8 @@ Public headers for this layer live under ``include/Fuzzing/Analysis/``.
 Compiler and Linker Plugins
 ---------------------------
 
-``AFLGoCompiler/`` and ``AFLGoLinker/`` are still worth reading as source-level
-pipeline components, but they are not part of the default ``lib/Fuzzing`` build
-today.
+``AFLGoCompiler/`` and ``AFLGoLinker/`` provide compile-time and link-time
+plugins for target injection and distance instrumentation.
 
 **PathProfiling/** (``lib/Fuzzing/PathProfiling/``, ``include/Fuzzing/PathProfiling/``):
 

@@ -8,7 +8,7 @@ used throughout the codebase.
 
 - ``Nullable`` and ``Offset`` for common analysis-side data wrappers.
 - ``ScopeExit`` for lightweight RAII cleanup.
-- ``range.h`` and vendored terminal-color helpers for ergonomic utility code.
+- ``Range.h`` (vendored ``rang`` library) for terminal color formatting.
 
 These headers are intentionally low-level and widely reused.
 

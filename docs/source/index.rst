@@ -1,7 +1,7 @@
 Lotus: Program Analysis Framework
 ==================================
 
-Lotus is a comprehensive program analysis, verification, and optimization framework built on LLVM. It provides multiple toolkits that can be used individually or in combination for various static analysis tasks.
+Lotus is a program analysis, verification, and optimization framework built on LLVM. It provides multiple toolkits for static analysis, verification, and bug detection.
 
 
 
@@ -64,7 +64,7 @@ Features
 * **Bug Detection**: Integer overflow, null pointer, buffer overflow, concurrency bugs, symbolic execution
 * **Symbolic Execution**: Path-sensitive engine for bug checking
 * **Symbolic Automata**: Seal — FSM model lifting for stateful systems (CAV 2026)
-* **LLVM Integration**: Built on LLVM 14 with comprehensive IR support
+* **LLVM Integration**: Built on LLVM 14 with IR and graph abstractions
 
 Supported Platforms
 -------------------

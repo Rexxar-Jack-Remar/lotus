@@ -1,5 +1,10 @@
-PDG Query – Program Dependence Graph Queries
-==============================================
+IR Tools
+========
+
+This page documents the command-line tools under ``tools/ir/``.
+
+PDG Query (lotus-ir-pdg-query)
+------------------------------
 
 Interactive and batch query engine for the Program Dependence Graph (PDG).
 
@@ -74,6 +79,35 @@ Relevant options:
 - ``--function=<name>`` restricts the experiment to one function.
 - ``--seed-index=N`` adds closure seeds; the function entry is always included.
 - ``--format=text|json|csv`` selects the output format.
+
+Use History (lotus-ir-usehistory)
+---------------------------------
+
+Driver for value-flow use histories and defect detection (such as double-free
+and use-after-free) over Lotus SVFG.
+
+**Binary**: ``lotus-ir-usehistory``  
+**Location**: ``tools/ir/lotus-ir-usehistory.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   # Check for defects
+   ./build/bin/lotus-ir-usehistory --check=double-free program.bc
+   ./build/bin/lotus-ir-usehistory --check=use-after-free program.bc
+
+   # Query flow path between SVFG nodes
+   ./build/bin/lotus-ir-usehistory --source-node=1 --sink-node=5 program.bc
+
+Relevant options:
+
+- ``--check=double-free|use-after-free`` – Run defect detection
+- ``--source-node=<ID>`` and ``--sink-node=<ID>`` – Query flow reachability
+- ``--format=text|json|dot`` – Select output format (default: ``text``)
+- ``--dump-svfg=<file>`` – Write the source SVFG to a DOT file
+- ``--timing`` – Print analysis phase timings to standard error
+- ``--quiet`` – Suppress issue and witness details
 
 .. toctree::
    :maxdepth: 1

@@ -38,8 +38,8 @@ Configuration
 - ``--prefetch-distance-provider=llm`` uses explicit distances from
   ``--llm-dist``.
 - ``--prefetch-distance-provider=static`` reserves the static-analysis mode.
-- ``--input-file`` remains accepted as the underlying legacy pass option, but
-  ``--profile`` is the preferred frontend spelling.
+- ``--input-file`` is also accepted by the underlying pass, but
+  ``--profile`` is the frontend option.
 
 Notes
 -----

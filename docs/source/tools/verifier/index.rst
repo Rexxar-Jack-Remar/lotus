@@ -84,10 +84,10 @@ Horn clauses (CHC), symbolic execution, and abstraction-refinement.
 .. code-block:: bash
 
    # Bounded model checking
-   ./build/bin/seahorn --bmc=10 program.c
+   ./build/bin/seahorn --horn-bmc program.bc
 
    # CHC-based verification
-   ./build/bin/seahorn --horn program.c
+   ./build/bin/seahorn --horn-solve program.bc
 
 For detailed documentation, see :doc:`seahorn/index`.
 
@@ -95,7 +95,7 @@ SMACK – LLVM-to-Boogie Verification
 -----------------------------------
 
 SMACK translates LLVM bitcode into Boogie programs for verifier backends. The
-migrated SMACK implementation lives under ``third-party/verification/smack/``
+SMACK implementation lives under ``third-party/verification/smack/``
 with the command-line frontend under ``tools/verifier/smack/``.
 
 **Binaries**: ``llvm2bpl``, ``extern-statics``  
@@ -116,7 +116,7 @@ Horn-ICE provides CHC (Constrained Horn Clause) verification with invariant
 learning capabilities.
 
 **Binaries**: ``chc_verifier``, ``hice-dt``  
-**Location**: ``third-party/horn-ice/`` (moved from previous standalone location)
+**Location**: ``third-party/horn-ice/``
 
 **Usage**:
 

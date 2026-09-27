@@ -20,9 +20,8 @@ control-dependence algorithms migrated from
 inevitability/biclique algorithms. Baseline implementations are split into
 ``SCD.cpp``, ``NTSCD.cpp``, ``DOD.cpp``, and ``ControlClosure.cpp``. The
 compact algorithms live separately in ``CompactNTSCD.cpp``, ``CompactDOD.cpp``,
-and ``CompactClosure.cpp``, preserving the old implementations as experimental
-baselines. ``ControlDependence.cpp`` and ``ICFGControlDependence.cpp`` are the
-LLVM/Lotus graph adapters.
+and ``CompactClosure.cpp``. ``ControlDependence.cpp`` and
+``ICFGControlDependence.cpp`` are the LLVM/Lotus graph adapters.
 
 The core algorithms and function adapter are linked as
 ``CanaryControlDependence``. The optional whole-ICFG adapter is isolated in
@@ -39,7 +38,7 @@ The ``Algorithm`` enum selects the variant to compute:
 - ``NTSCD2`` – backwards-counter NTSCD implementation
 - ``NTSCDLegacy`` – compatibility name for dg's legacy backwards-counter implementation
 - ``NTSCDRanganath`` – fixed-point form of Ranganath et al.'s NTSCD algorithm
-- ``NTSCDRanganathOriginal`` – original order-sensitive algorithm, retained for comparison
+- ``NTSCDRanganathOriginal`` – original order-sensitive algorithm
 - ``DOD`` – decisive-order dependence
 - ``DODRanganath`` – Ranganath et al.'s DOD algorithm
 - ``DODNTSCD`` – combined DOD and NTSCD relation
@@ -65,7 +64,7 @@ Whole-ICFG analysis
 -------------------
 
 ``ICFGControlDependenceAnalysis`` runs every graph-based variant over an
-existing Lotus ICFG, corresponding to dg's whole-ICFG mode. Standard CD remains
+existing Lotus ICFG, corresponding to dg's whole-ICFG mode. Standard CD is
 function-only because it requires a function post-dominator tree. The ICFG
 directly models calls, returns, exceptional returns, and non-returning calls.
 Fully resolved call-to-return summary edges are excluded from whole-ICFG
@@ -91,7 +90,7 @@ Interpretation
 --------------
 
 DOD is represented as a binary over-approximation of its underlying ternary
-relation, as in dg. The migrated DOD implementation accepts binary predicates;
+relation, as in dg. The DOD implementation accepts binary predicates;
 multi-way switches are skipped. The original Ranganath NTSCD variant is known
 to be incorrect and is exposed only for parity and experimentation. For a graph
 with ``n`` vertices and ``m`` edges, compact preprocessing takes ``O(n(n+m))``

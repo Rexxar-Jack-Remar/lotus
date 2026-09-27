@@ -8,8 +8,7 @@ Overview
 --------
 
 Context-Free Language (CFL) reachability extends graph reachability with
-context-free grammars for precise interprocedural analysis. CFL reachability
-enables analysis of complex program properties using grammar-based constraints.
+context-free grammars for precise interprocedural analysis.
 
 **Location**: ``tools/cfl/``
 
@@ -17,7 +16,7 @@ enables analysis of complex program properties using grammar-based constraints.
 ``lotus-cfl-interleaved-dyck-mcfl``, ``lotus-cfl-interleaved-dyck-staged-bounds``,
 ``lotus-cfl-interleaved-dyck-unary``, ``lotus-cfl-interleaved-dyck-spds``,
 ``lotus-cfl-interleaved-dyck-lcl``, ``lotus-cfl-interleaved-dyck-affine-spds``,
-``lotus-cfl-interleaved-dyck-graph-reduction``, ``lotus-cfl-dynamic-dyck``, and CSR.
+``lotus-cfl-interleaved-dyck-graph-reduction``, ``lotus-cfl-dynamic-dyck``, and ``csr``.
 
 Classical CFL solving and clients
 ---------------------------------
@@ -79,10 +78,10 @@ options.
 The general solver accepts the vendored datasets under
 ``benchmarks/real-world/CFL/Classical``, POCR grammar/graph files, and exposes
 unidirectional summarization, SCC elimination, graph folding, and inter-Dyck
-pruning. Foldability utilities remain available through their C++ APIs.
+pruning. Foldability utilities are available through their C++ APIs.
 Run ``python3 scripts/cfl/run_cfl_dataset.py --all-solvers --case lbm`` for a
 small cross-backend check over the vendored alias, value-flow, and taint
-instances. This includes ``cert``; STG remains separate because it requires an
+instances. This includes ``cert``; STG is separate because it requires an
 explicit decomposition specification.
 Select subsets with comma-separated or repeated ``--analysis``, ``--case``,
 and ``--solver`` options. ``--workers N`` runs independent solver processes in

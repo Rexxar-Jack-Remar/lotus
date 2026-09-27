@@ -44,7 +44,7 @@ Reducible aggregators run with worker-local state. The lattice library includes
 minimum, maximum, set-union, dual, product, bounded-set, and
 constant-propagation values.
 
-The current semantic and architecture reference is maintained in
+The semantic and architecture reference is maintained in
 ``lib/Solvers/Datalog/README.md``.
 
 Command-line engine
@@ -81,6 +81,6 @@ directly to ``SemanticProgram`` without a JSON round trip.
 multiple files; declarations may follow their uses. Native ``.include`` uses an
 injected ``SourceResolver`` so the library never chooses filesystem policy. The
 CLI contains no parser implementation and supplies a relative-path resolver.
-Output rows are sorted deterministically, making it suitable for future Python
-differential and performance harnesses. The complete syntax is documented in
+Output rows are sorted deterministically, making it suitable for differential
+and performance harnesses. The complete syntax is documented in
 ``tools/solver/datalog/README.md``.

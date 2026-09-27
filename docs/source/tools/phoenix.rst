@@ -64,7 +64,7 @@ Available Analyzers
 
 - ``phoenix_analyzer.py`` — Phoenix alias analysis driver
 - ``svf_analyzer.py`` — SVF analysis driver
-- ``tpa_analyzer.py`` — TPA (Type-based Pointer Analysis) driver
+- ``tpa_analyzer.py`` — TPA pointer analysis driver
 - ``aser_analyzer.py`` — AserPTA analysis driver
 - ``sparrow_analyzer.py`` — SparrowAA analysis driver
 
@@ -76,9 +76,8 @@ Usage
    cd lotus
    python scripts/phoenix/src/main.py
 
-The script will prompt for a directory path containing ``.bc`` files, then ask
-which tool to run.  This legacy workflow is retained while users migrate to
-YAML experiments.
+The script prompts for a directory path containing ``.bc`` files and the tool
+to run.
 
 Operational notes
 -----------------

@@ -22,8 +22,8 @@ path in the supplied abstraction. Missing models and exhausted search budgets mu
 Integration status
 ------------------
 
-``buildUseHistoryFromLotusSVFG`` constructs the overlay from this checkout's
-SVFG and the LLVM module CFG. ``lotus-ir-usehistory`` first builds ICFG and
+``buildUseHistoryFromLotusSVFG`` constructs the overlay from Lotus SVFG and
+the LLVM module CFG. ``lotus-ir-usehistory`` first builds ICFG and
 SVFG, then exports JSON/DOT, runs a structural query between SVFG node IDs, or
 checks possible double-free and use-after-free using object IDs and resource
 histories. Ambiguous native locations are reported as graph issues.
@@ -33,9 +33,7 @@ Heartbleed-style and unchecked-use rules. The command-line tool automatically
 supplies release and dereference facts for its two resource checks. Taint
 sources/sinks, sanitizers and full external-call semantics require client
 models. A ``Found`` result means a potential witness in the SVFG abstraction;
-it does not prove concrete path feasibility. See
-``lib/IR/UseHistory/README.md`` for usage and limits.
-
+it does not prove concrete path feasibility.
 
 See ``lib/IR/UseHistory/README.md`` for the native mapping contract, query
-semantics, models, complexity and full API examples.
+semantics, models, complexity, and full API examples.

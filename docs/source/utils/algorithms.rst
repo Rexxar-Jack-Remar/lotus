@@ -4,7 +4,7 @@ Path Expression Algorithms
 ``include/Utils/Algorithms/`` contains algorithmic helpers that do not fit into
 the general-purpose container layer.
 
-**Current focus**: ``PathExpressions/``
+**Components** (``PathExpressions/``):
 
 - ``PathExpressionComputer`` computes path summaries over labeled graphs.
 - ``Regex`` stores the resulting path-expression representation.

@@ -4,9 +4,8 @@ Constant-Time Analysis
 Static analysis for verifying constant-time programming properties in
 sensitive code.
 
-This page documents the current ``lib/Security/ConstantTime`` subsystem. Older
-references to a separate ``Crypto`` analysis directory are stale; the code now
-lives under the unified ``lib/Security`` tree.
+The constant-time analysis implementation lives under
+``lib/Security/ConstantTime``.
 
 **Headers**: ``include/Security/ConstantTime``
 
@@ -84,8 +83,8 @@ generation, statistics, and source-location rendering.
 Analysis Modes and Options
 --------------------------
 
-The subsystem is now configured through runtime options collected in
-``CTOptions`` rather than the older preprocessor-driven setup.
+The subsystem is configured through runtime options collected in
+``CTOptions``.
 
 Important defaults include:
 
@@ -103,7 +102,7 @@ Important defaults include:
 - ``debug = false``
 - ``print_function = false``
 
-``file_path`` remains available for source-file lookup during reporting.
+``file_path`` specifies the source file path used during reporting.
 
 Leak Model
 ----------
@@ -113,11 +112,6 @@ The pass reports constant-time violations through several channels:
 - **Cache timing**: secret-dependent memory-access behavior
 - **Branch timing**: secret-dependent control flow
 - **Variable timing**: operations whose latency may vary with secret data
-
-In practice, this means the ConstantTime component now covers analysis that was
-historically documented under separate crypto and speculation/security topics,
-but is implemented today as one security-oriented constant-time subsystem in
-``lib/Security/ConstantTime``.
 
 Usage
 -----

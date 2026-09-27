@@ -11,10 +11,10 @@ infrastructure.
 Overview
 --------
 
-This subsystem contains the historical LLPE code used for aggressive
+This subsystem contains the LLPE code used for aggressive
 specialization, symbolic execution style reasoning, and partial evaluation over
 LLVM IR. It is built as the ``CanaryPE`` static library and is separate from
-the scalar, IPO, and prefetch libraries. It is not currently surfaced through
+the scalar, IPO, and prefetch libraries. It is not surfaced through
 the ``lotus-opt-ipo`` or ``lotus-opt-prefetch`` frontends.
 
 Main components

@@ -4,22 +4,22 @@ Optimization Tools
 This section documents the optimization-related command-line tools under
 ``tools/optimization/``.
 
-The current front ends cover two focused parts of ``lib/Optimization/``:
+The front ends in this directory cover three areas:
 
-- ``lotus-opt-ipo`` drives the passes in ``lib/Optimization/IPO/`` via
-  ``tools/optimization/lotus-opt-ipo.cpp``
-- ``lotus-opt-prefetch`` drives the software prefetching implementation in
+- ``lotus-opt-ipo`` drives inter-procedural optimization passes in
+  ``lib/Optimization/IPO/`` via ``tools/optimization/lotus-opt-ipo.cpp``
+- ``lotus-opt-prefetch`` drives software prefetching in
   ``lib/Optimization/Prefetch/`` via
   ``tools/optimization/lotus-opt-prefetch.cpp``
+- ``lotus-opt-purity`` drives function purity inference in
+  ``lib/Analysis/Purity/`` via ``tools/optimization/lotus-opt-purity.cpp``
 
 Other optimization libraries, such as ``Scalar/``, ``Pipeline/``, and
 ``PartialEvaluation/``, exist in the source tree but are not documented here as
-standalone tools because this directory does not currently expose separate
-front-end binaries for them.
+standalone tools because they do not expose separate front-end binaries.
 
 **Location**: ``tools/optimization/``
-**Additional frontends**: the currently disabled
-``tools/optimization/lotus-opt-lif.cpp``
+**Experimental frontends**: ``tools/optimization/lotus-opt-lif.cpp`` (not built by default)
 
 lotus-opt-purity — Purity Inference Driver
 -------------------------------------------
@@ -79,7 +79,7 @@ Usage examples:
    lotus-opt-purity input.ll -S --report-json purity.json
 
    # Use external summary store with validation
-   lotus-opt-purity input.bc -o output.bc \\
+   lotus-opt-purity input.bc -o output.bc \
      --purity-summary-file summaries.json --apply-attrs
 
 .. toctree::

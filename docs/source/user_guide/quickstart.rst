@@ -59,7 +59,7 @@ Abstract Interpretation
 .. code-block:: bash
 
    ./build/bin/clam example.bc                    # Clam analyzer
-   ./build/bin/clam-pp example.bc                 # Clam pretty-printer
+   ./build/bin/clam-pp example.bc                 # Clam preprocessor
    ./build/bin/clam-diff old.bc new.bc            # Differential analysis
 
 Program Dependence Graph
