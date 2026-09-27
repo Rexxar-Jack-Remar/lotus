@@ -1,15 +1,15 @@
 # AffineSPDS: affine history synchronization for Lotus
 
 This C++17 engine strengthens the endpoint-only SPDS upper bound by comparing
-**joint affine relations between histories of projected witnesses**. It uses the
+**joint affine relations between histories of projected witnesses**. It reuses the
 existing `spds::PushdownSystem`, `postStar`, `preStar`, and `SaturationSession`
-with an `AffineSemiring` weight domain. It neither replaces those algorithms nor
-changes Core or the Boolean SPDS engine.
+with an `AffineSemiring` weight domain.
 
-This is the proposed affine-history extension discussed with the user, **not an
-algorithm attributed to the POPL 2019 paper**. The paper supplies the separate
+The affine-history synchronization implemented here is an extension built on
+top of the POPL 2019 construction, **not an algorithm from that paper**. The
+paper supplies the separate
 call/field PDS construction and weighted-saturation interface; the synchronized
-history interpretation and new implementation are an extension.
+history interpretation and its implementation are the extension.
 
 ## Semantics and scope
 
@@ -310,12 +310,11 @@ after comparisons, and the reported maximum rank includes queried readout hulls.
 
 The Core DOT parser currently reads edge statements, not isolated vertex
 statements. Use `--vertex V` or `Graph::addVertex(V)` to retain isolated vertices.
-This engine does not change the Core parser.
 
 ## Front-end-neutral synchronized data-flow builder
 
 `AffineSPDS/Synchronized.h` provides `affine::SynchronizedSystem`. It follows the
-previous SPDS variable/statement encoding, but carries history weights on BOTH
+`SPDS` variable/statement encoding, but carries history weights on BOTH
 systems and compares their hulls at synchronized configurations:
 
 ```cpp
@@ -369,8 +368,8 @@ The dimension check is not a global memory budget and cannot undo allocation of
 a custom observer already built by the caller; choose modest feature budgets.
 
 Readout over a saturated automaton is finite-height too, but its extra work is
-not counted against the saturation's update limit. This version does not expose
-a whole-analysis wall-clock or memory-budget controller.
+not counted against the saturation's update limit. There is no whole-analysis
+wall-clock or memory-budget controller.
 
 The CLI buffers result output until the complete requested operation succeeds.
 Exit codes are 0 (complete), 2 (invalid input/I/O), and 3 (resource failure).

@@ -57,8 +57,12 @@ void DoubleFreeChecker::reportBug(ProgSlice *slice) {
 
   // Match SVF: only report when a double-free path exists (two free sinks
   // reachable on the same path).
-  if (slice->isSatisfiableForPairs())
+  if (SaberNoSMT) {
+    if (slice->getSinks().size() < 2)
+      return;
+  } else if (slice->isSatisfiableForPairs()) {
     return;
+  }
 
   BugReportMgr &mgr = BugReportMgr::get_instance();
   int bugTypeId = mgr.register_bug_type("Double Free", BugDescription::BI_HIGH,
@@ -70,7 +74,11 @@ void DoubleFreeChecker::reportBug(ProgSlice *slice) {
     report->append_step(const_cast<Value *>(reportSource),
                         "Memory allocated here");
   }
-  appendPathConditionEvents(report, slice);
+  if (SaberNoSMT && reportSource)
+    report->append_step(const_cast<Value *>(reportSource),
+                        "Path feasibility not checked (Saber no-SMT mode)");
+  else
+    appendPathConditionEvents(report, slice);
   if (reportSink) {
     report->append_step(const_cast<Value *>(reportSink),
                         "Memory may be freed again here");
@@ -81,7 +89,7 @@ void DoubleFreeChecker::reportBug(ProgSlice *slice) {
 
   mgr.insert_report(bugTypeId, report, false);
 
-  if (SaberValidateTests)
+  if (SaberValidateTests && !SaberNoSMT)
     testsValidation(slice);
 
   outs() << "Double Free detected at ";

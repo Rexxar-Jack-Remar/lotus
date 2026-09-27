@@ -14,8 +14,8 @@ with the variants exposed by the reference implementation.
 | Component | Responsibility |
 | --- | --- |
 | `IndirectionList` | Field-sensitive indirection lists, wildcard fields, k-limiting, and summarized remainders from Appendix B. |
-| `GPU` | Generalized points-to updates, TS/SS composition, data-dependence tests, GPU reduction, and queued producers. |
-| `Graph` | GPBs and GPG flow edges, boundary definitions, both reaching-GPU analyses, blocking, strong/weak updates, dead-GPU elimination, and coherent coalescing. |
+| `GPU` | Generalized points-to updates (GPUs), target-source (TS) / source-source (SS) composition, data-dependence tests, GPU reduction, and queued producers. |
+| `Graph` | Generalized points-to blocks (GPBs) and GPG flow edges, boundary definitions, both reaching-GPU analyses, blocking, strong/weak updates, dead-GPU elimination, and coherent coalescing. |
 | `ProgramModel` | Stable abstract locations for LLVM SSA values, globals, stack objects, allocation sites, formals, functions, returns, null, and unknown memory. |
 | `LLVMFrontend` | Translation of LLVM CFGs and pointer operations into initial GPGs, including GEP fields, aggregate initializers, memory intrinsics, calls, and pointer uses. |
 | `GPGAnalysisEngine` | Bottom-up call inlining, SCC refinement for recursion, delayed function-pointer resolution, sensitivity variants, and optimization scheduling. |

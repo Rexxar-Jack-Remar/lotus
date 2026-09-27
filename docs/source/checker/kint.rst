@@ -15,7 +15,7 @@ by zero, array bounds violations, and related issues.
 Overview
 --------
 
-KINT (Kint Is Not Taint) uses SMT solving and summary encoding to detect
+KINT uses SMT solving and summary encoding to detect
 numerical bugs in LLVM bitcode. It combines:
 
 * **SMT Solving**: Z3-based path-sensitive verification for precise bug detection
@@ -23,11 +23,11 @@ numerical bugs in LLVM bitcode. It combines:
 * **Taint Analysis**: Tracking of untrusted data sources
 
 .. note::
-   Range analysis was removed (commit 88adc045) and replaced with a pure
-   SMT-based approach using per-object memory arrays and inter-procedural
-   function summaries.
+   The current implementation is purely SMT-based, using per-object memory
+   arrays and inter-procedural function summaries.
 
-All detected bugs are reported through the centralized ``BugReportMgr`` system, enabling unified JSON and SARIF output.
+All KINT findings go through the shared ``BugReportMgr``, so they can be
+written to the same JSON and SARIF reports as other engines.
 
 Components
 ----------
@@ -169,8 +169,18 @@ Command-Line Options
 
 **Robust reachability options**:
 
-* ``--kint.robust-checks=<id[,id...]>`` – Restrict robust reachability to a subset
-  of the canonical IDs selected by ``--checks``.
+Robust reachability re-checks whether a bug condition is still reachable once
+values that KINT cannot model are treated as universally quantified variables
+(quantified SMT over unknown calls). It is off by default.
+
+* ``--kint.robust-reachability=<true|false>`` – Enable robust reachability checks (default: false)
+* ``--kint.robust-checks=<id[,id...]>`` – Run robust reachability only for a subset
+  of the canonical IDs selected by ``--checks`` (``int-overflow``, ``div-by-zero``,
+  ``bad-shift``, ``array-oob``, ``dead-branch``); empty means the selected ``--checks`` set
+* ``--kint.robust-universal-unknown-loads=<true|false>`` – Treat unknown loads as universally quantified variables
+* ``--kint.robust-universal-external-globals=<true|false>`` – Treat loads from external globals as universal variables
+* ``--kint.robust-universal-inline-asm=<true|false>`` – Treat inline asm returns as universal variables
+* ``--kint.dump-ef-constraints=<file>`` – Append the generated (forall) constraints to a file
 
 **Report Options**:
 
@@ -259,7 +269,10 @@ For path-sensitive verification, KINT uses Z3:
 * **Satisfiability Checking**: Verifies if bug conditions are satisfiable
 * **Timeout Handling**: Limits analysis time per function
 
-Memory modeling was improved (commit b4cef8a1) with per-object SMT arrays: each allocation site gets its own byte array (``obj_base``, ``obj_size``, ``obj_mem``), with ``ObjectStateFrame`` snapshots for path branching, alias tracking (``m_obj_alias``, ``m_int_alias``), and selective havoc for unknown calls.
+The memory model uses one SMT array per allocation site: each allocation gets
+its own byte array (``obj_base``, ``obj_size``, ``obj_mem``), with
+``ObjectStateFrame`` snapshots for path branching, alias tracking
+(``m_obj_alias``, ``m_int_alias``), and selective havoc for unknown calls.
 
 Taint Analysis
 --------------
@@ -285,9 +298,12 @@ Limitations
 Performance
 -----------
 
-* SMT solving can be slow for complex functions (use timeouts)
-* Function timeout helps prevent analysis from getting stuck
-* Statistics can help identify performance bottlenecks
+* SMT cost is dominated by functions with many paths; tune
+  ``--kint.function-timeout-seconds`` and ``--kint.max-paths-per-function``
+* ``--kint.summary-timeout-seconds`` and ``--kint.summary-max-paths`` bound
+  inter-procedural summary construction
+* ``--kint.summary-mode=off`` skips summary building entirely for a
+  single-function run
 
 Integration
 -----------

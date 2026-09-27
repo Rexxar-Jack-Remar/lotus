@@ -35,8 +35,8 @@ upper_bound = R_call intersection R_field
 A true interleaved-Dyck path witnesses both projections and is never discarded.
 A missing pair certifies absence of such a path. A present pair need not have a
 single balanced witness. The implementation deliberately does not intersect
-path witnesses, iteratively prune one PDS with the other, or substitute the
-previous LCL engine. Such changes would not be Definition 4's construction.
+path witnesses or iteratively prune one PDS with the other; those changes
+would not be Definition 4's construction.
 
 The paper also queries nonempty field stacks (access paths) and pending calling
 contexts. Its Figure 7 contains an outstanding outer call. Use a precise stack

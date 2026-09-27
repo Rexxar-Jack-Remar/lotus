@@ -4,9 +4,10 @@
 
 This module implements algorithms from "Automatic Abstraction of Bit-Vector Formulae" for computing symbolic abstractions of **SMT formulas** (specifically bit-vector formulas). 
 
-**⚠️ Important Distinction**: This library is **NOT** the same as `lib/Verification/SymAbsAI`, which is a complete program analysis framework for LLVM IR.
+This library is distinct from `lib/Verification/SymAbsAI`, which is a complete
+program analysis framework for LLVM IR.
 
-### Key Differences
+### Comparison with SymAbsAI
 
 | Aspect | `lib/Solvers/SMT/SymAbs` (this library) | `lib/Verification/SymAbsAI` |
 |--------|------------------------------------------|----------------------------------------|

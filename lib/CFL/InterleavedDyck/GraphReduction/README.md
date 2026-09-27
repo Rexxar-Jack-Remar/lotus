@@ -40,8 +40,8 @@ python3 build/bin/lotus-cfl-interleaved-dyck-graph-reduction.py reduced.dot \
   --dkmerge build/bin/lotus-cfl-interleaved-dyck-dkmerge
 ```
 
-The driver now accepts explicit paths and no longer depends on a local
-Makefile, `dotfile/exp-2020`, or binaries in the current directory.
+The driver takes explicit `--graphaux`/`--dkmerge` tool paths, so it can be
+run from any working directory.
 
 ## Code organization
 
@@ -51,7 +51,6 @@ Makefile, `dotfile/exp-2020`, or binaries in the current directory.
 - `DkMerge.cpp` performs the degree-based merge phase.
 - `graph_simp.py` alternates both colors and removes proven-redundant edges.
 - `Legacy/` contains private artifact-era data structures under `include/CFL/InterleavedDyck/GraphReduction/Legacy/`.
-  They are maintained for compatibility with the artifact-era reduction pipeline.
 
 The specialized reducer representation is intentionally not merged with
 `interleaved_dyck::Graph`: it stores intermediate merge classes, colored

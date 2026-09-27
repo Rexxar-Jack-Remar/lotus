@@ -531,6 +531,13 @@ SaberCondAllocator::getPHIComplementCond(const llvm::BasicBlock *BB1,
 
 bool SaberCondAllocator::isSatisfiable(const Condition &condition) {
   (void)condition;
+  if (SaberNoSMT) {
+#ifdef USE_Z3
+    if (condition.getExpr().is_false())
+      return false;
+#endif
+    return true;
+  }
 #ifdef USE_Z3
   if (condition.getExpr().is_true())
     return true;
@@ -554,6 +561,8 @@ bool SaberCondAllocator::isSatisfiable(const Condition &condition) {
 
 bool SaberCondAllocator::isEquivalentBranchCond(const Condition &lhs,
                                                 const Condition &rhs) const {
+  if (SaberNoSMT)
+    return lhs.id() == rhs.id();
 #ifdef USE_Z3
   if (lhs == rhs)
     return true;

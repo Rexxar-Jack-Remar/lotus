@@ -17,9 +17,18 @@ enum class DefectKind {
 struct DefectReport {
   DefectKind kind = DefectKind::DoubleFree;
   QueryResult result;
+  bool specialized = false;
   /// Native SVFG IDs present on witness nodes. History psi/phi nodes have no
   /// native ID, so this list need not have one entry per witness node.
   std::vector<NativeID> nativeWitness;
+};
+
+struct DefectScan {
+  QueryStatus status = QueryStatus::NotFound;
+  std::vector<DefectReport> findings;
+  bool specialized = false;
+  bool exhaustive = true;
+  std::string message;
 };
 
 /// Run a defect rule over an already constructed and annotated UseHistory graph.
@@ -32,6 +41,10 @@ public:
   DefectReport run(DefectKind kind,
                    std::vector<FlowNodeID> roots = {},
                    std::vector<FlowNodeID> uses = {}) const;
+  /// Enumerate one witness per release/dereference site for a resource rule.
+  /// An issue can make the negative result Unknown even after all modeled
+  /// sites have been visited.
+  DefectScan scan(DefectKind kind) const;
 
 private:
   const FlowGraph &Graph;

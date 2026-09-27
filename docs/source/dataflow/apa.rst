@@ -50,8 +50,9 @@ Order-aware elimination
 
 ``EliminationOptions`` and ``PathSummaryEquationOptions`` expose ``Ordering``
 and ``Order`` settings. The policies ``Structural``, ``ExpressionAware``,
-``StarRisk``, and ``Hybrid`` use live-graph sparse elimination, cached operand
-DAG sizes, and a dirty-candidate/versioned-heap selector. Removed equations are
+``StarRisk``, and ``Hybrid`` score pivots from the live graph's sparse degree
+information, cached operand DAG sizes, and a dirty-candidate/versioned-heap
+selector. Removed equations are
 back-substituted so summaries remain available at every program point. These
 policies are supported in both equation directions, the forward-summary solver,
 and the modular summary builder. Module-scoped interprocedural affine equalities
@@ -71,16 +72,17 @@ to emit candidate scores, pivot traces, live-DAG statistics, allocations, and
 ranking costs. ``--inter-engine=context|expanded|modular`` selects the model.
 Context mode caches construction per procedure/call-string pair and reinterprets
 after external fact updates. ``--order-full-rescore`` checks incremental selection.
-Policies never omit signals or substitute Structural; no signal-disabling or
-metadata-fallback flags are provided.
+The ordering signal set is fixed: every policy scores the same signals, and
+``Structural`` remains available as a baseline ordering.
 Additional baselines are ``rpo``, seeded ``random``, ``min-degree``, and complete
 local permutations via ``explicit --order-explicit=0,1,...``.
 
-Historical defaults are preserved. Use ``--order-sparse`` on **all** compared
-configurations to isolate ordering from the legacy full-matrix engine. Online
+For order-only comparisons, pass ``--order-sparse`` on **all** configurations so
+the numbers are not confounded by solver-engine differences. Online
 ordering with an ADT engine is rejected rather than silently switching engines. The
-sparse equation baseline uses ascending local SCC indices; sparse intra Default
-keeps its historical permutation. Live-DAG counts include saved equations and query
+sparse equation baseline uses ascending local SCC indices; the sparse
+intra-procedural ``Default`` policy uses a fixed, documented permutation.
+Live-DAG counts include saved equations and query
 summaries, but exclude factory-only roots; active-graph counts are separate. Neither
 measures physical RSS. Nested semantic-star intervals are counted only once.
 
@@ -90,8 +92,8 @@ orders requires a language-invariant interpretation; a lattice interface alone
 does not guarantee it. See ``lib/Dataflow/APA/README.md`` for policy formulas,
 semantic-cache snapshots, measurement scopes, and the responsibility-based header
 layout. Core strategies have separate ``Ordering/Policies/`` headers; signal
-collection and versioned selection are independent modules. No ``Detail`` directory
-or backward-compatibility headers are retained.
+collection and versioned selection are independent modules. Headers are grouped
+by responsibility, with no shared catch-all ``Detail`` layer.
 
 Interprocedural Forward Summary Solver
 --------------------------------------
@@ -299,8 +301,10 @@ The pipeline has four stages:
   on e-nodes, applied matches, rounds, wall-clock time, and consecutive rounds
   without cost improvement. The driver is anytime: any stopping point yields a
   valid extractable result.
-- ``Extract`` (``BatchExtract.h``) picks one e-node per e-class to minimize the
-  reuse-aware shared-DAG objective (Eq. 5), using a cycle-safe relaxation
+- ``Extract`` (``BatchExtract.h``) picks one e-node per e-class to minimize a
+  reuse-aware shared-DAG objective — minimizing the number of distinct nodes in
+  the shared extracted tree rather than the sum of per-root sizes — using a
+  cycle-safe relaxation
   followed by a reuse-refinement loop.
 - ``Export`` (``Export.h``) materializes the chosen representatives back into
   the factory, recovering cross-root sharing through a memo keyed by canonical
@@ -310,7 +314,7 @@ Rewrites are gated by a client-declared ``LawProfile`` (``LawProfile.h``):
 left/right distributivity, annihilation, Kleene-star laws, unfoldings, and
 sliding. Presets include ``kleeneAlgebra()``, ``flowAlgebra()``, and the
 universally-safe ``safeMinimal()`` (left distributivity only). The ``CostModel``
-(``CostModel.h``) supplies per-operator weights plus the Eq. 5 shared-DAG
+(``CostModel.h``) supplies per-operator weights plus the shared-DAG
 objective weights; presets are ``uniform()``, ``profiled()``, and ``dag()``.
 
 EAN is fail-safe. If anything throws, the result shape is wrong, or the
@@ -326,7 +330,7 @@ TranslAPA baseline
 the elimination front-end verbatim and swaps only the interpreter. Instead of
 ``SolverContext::eval``, which re-applies generic transfers and iterates
 ``Star`` to a lattice fixpoint, it folds each node's path expression with the
-closed-form Gen/Kill semiring (paper §4) in a single memoized bottom-up pass.
+closed-form Gen/Kill semiring in a single memoized bottom-up pass.
 
 The reusable core is ``foldFillGenKill()`` (``Driver.h``). Given a solved
 result and a translator that maps transfer atoms to ``(Gen, Kill)`` pairs, it
@@ -356,7 +360,7 @@ comparison this baseline exists for.
 Modular interprocedural summary solver
 --------------------------------------
 
-The ``ModularInterSummaryBuilder`` (E6, milestone 3) is the modular counterpart
+The ``ModularInterSummaryBuilder`` is the modular counterpart
 of the monolithic ``ForwardInterSummarySolver`` described above. Instead of
 encoding the whole program as one global equation graph, it builds ONE
 entry-to-exit path-expression summary per reachable non-opaque procedure over
@@ -372,14 +376,14 @@ via ``Star``. Each ``ProcSummary`` carries the entry-to-exit expression (a union
 over the procedure's exit points) plus an entry-to-node expression for every
 instruction. The builder reports aggregate ``DagStats`` before and after an
 optional per-procedure EAN or Greedy post-pass, mirroring the monolithic
-solver's Table VI/VII diagnostics.
+solver's diagnostic output.
 
 Recursion is deliberately deferred. A ``SummaryCall`` to a same-team procedure
 is an opaque placeholder during construction; closing recursive teams is an
-interpretation-time fixpoint (milestone 4) guided by the reverse-topological
+interpretation-time fixpoint guided by the reverse-topological
 order and ``recursive`` flags in the returned ``CallGraphSCCResult``.
 
-The ``ModularInterSummaryDriver`` (milestone 4) interprets the summaries into
+The ``ModularInterSummaryDriver`` interprets the summaries into
 IN/OUT facts with a context-insensitive, functional fixpoint over procedure
 entry facts: entry procedures start at the initial fact, callee entry facts
 accumulate via ``callFlow`` at their call sites, and the outer loop iterates
@@ -410,7 +414,7 @@ Typical use cases
 Analysis Tooling & Evaluation
 -----------------------------
 
-The command-line driver (``lotus-dfa-apa``) logic is cleanly separated into reusable components under ``include/Dataflow/APA/Tooling/`` and ``lib/Dataflow/APA/Tooling/``. This isolation prevents the core APA analysis engines from being polluted with experiment-specific artifacts (like repetitive cycle timing, specific OS memory profiling tools, or hardcoded benchmark variants), offering a clean entry point for client applications.
+The command-line driver (``lotus-dfa-apa``) logic is factored into reusable components under ``include/Dataflow/APA/Tooling/`` and ``lib/Dataflow/APA/Tooling/``. Benchmarks, cycle timing, and OS memory-profiling helpers live there, so the core APA analysis engines depend on none of them and client applications link only the analysis code.
 
 See also
 --------

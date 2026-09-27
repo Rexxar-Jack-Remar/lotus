@@ -285,7 +285,7 @@ Unification-based alias analysis using Dyck-CFL reachability.
 - ``-print-alias-set-info`` – Print alias sets and relations (DOT)
 - ``-count-fp`` – Count possible targets for each function pointer
 - ``-dot-dyck-callgraph`` – Generate call graph from alias results
-- ``-no-function-type-check`` – Disable function type compatibility checking
+- ``-function-type-check-level=<0-4>`` – Strictness of function type compatibility checking (default ``4``)
 
 **Typical Use**:
 

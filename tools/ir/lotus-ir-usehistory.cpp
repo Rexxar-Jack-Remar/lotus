@@ -13,8 +13,13 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <iostream>
+#include <chrono>
+#include <iomanip>
 #include <limits>
+#include <map>
 #include <memory>
+#include <optional>
+#include <set>
 #include <stdexcept>
 
 using namespace lotus::analysis;
@@ -32,6 +37,10 @@ llvm::cl::opt<std::string> DumpSVFG("dump-svfg",
 llvm::cl::opt<std::string> Check("check",
                                  llvm::cl::desc("double-free or use-after-free"),
                                  llvm::cl::init(""));
+llvm::cl::opt<bool> Timing("timing",
+                            llvm::cl::desc("Print analysis phase timings to stderr"));
+llvm::cl::opt<bool> Quiet("quiet",
+                           llvm::cl::desc("Suppress issue and witness details"));
 llvm::cl::opt<unsigned> Source("source-node",
                                 llvm::cl::desc("SVFG source node ID for a flow query"),
                                 llvm::cl::init(std::numeric_limits<unsigned>::max()));
@@ -46,6 +55,19 @@ const char *statusName(QueryStatus status) {
   case QueryStatus::Unknown: return "Unknown";
   }
   return "Unknown";
+}
+
+std::string findingSite(const FlowNode &node) {
+  const std::string &label = node.label;
+  const auto functionEnd = label.find(".resources:");
+  const std::string function = label.substr(0, functionEnd);
+  const auto open = label.rfind(" [");
+  if (open != std::string::npos) {
+    const auto close = label.find(']', open + 2);
+    if (close != std::string::npos)
+      return function + ":" + label.substr(open + 2, close - open - 2);
+  }
+  return label;
 }
 } // namespace
 
@@ -80,6 +102,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  using Clock = std::chrono::steady_clock;
+  const auto start = Clock::now();
   llvm::LLVMContext context;
   llvm::SMDiagnostic diagnostic;
   auto module = llvm::parseIRFile(Input, diagnostic, context);
@@ -87,57 +111,104 @@ int main(int argc, char **argv) {
     diagnostic.print(argv[0], llvm::errs());
     return 1;
   }
+  const auto parsed = Clock::now();
   try {
     ICFG icfg;
     ICFGBuilder icfgBuilder(&icfg);
     icfgBuilder.build(module.get());
     SVFGBuilderConfig config;
     config.usePointerAnalysis = true;
-    config.buildMSSA = true;
+    config.buildMSSA = Check.empty();
     config.resolveIndirectCalls = true;
     SVFGBuilder builder(config);
     std::unique_ptr<SVFG> svfg(builder.build(&icfg));
+    const auto builtSVFG = Clock::now();
     if (!DumpSVFG.empty()) svfg->dump(DumpSVFG);
-    auto result = buildUseHistoryFromLotusSVFG(*svfg, *module);
+    NativeHistoryMode mode = Check == "double-free" ? NativeHistoryMode::DoubleFree :
+                             Check == "use-after-free" ? NativeHistoryMode::UseAfterFree :
+                                                          NativeHistoryMode::Full;
+    auto result = buildUseHistoryFromLotusSVFG(*svfg, *module, mode);
+    const auto builtHistory = Clock::now();
+    std::optional<DefectScan> checkReport;
+    std::map<std::string, std::vector<std::size_t>> findingGroups;
+    std::map<std::string, std::set<ObjectID>> findingObjects;
+    std::optional<QueryResult> nodeQuery;
+    if (!Check.empty()) {
+      DefectKind kind = Check == "double-free" ? DefectKind::DoubleFree :
+                                                DefectKind::UseAfterFree;
+      checkReport = DefectDetector(result.graph).scan(kind);
+      for (std::size_t index = 0; index < checkReport->findings.size(); ++index) {
+        const auto &witness = checkReport->findings[index].result.nodes;
+        if (witness.empty()) continue;
+        const auto &sink = result.graph.node(witness.back());
+        std::string site = findingSite(sink);
+        findingGroups[site].push_back(index);
+        if (sink.object) findingObjects[site].insert(*sink.object);
+      }
+    }
+    if (query) {
+      auto source = result.native.nodes.find(Source);
+      auto sink = result.native.nodes.find(Sink);
+      if (source == result.native.nodes.end() || sink == result.native.nodes.end())
+        throw std::invalid_argument("source or sink SVFG node was not imported");
+      Query request;
+      request.sources = {source->second};
+      request.sinks = {sink->second};
+      nodeQuery = QueryEngine(result.graph).run(request);
+    }
+    const auto analyzed = Clock::now();
     if (Format == "json") result.graph.printJSON(std::cout);
     else if (Format == "dot") result.graph.printDOT(std::cout);
     else {
-      std::cout << "svfg_nodes=" << result.native.nodes.size()
-                << " svfg_edges=" << result.native.edges.size()
+      std::cout << "svfg_nodes=" << svfg->getNumNodes()
+                << " svfg_edges=" << svfg->getStat().numEdges
                 << " history_nodes=" << result.graph.nodes().size()
                 << " issues=" << result.graph.issues().size() << '\n';
-      for (const auto &issue : result.graph.issues())
-        std::cout << "issue: " << issue << '\n';
-      if (!Check.empty()) {
-        DefectKind kind = Check == "double-free" ? DefectKind::DoubleFree :
-                                                  DefectKind::UseAfterFree;
-        auto report = DefectDetector(result.graph).run(kind);
-        std::cout << "check=" << Check << " result=" << statusName(report.result.status)
-                  << " witness_edges=" << report.result.edges.size() << '\n';
-        if (!report.result.message.empty())
-          std::cout << "message: " << report.result.message << '\n';
-        for (auto id : report.result.nodes) {
-          const auto &node = result.graph.node(id);
-          std::cout << "witness_node=" << id << " label=" << node.label;
-          if (node.object) std::cout << " object=" << *node.object;
-          std::cout << '\n';
-        }
+      if (!Quiet)
+        for (const auto &issue : result.graph.issues())
+          std::cout << "issue: " << issue << '\n';
+      if (checkReport) {
+        const auto &scan = *checkReport;
+        std::cout << "check=" << Check << " result=" << statusName(scan.status)
+                  << " findings=" << scan.findings.size()
+                  << " finding_sites=" << findingGroups.size()
+                  << " exhaustive=" << (scan.exhaustive ? "yes" : "no") << '\n';
+        if (!Quiet && !scan.message.empty())
+          std::cout << "message: " << scan.message << '\n';
+        if (!Quiet)
+          for (const auto &group : findingGroups) {
+            std::cout << "finding_site=" << group.first
+                      << " candidates=" << group.second.size()
+                      << " objects=" << findingObjects.at(group.first).size() << '\n';
+            for (auto id : scan.findings[group.second.front()].result.nodes) {
+              const auto &node = result.graph.node(id);
+              std::cout << "witness_node=" << id << " label=" << node.label;
+              if (node.object) std::cout << " object=" << *node.object;
+              std::cout << '\n';
+            }
+          }
       }
-      if (query) {
-        auto source = result.native.nodes.find(Source);
-        auto sink = result.native.nodes.find(Sink);
-        if (source == result.native.nodes.end() || sink == result.native.nodes.end())
-          throw std::invalid_argument("source or sink SVFG node was not imported");
-        Query request;
-        request.sources = {source->second};
-        request.sinks = {sink->second};
-        auto answer = QueryEngine(result.graph).run(request);
+      if (nodeQuery) {
+        const auto &answer = *nodeQuery;
         std::cout << "query=" << statusName(answer.status)
                   << " witness_edges=" << answer.edges.size() << '\n';
-        if (!answer.message.empty()) std::cout << "message: " << answer.message << '\n';
-        for (auto node : answer.nodes)
-          std::cout << "witness_node=" << node << '\n';
+        if (!Quiet && !answer.message.empty())
+          std::cout << "message: " << answer.message << '\n';
+        if (!Quiet)
+          for (auto node : answer.nodes)
+            std::cout << "witness_node=" << node << '\n';
       }
+    }
+    if (Timing) {
+      auto millis = [](Clock::time_point from, Clock::time_point to) {
+        return std::chrono::duration<double, std::milli>(to - from).count();
+      };
+      std::cerr << std::fixed << std::setprecision(3)
+                << "timing_ms parse=" << millis(start, parsed)
+                << " svfg=" << millis(parsed, builtSVFG)
+                << " usehistory=" << millis(builtSVFG, builtHistory)
+                << " check=" << millis(builtHistory, analyzed)
+                << " total=" << millis(start, analyzed) << '\n';
     }
   } catch (const std::exception &error) {
     llvm::errs() << "lotus-ir-usehistory: " << error.what() << '\n';

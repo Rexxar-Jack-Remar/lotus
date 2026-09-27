@@ -26,8 +26,7 @@ cache, branch, and variable-timing leaks.
 
 ## Default options
 
-`CTOptions` replaces the legacy preprocessor configuration and preserves the
-previous defaults:
+`CTOptions` holds the analysis options; the defaults are:
 
 - `type_system = true`
 - `test_all_parameters = true`
@@ -43,12 +42,12 @@ previous defaults:
 - `debug = false`
 - `print_function = false`
 
-`file_path` remains available for source-file lookup during reporting and
-defaults to the empty string.
+`file_path` is used for source-file lookup during reporting and defaults to the
+empty string.
 
 ## Testing
 
-Unit coverage for this subsystem lives in `tests/unit/Analysis/CryptoAnalysisTest.cpp`.
+Unit coverage for this subsystem lives in `tests/unit/Analysis/General/CryptoAnalysisTest.cpp`.
 The tests cover:
 
 - default-option compatibility

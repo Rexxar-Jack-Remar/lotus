@@ -11,6 +11,7 @@
 #include "Checker/Framework/BugReportMgr.h"
 #include "Checker/Framework/BugTypes.h"
 #include "Checker/Saber/SaberCheckerAPI.h"
+#include "Checker/Saber/SaberOptions.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGNode.h"
 
@@ -64,8 +65,11 @@ void FileChecker::reportBug(ProgSlice *slice) {
   if (reportSource) {
     report->append_step(const_cast<Value *>(reportSource), "File opened here");
   }
-  if (!neverClose)
+  if (!neverClose && !SaberNoSMT)
     appendPathConditionEvents(report, slice);
+  if (SaberNoSMT && reportSource)
+    report->append_step(const_cast<Value *>(reportSource),
+                        "Path feasibility not checked (Saber no-SMT mode)");
   if (reportSource) {
     report->append_step(const_cast<Value *>(reportSource),
                         neverClose ? "File descriptor is never closed"

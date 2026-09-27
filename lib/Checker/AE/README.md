@@ -4,10 +4,10 @@
 
 The Abstract Execution (AE) engine is a static analysis tool that detects memory safety bugs in C/C++ programs through abstract interpretation. It was migrated from SVF's AE implementation and adapted to work with Lotus's infrastructure.
 
-SVF-faithful parity in Lotus targets the original AE core: buffer overflow and
-null pointer dereference detection over the migrated abstract-execution engine.
+The part inherited from SVF is the original AE core: buffer-overflow and
+null-pointer-dereference detection over the abstract-execution engine.
 `UseAfterFreeDetector`, `InvalidFreeDetector`, and `MemLeakDetector` are
-Lotus-specific extensions layered on top of that migrated core.
+Lotus-specific extensions layered on top of that core.
 
 **Based on the paper:**
 *"Precise Sparse Abstract Execution via Cross-Domain Interaction"*
@@ -296,14 +296,13 @@ Enable only when specifically looking for memory leaks, and manually review resu
 3. **Scalability**: Large programs with complex loops may be slow
 4. **External Functions**: Limited modeling of library functions
 
-## Future Work
+## Not yet supported
 
-- [x] Add memory leak detection (disabled by default)
-- [ ] Add integer overflow detection
-- [ ] Improve external function modeling
-- [ ] Add path-sensitive analysis
-- [ ] Parallelize analysis across functions
-- [ ] Improve inter-procedural leak tracking
+- integer overflow detection
+- richer external-function modeling
+- path-sensitive analysis
+- parallel analysis across functions
+- inter-procedural leak tracking
 
 ## References
 

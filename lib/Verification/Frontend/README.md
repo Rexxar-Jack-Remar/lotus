@@ -3,8 +3,7 @@
 
 `BooleanProgramParser.cpp` preserves the public `parseBooleanProgram` AST API
 used by Lotus's NPA lowering and existing callers. `bp_parser.yy` and
-`bp_scanner.ll` now contain the OOPSLA 23 Boolean-program grammar in place of
-the old inactive skeleton. They build the `lotus-bool-parse` tool, whose flat
+`bp_scanner.ll` implement the OOPSLA 23 Boolean-program grammar. They build the `lotus-bool-parse` tool, whose flat
 output is accepted by `lotus-bool-normalize`. Its entry point and the
 normalizer source are under `tools/verifier/boolean-program/`. The normalizer
 emits the `prep_output/BP` format documented

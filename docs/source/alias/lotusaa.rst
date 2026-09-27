@@ -19,7 +19,8 @@ Components
 * **MemoryModel/** – Points-to graph and memory modeling
 * **Support/** – Configuration and utility functions
 
-**Features**: Modular design for extensible pointer analysis.
+**Features**: strong updates on singleton objects, path-sensitive load-value
+recovery, whole-program or module-local operation.
 
 Design
 ======

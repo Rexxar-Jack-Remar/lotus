@@ -47,10 +47,11 @@ Lotus-native migrations of the corresponding SVF pipelines:
 2. **VersionedFlowSensitivePTA** implements the ``vfspta`` analysis. Memory
    facts are keyed by ``(abstract object, meld version)`` rather than by
    ``(SVFG location, abstract object)`` as in the conventional solver. It adds
-   object prelabeling, meld versions, consume/yield maps, version and statement
-   reliance, strong and weak updates, intrinsic memory definitions,
-   footprint-equivalent object reuse, occurrence-weighted propagation, OTF
-   delta-edge updates, and result persistence.
+   object prelabeling and version-keyed consume/yield bookkeeping so that strong
+   and weak updates, statement-level reliance, and on-the-fly delta-edge
+   updates all operate on versioned memory state instead of on the whole
+   object. ``lib/Alias/InclusionBased/FlowSensitive/README.md`` lists the
+   remaining mechanisms.
 
 3. **ValueFlowPTA** implements the ``vfpta`` analysis described in
    :doc:`valueflowpta`. It constructs a field-insensitive value-flow graph

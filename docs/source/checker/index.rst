@@ -136,7 +136,8 @@ engine.
 * **CheckerDriver** — Orchestrates checker execution: selects and runs
   checkers from the registry over a ``CheckerContext``, collects diagnostics,
   and emits results to the ``BugReportMgr``.
-* **CheckerDiagnostic** — Structured diagnostic with bug type, severity,
+* **CheckerDiagnostic** — The diagnostic object a checker emits: it carries the
+  bug type, severity,
   source location, message, suggestion, confidence, and optional trace steps.
   Convertible to the ``BugReport`` format for unified reporting.
 * **CheckerContext** — Per-module execution context providing the LLVM module
@@ -323,7 +324,8 @@ Bug Types
 The framework detects the following bug categories:
 
 * **Memory Safety**: Null pointer dereference, use-after-free, uninitialized reads, invalid accesses, memory leaks
-* **Numerical Errors**: Integer overflow, division by zero, bad shift, array out-of-bounds, dead branches
+* **Numerical Errors**: Integer overflow, division by zero, bad shift, array out-of-bounds
+* **Reachability**: Unreachable (dead) branches, reported alongside the numerical checks
 * **Concurrency**: Data races, deadlocks, atomicity violations, lock mismatches, condition-variable misuse, OpenMP runtime misuse, MPI protocol/RMA bugs
 * **Security**: Taint errors (untrusted data flows), use-after-free, null dereferences
 * **Performance**: Unnecessary copies, const-refable parameters
@@ -335,7 +337,9 @@ Integration Points
 
 * **UnderApproxAA**: Used by PulseChecker for must-alias canonicalization
 * **Z3 SMT Solver**: Used by KINT for path-sensitive verification
-* **Biabductive Analysis**: Used by PulseChecker for precise bug detection
+* **Biabductive Analysis**: Pulse's abstract domain abduces missing pre-heap
+  and missing heap facts so a witness path stays sound when it reads memory
+  the caller has not written
 * **LLVM Pass Infrastructure**: Standard pass registration for integration
 
 See Also

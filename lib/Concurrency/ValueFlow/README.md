@@ -15,7 +15,7 @@ concurrency checker:
   that solver with the thread-aware SVFG and sliced solve scope.
 - `WholeProgramSparseRefinement` owns the ICFG, SVFG, overlay, and solver for a
   complete analysis run.
-- `MultiStageSlicer` implements the MSli pipeline: candidate closure,
+- `MultiStageSlicer` implements the multi-stage slicing (MSli) pipeline: candidate closure,
   synchronization/call expansion, and a bounded PTA closure. The pre-analysis
   overlay is discarded; MHP and lock queries are evaluated again while
   constructing the filtered main-phase overlay.

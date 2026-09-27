@@ -124,10 +124,10 @@ Key Options
 * ``--taint.sources=<functions>`` – Comma-separated list of custom source functions.
 * ``--taint.sinks=<functions>`` – Comma-separated list of custom sink functions.
 * ``--verbose`` – Show module and source/sink tagging details.
+* ``--analysis-stats`` – Print analysis statistics.
 
 For the checker-facing usage, reporting behavior, and distinctions from the
 taint tracking embedded in other engines, see :doc:`../checker/taint`.
-* ``--analysis-stats`` – Print analysis statistics.
 
 The tool performs interprocedural taint analysis to detect potential security
 vulnerabilities where tainted data (from sources like user input) flows to

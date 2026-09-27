@@ -356,7 +356,7 @@ DyckAA Issues
 
 .. code-block:: bash
 
-   # Don't use -no-function-type-check
+   # Keep -function-type-check-level at its default (4)
 
 2. The analysis is very precise but conservative. This is expected behavior.
 

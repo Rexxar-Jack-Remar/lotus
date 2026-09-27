@@ -80,11 +80,11 @@ claim of full public API parity with `egg`.
 
 ## Unsupported upstream functionality
 
-Some upstream `egg` functionality is still intentionally out of scope:
+Some upstream `egg` functionality is intentionally out of scope:
 
-- no LP extractor surface: the previous Z3-backed DAG extractor was not a
-  faithful migration of `egg`'s `good_lp`-based implementation and has been
-  removed pending a proper redesign
+- no LP extractor surface: the Z3-backed DAG extractor was dropped because it
+  did not faithfully migrate `egg`'s `good_lp`-based implementation; it awaits a
+  redesign
 - no macro-level Rust API parity for `rewrite!` or `multi_rewrite!`
 - no attempt to mirror Rust-only crate structure such as tutorials, doctests,
   or feature gating
@@ -109,7 +109,7 @@ The primary umbrella header is:
 
 ## Test coverage
 
-Unit tests for the new library live under `tests/unit/Solvers/`:
+Unit tests for the library live under `tests/unit/Solvers/`:
 
 - `EGraphCoreTest.cpp`
 - `EGraphSimpleTest.cpp`

@@ -26,5 +26,3 @@ module. Interleaved-Dyck tools consistently use the
 | `lotus-cfl-interleaved-dyck-mcfl` | Run the dimension-indexed MCFL underapproximation hierarchy |
 | `lotus-cfl-interleaved-dyck-graph-reduction.py` | Orchestrate the graph-reduction helpers |
 
-There are no compatibility headers, CMake target aliases, or legacy command
-names for the former flat layout.

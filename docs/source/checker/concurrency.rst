@@ -24,7 +24,8 @@ The concurrency checker analyzes LLVM IR to detect thread safety issues using:
 * **OpenMP Task Analysis** – Tracks task creation, taskgroup/taskwait boundaries, and ``depend`` relations
 * **MPI Communication Analysis** – Tracks point-to-point operations, collectives, requests, and RMA synchronization
 
-All detected bugs are reported through the centralized ``BugReportMgr`` system, enabling unified JSON and SARIF output.
+Concurrency findings go through the shared ``BugReportMgr``, so they land in
+the same JSON and SARIF reports as other engines.
 
 Components
 ----------
@@ -245,10 +246,12 @@ Limitations
 Performance
 -----------
 
-* Handles multiple threads efficiently using graph-based algorithms
-* MHP analysis scales with the number of threads and instructions
-* Lock set analysis is efficient for typical lock usage patterns
-* Conservative analysis may have false positives but ensures soundness
+* Cost is dominated by MHP graph construction, which grows with the number of
+  threads and of shared-memory accesses
+* Lock-set analysis carries the set of locks held at each access, so deeply
+  nested locking increases the per-access state
+* ``--concur.mode=analysis`` with ``--concur.output`` dumps the analysis facts
+  without running the report path
 
 Integration
 -----------

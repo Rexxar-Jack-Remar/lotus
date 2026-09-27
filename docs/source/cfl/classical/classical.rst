@@ -47,9 +47,8 @@ layout:
    automatically when the command-line driver is used. Only ``<epsilon>`` is
    reserved for epsilon; ``e`` and ``epsilon`` are ordinary terminals. A
    configurable expansion limit rejects independent attribute domains whose
-   Cartesian product would grow unexpectedly large. The former independent
-   ``CNFGrammar`` parser/transformer has been removed; this is the only grammar
-   normalization implementation.
+   Cartesian product would grow unexpectedly large. This is the only grammar
+   normalization implementation in the classical solver.
 
 ``LabeledGraph``
    Stores the base problem boundary. Solver sessions keep derived facts in a
@@ -166,7 +165,7 @@ Solver backends
    they do not expand and reinsert the previous quotient closure as axioms.
 
 ``CertCFL``
-   Select with ``--solver cert-cfl``. Cardinality-certified exact all-symbol
+   Select with ``--solver cert``. Cardinality-certified exact all-symbol
    solving: universal-degree certificates and a finite threshold domain
    promote dense blocks to exactness, with symbolic nullable identity.
    ``observed`` must remain unset and ``unidirectional`` is rejected. The

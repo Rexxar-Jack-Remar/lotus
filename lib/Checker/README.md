@@ -14,5 +14,5 @@ Bug checkers and reporting infrastructure.
 | **Saber** | Source-sink bug detector. Migrated from SVF's SABER engine. Checkers: memory leak, double-free, file operations (fopen/fclose). | ⚠️ Migrated (from SVF), unstable |
 | **Framework** | Shared checker infrastructure: registry, driver, declarative specs, diagnostics, and reporting (BugReport, BugReportMgr, BugTypes, SARIF, SuppressionManager). | ✅ Stable |
 
-Security-oriented side-channel components such as Spectre now live under
-`lib/Security` rather than the checker layer.
+Security-oriented side-channel components such as Spectre live under
+`lib/Security`, not in the checker layer.

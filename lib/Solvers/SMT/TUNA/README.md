@@ -1,10 +1,16 @@
 # TUNA
 Code repository for [Compiler Optimization-Based SMT Simplifications: An In-Depth Study](https://dl.acm.org/doi/10.1145/3795879).
 
-
-NOTE: this dir is for LLVM 16 (not LLVM 14). Sot is not built by default.
+This directory targets LLVM 16, while the rest of Lotus builds against LLVM 14,
+so TUNA is built with its own CMake project rather than as part of the Lotus
+build. SLOT is no longer a separate project: its SMT↔LLVM conversion toolkit
+lives here as `TUNA-Opt/SMT2LLVM`, and the `slot` and `fastslot` drivers are
+built along with it.
 
 TUNA speeds up SMT solving by converting SMT formulas to LLVM IR, applying compiler optimizations, and converting back. It includes a genetic algorithm to automatically find the best combination of LLVM passes for a given dataset.
+
+This TUNA is unrelated to the TUNA strong-update tool referenced by
+`lib/Alias/InclusionBased/LotusAA/`; the two projects only share a name.
 
 ## Repository Structure
 
@@ -13,7 +19,7 @@ TUNA/
 ├── TUNA-Opt/          # Core optimization framework
 │   ├── SMT2LLVM/      # Bidirectional SMT ↔ LLVM IR conversion tools
 │   └── GA/            # Genetic algorithm for pass selection
-└── TUNA-Learn/        # (coming soon) Machine learning-based optimization framework
+└── TUNA-Learn/        # Machine learning-based optimization framework (not yet implemented)
 ```
 
 ## Dependencies

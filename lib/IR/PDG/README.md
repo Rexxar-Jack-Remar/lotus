@@ -4,10 +4,10 @@ The **Program Dependence Graph (PDG)** is a fine-grained representation of data
 and control dependences. It is built on top of the ICFG and is used for
 slicing, security analyses, and other dependence-aware queries.
 
-The PDG is field-sensitive and flow-insensitive. The query layer now exposes
+The PDG is field-sensitive and flow-insensitive. The query layer exposes
 both context-insensitive and call/return-matched context-sensitive traversals
 through focused ``*Query`` headers under ``include/IR/PDG/Analysis/``, with
-``Query.h`` retained as the umbrella include.
+``Query.h`` as the umbrella include.
 The Cypher query-language parser and executor live separately under
 ``include/IR/PDG/QueryLanguage/`` and ``lib/IR/PDG/QueryLanguage/``.
 
@@ -28,6 +28,11 @@ The Cypher query-language parser and executor live separately under
   and control-region queries
 - **`TransformQuery`**: motion legality and dependence-aware scheduling helpers
 - **`DiffQuery`**: structural PDG differencing and impact summaries
+- **`ImpactQuery`**: ranked impact report for a changed node, with shortest
+  distance and interprocedural-crossing metadata
+- **`SummaryQuery`**: source/target relationship buckets with witness paths
+- **`ResourceFlowQuery`**: acquire/use/transfer/release events over resource
+  families
 - **`PDGCriteriaResolver`**: criteria resolution from nodes, LLVM values,
   function names, callee names, source locations, property specs, and Cypher
   selections

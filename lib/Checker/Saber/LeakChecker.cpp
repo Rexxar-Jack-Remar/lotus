@@ -327,8 +327,11 @@ void LeakChecker::reportBug(ProgSlice *slice) {
                           : "Memory may leak on some paths (partial leak)";
     report->append_step(const_cast<Value *>(reportSource), tip);
   }
-  if (!neverFree)
+  if (!neverFree && !SaberNoSMT)
     appendPathConditionEvents(report, slice);
+  if (SaberNoSMT && reportSource)
+    report->append_step(const_cast<Value *>(reportSource),
+                        "Path feasibility not checked (Saber no-SMT mode)");
   if (reportSource) {
     report->append_step(const_cast<Value *>(reportSource),
                         neverFree ? "Allocated memory is never freed"
@@ -337,7 +340,7 @@ void LeakChecker::reportBug(ProgSlice *slice) {
 
   mgr.insert_report(bugTypeId, report, false);
 
-  if (SaberValidateTests)
+  if (SaberValidateTests && !SaberNoSMT)
     testsValidation(slice);
 
   outs() << "Memory Leak detected at ";

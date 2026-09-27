@@ -44,6 +44,11 @@ Behavior
 - Saber tuning parameters are explicitly namespaced, for example
   ``--saber.context-limit``, ``--saber.max-forward-items``, and
   ``--saber.solver-timeout-ms``.
+- ``--saber.no-smt`` skips SMT path-condition propagation and solving for all
+  Saber checks. It retains source/sink value-flow traversal and reports
+  conservative candidates: a reachable pair of frees can be reported even
+  when their branches are mutually exclusive; a reachable close/free does
+  not prove all paths are covered. The default retains SMT filtering.
 
 Interpreting findings
 ---------------------

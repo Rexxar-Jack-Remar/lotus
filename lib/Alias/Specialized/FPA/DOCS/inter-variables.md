@@ -1,6 +1,6 @@
 
 
-TypeDive中涉及到的中间变量包括：
+MLTA中涉及到的中间变量包括：
 
 - `set<size_t> typeCapSet;`: 保存escape type的hash值
 

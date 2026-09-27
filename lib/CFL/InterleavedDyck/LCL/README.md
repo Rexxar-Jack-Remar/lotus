@@ -175,8 +175,7 @@ The CLI reuses the existing Core DOT reader; it is not a general Graphviz
 parser. Use one edge per line and labels such as `op--7`, `cp--7`, `ob--9`,
 `cb--9`, or `normal`/`eps`/`epsilon`. The existing parser does not register
 standalone vertex declarations. Represent isolated vertices through
-`Graph::addVertex`, or use a neutral self-edge in CLI input. The patch does not
-change Core's parser or other engines.
+`Graph::addVertex`, or use a neutral self-edge in CLI input.
 
 ## Complexity
 

@@ -10,13 +10,17 @@
 namespace lotus {
 namespace usehistory {
 
+enum class NativeHistoryMode { Full, DoubleFree, UseAfterFree };
+
 /// Construct ordered histories from this revision's SVFG and the LLVM CFG.
 /// Sites are derived from instructions, memory phases, CFG edges and function
 /// boundaries. Resource histories are populated for malloc/calloc, free and
 /// loads/stores using SVFG object IDs. Unsupported or ambiguous facts are
 /// recorded as issues, so negative queries remain Unknown.
 SVFGHistoryResult buildUseHistoryFromLotusSVFG(const analysis::SVFG &svfg,
-                                               const llvm::Module &module);
+                                               const llvm::Module &module,
+                                               NativeHistoryMode mode =
+                                                   NativeHistoryMode::Full);
 
 /// Copy metadata carried by a Lotus SVFG edge. The caller assigns an ID and
 /// supplies the exact consumer site (or marks a genuine boundary). Empty

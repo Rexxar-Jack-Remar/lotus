@@ -73,7 +73,7 @@ Key API surface
    * - ``RegularSet``
      - Explicit state/transition/final construction for regular seeds.
    * - ``BooleanSemiring`` / ``RelationSemiring``
-     - Boolean weights and finite binary-relation typestate weights.
+     - Boolean weights and finite binary-relation weights.
    * - ``SynchronizedSystem<Domain>``
      - Front-end-neutral data-flow builder over variable/statement controls
        with ``postStar``/``preStar``.

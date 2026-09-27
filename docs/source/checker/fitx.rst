@@ -55,9 +55,8 @@ Analysis Approach (from the paper)
 **Bug-checking hooks** (paper Table 6):
 
 * ``IMMEDIATE``: right after a transition (default).
-* ``VAR_END``: end of variable lifetime.
-* ``BLOCK_END``: end of basic block.
-* ``FUNC_END``: end of function.
+* ``END_OF_LIFE``: end of the value's lifetime (Table 6's variable-end hook).
+* ``FUNCTION_END``: end of function.
 * ``MODULE_END``: end of analysis (e.g. for functions with no in-unit callers).
 
 Components
@@ -98,8 +97,9 @@ FiTx targets well-known patterns that are FiT-analysis findable (paper Table 2, 
 
 The bundled aggregate detector includes the null-pointer and UBI typestate
 definitions in addition to the resource and locking checks above.  The
-framework is extensible with new typestate definitions; this does not imply
-that every FiT-findable pattern described by the paper is enabled today.
+framework is extensible with new typestate definitions; only the patterns
+listed under "Bug Types" are checked by default, and others must be added as
+new detectors.
 
 Scope and alternatives
 ----------------------

@@ -510,6 +510,53 @@ void defectDetector() {
   incomplete.addIssue("unmodeled call");
   CHECK(DefectDetector(incomplete).run(DefectKind::DoubleFree).result.status ==
         QueryStatus::Unknown);
+
+  FlowGraph resource;
+  auto release = node(resource, "free", Event::Release);
+  auto reset = node(resource, "fresh allocation", Event::Allocate);
+  auto later = node(resource, "second free", Event::Release);
+  for (auto id : {release, reset, later}) resource.setObject(id, 42);
+  edge(resource, release, reset, FlowKind::History);
+  edge(resource, reset, later, FlowKind::History);
+  auto result = DefectDetector(resource).run(DefectKind::DoubleFree);
+  CHECK(result.specialized);
+  CHECK(result.result.status ==
+        QueryEngine(resource).run(queries::doubleFree(resource)).status);
+  CHECK(result.result.status == QueryStatus::NotFound);
+
+  std::mt19937 rng(78);
+  for (unsigned trial = 0; trial < 80; ++trial) {
+    FlowGraph graph;
+    for (unsigned i = 0; i < 18; ++i) {
+      unsigned choice = rng() % 5;
+      Event event = choice == 0 ? Event::Release :
+                    choice == 1 ? Event::Dereference :
+                    choice == 2 ? Event::Allocate : Event::None;
+      auto id = node(graph, "resource", event,
+                     choice == 2 && (rng() % 2) ? Certainty::Must : Certainty::May);
+      graph.setObject(id, 42);
+    }
+    for (FlowNodeID i = 0; i < graph.nodes().size(); ++i)
+      for (FlowNodeID j = i + 1; j < graph.nodes().size(); ++j)
+        if (rng() % 7 == 0) edge(graph, i, j, FlowKind::History);
+    for (auto kind : {DefectKind::DoubleFree, DefectKind::UseAfterFree}) {
+      Query query = kind == DefectKind::DoubleFree ? queries::doubleFree(graph) :
+                                                     queries::useAfterFree(graph);
+      auto report = DefectDetector(graph).run(kind);
+      if (graph.select(Event::Release).empty() || query.sinks.empty())
+        CHECK(report.result.status == QueryStatus::Unknown);
+      else
+        CHECK(report.result.status == QueryEngine(graph).run(query).status);
+      auto scan = DefectDetector(graph).scan(kind);
+      std::size_t referenceCount = 0;
+      auto sinks = query.sinks;
+      for (auto sink : sinks) {
+        query.sinks = {sink};
+        if (QueryEngine(graph).run(query).found()) ++referenceCount;
+      }
+      CHECK(scan.findings.size() == referenceCount);
+    }
+  }
 }
 int main(int argc,char **argv){
   const std::map<std::string,std::function<void()>> tests={

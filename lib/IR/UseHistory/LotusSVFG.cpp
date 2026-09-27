@@ -2,6 +2,7 @@
 #include "IR/UseHistory/ResourceHistory.h"
 
 #include <llvm/IR/CFG.h>
+#include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
@@ -75,6 +76,9 @@ std::string instructionText(const llvm::Instruction &instruction) {
   std::string text;
   llvm::raw_string_ostream out(text);
   instruction.print(out);
+  if (const llvm::DebugLoc &location = instruction.getDebugLoc())
+    out << " [" << location->getFilename() << ':' << location.getLine() << ':'
+        << location.getCol() << ']';
   return out.str();
 }
 
@@ -123,6 +127,56 @@ Layout makeLayout(const llvm::Function &function, FunctionID id) {
     }
   }
   layout.exit = addBlockSite(exit, "function exit");
+  return layout;
+}
+
+bool resourceEvent(const llvm::Instruction &instruction, NativeHistoryMode mode) {
+  if (mode == NativeHistoryMode::UseAfterFree &&
+      (llvm::isa<llvm::LoadInst>(instruction) ||
+       llvm::isa<llvm::StoreInst>(instruction)))
+    return true;
+  const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+  const auto *callee = call ? call->getCalledFunction() : nullptr;
+  if (!callee) return false;
+  auto name = callee->getName();
+  return name == "free" ||
+         ((name == "malloc" || name == "calloc") && call->getType()->isPointerTy());
+}
+
+bool hasResourceEvent(const llvm::Function &function, NativeHistoryMode mode) {
+  for (const auto &block : function)
+    for (const auto &instruction : block)
+      if (resourceEvent(instruction, mode)) return true;
+  return false;
+}
+
+Layout makeResourceLayout(const llvm::Function &function, FunctionID id,
+                          NativeHistoryMode mode) {
+  Layout layout;
+  layout.function.id = id;
+  layout.function.name = function.getName().str();
+  Program &program = layout.function.control;
+  for (const auto &block : function)
+    layout.blocks.emplace(&block, program.addBlock(block.getName().str()));
+  for (const auto &block : function) {
+    const auto *terminator = block.getTerminator();
+    for (unsigned successor = 0; successor < terminator->getNumSuccessors(); ++successor)
+      program.addEdge(layout.blocks.at(&block),
+                      layout.blocks.at(terminator->getSuccessor(successor)));
+  }
+  for (const auto &block : function) {
+    BlockID current = layout.blocks.at(&block);
+    for (const auto &instruction : block) {
+      if (!resourceEvent(instruction, mode)) continue;
+      bool dereference = llvm::isa<llvm::LoadInst>(instruction) ||
+                         llvm::isa<llvm::StoreInst>(instruction);
+      SiteID site = program.addOperation(current,
+                           std::string(dereference ? "before " : "after ") +
+                           instructionText(instruction));
+      if (dereference) layout.before.emplace(&instruction, site);
+      else layout.after.emplace(&instruction, site);
+    }
+  }
   return layout;
 }
 
@@ -253,7 +307,7 @@ ObjectSet resourceObjects(const analysis::SVFG &svfg, const llvm::Value *pointer
 void appendResourceFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
                          const llvm::Module &module,
                          const std::map<const llvm::Function *, Layout> &layouts,
-                         FunctionID firstLayer) {
+                         FunctionID firstLayer, NativeHistoryMode mode) {
   std::map<const llvm::Function *, std::vector<ResourceAccess>> accesses;
   std::set<ObjectID> universe;
   bool hasInternalCall = false;
@@ -270,14 +324,16 @@ void appendResourceFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
     auto layout = layouts.find(&function);
     if (layout == layouts.end()) continue;
     for (const auto &block : function) for (const auto &instruction : block) {
-      if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(&instruction))
+      if (mode != NativeHistoryMode::DoubleFree) {
+        if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(&instruction))
         add(function, layout->second.before.at(load),
             resourceObjects(svfg, load->getPointerOperand()), Event::Dereference,
             Certainty::May);
-      if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(&instruction))
+        if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(&instruction))
         add(function, layout->second.before.at(store),
             resourceObjects(svfg, store->getPointerOperand()), Event::Dereference,
             Certainty::May);
+      }
       const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
       if (!call) continue;
       const auto *callee = call->getCalledFunction();
@@ -305,20 +361,45 @@ void appendResourceFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
   }
 }
 
+std::vector<std::string> callIssues(const llvm::Module &module) {
+  std::vector<std::string> issues;
+  for (const auto &function : module) for (const auto &block : function)
+    for (const auto &instruction : block) {
+      const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+      if (!call) continue;
+      const auto *callee = call->getCalledFunction();
+      if (!callee || (callee->isDeclaration() && !callee->isIntrinsic()))
+        issues.push_back("call in " + function.getName().str() +
+                         " has no complete native effect model");
+    }
+  return issues;
+}
+
 } // namespace
 
 SVFGHistoryResult buildUseHistoryFromLotusSVFG(const analysis::SVFG &svfg,
-                                               const llvm::Module &module) {
+                                               const llvm::Module &module,
+                                               NativeHistoryMode mode) {
   SVFGConstructionInput input;
   std::map<const llvm::Function *, Layout> layouts;
   FunctionID nextFunction = 1;
   for (const auto &function : module) {
     if (function.isDeclaration()) continue;
-    layouts.emplace(&function, makeLayout(function, nextFunction++));
+    if (mode == NativeHistoryMode::Full)
+      layouts.emplace(&function, makeLayout(function, nextFunction++));
+    else if (hasResourceEvent(function, mode))
+      layouts.emplace(&function, makeResourceLayout(function, nextFunction++, mode));
   }
   std::map<const llvm::Function *, llvm::DominatorTree> dominators;
-  for (const auto &entry : layouts)
-    dominators[entry.first].recalculate(*const_cast<llvm::Function *>(entry.first));
+  if (mode == NativeHistoryMode::Full)
+    for (const auto &entry : layouts)
+      dominators[entry.first].recalculate(*const_cast<llvm::Function *>(entry.first));
+  if (mode != NativeHistoryMode::Full) {
+    SVFGHistoryResult result;
+    appendResourceFacts(result, svfg, module, layouts, 1, mode);
+    for (const auto &issue : callIssues(module)) result.graph.addIssue(issue);
+    return result;
+  }
   FunctionLayout globals;
   globals.id = 0;
   globals.name = "module constants";
@@ -350,15 +431,7 @@ SVFGHistoryResult buildUseHistoryFromLotusSVFG(const analysis::SVFG &svfg,
     input.nodes.push_back(std::move(located));
   }
 
-  for (const auto &function : module) for (const auto &block : function)
-    for (const auto &instruction : block) {
-      const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
-      if (!call) continue;
-      const auto *callee = call->getCalledFunction();
-      if (!callee || (callee->isDeclaration() && !callee->isIntrinsic()))
-        input.issues.push_back("call in " + function.getName().str() +
-                               " has no complete native effect model");
-    }
+  input.issues = callIssues(module);
 
   NativeID nextEdge = 1;
   for (const NativeNode *node : nodes) {
@@ -427,7 +500,7 @@ SVFGHistoryResult buildUseHistoryFromLotusSVFG(const analysis::SVFG &svfg,
   input.functions.push_back(std::move(globals));
   for (const auto &item : layouts) input.functions.push_back(item.second.function);
   auto result = SVFGHistoryBuilder::build(input);
-  appendResourceFacts(result, svfg, module, layouts, nextFunction);
+  appendResourceFacts(result, svfg, module, layouts, nextFunction, mode);
   return result;
 }
 

@@ -19,7 +19,8 @@ Lowers parsed programs to the NPA dataflow framework via
 - ``BooleanProgram`` — AST data structures (Procedure, Statement, BooleanExpr, etc.)
 - ``PredicateProgramLowering`` — lowers to NPA ``PredicateRelation``-based CFG
 
-Only linked by unit tests (``boolean_program_frontend_test``).
+Used by ``lotus-dfa-npa`` (via ``NPABooleanDriver``) and by the unit test
+``tests/unit/Verification/BooleanProgramFrontendTest.cpp``.
 
 Scope and usage
 ---------------

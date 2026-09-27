@@ -29,6 +29,104 @@ TEST(SaberConditionAllocatorTest,
 
   EXPECT_EQ(getReportCountForType(mgr, "Double Free"), reportsBefore + 1);
 }
+
+TEST(SaberConditionAllocatorTest, NoSMTModeChecksAllSaberProperties) {
+  SaberOptionScope options;
+  SaberNoSMT = true;
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    %struct._IO_FILE = type opaque
+    @path = private constant [9 x i8] c"test.txt\00"
+    @mode = private constant [2 x i8] c"r\00"
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+    declare %struct._IO_FILE* @fopen(i8*, i8*)
+
+    define void @double_free() {
+    entry:
+      %p = call i8* @malloc(i64 8)
+      call void @free(i8* %p)
+      call void @free(i8* %p)
+      ret void
+    }
+    define void @leak_memory() {
+    entry:
+      %p = call i8* @malloc(i64 8)
+      ret void
+    }
+    define void @leak_file() {
+    entry:
+      %p = getelementptr [9 x i8], [9 x i8]* @path, i64 0, i64 0
+      %m = getelementptr [2 x i8], [2 x i8]* @mode, i64 0, i64 0
+      %fp = call %struct._IO_FILE* @fopen(i8* %p, i8* %m)
+      ret void
+    }
+    define i32 @main() {
+    entry:
+      call void @double_free()
+      call void @leak_memory()
+      call void @leak_file()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &manager = BugReportMgr::get_instance();
+  const size_t doubleFreeBefore = getReportCountForType(manager, "Double Free");
+  const size_t memoryLeakBefore = getMemoryLeakReportCount(manager);
+  const size_t fileLeakBefore =
+      getReportCountForType(manager, "File Descriptor Leak") +
+      getReportCountForType(manager, "File Descriptor Leak 2");
+  DoubleFreeChecker doubleFree;
+  doubleFree.runOnModule(*module);
+  LeakChecker memoryLeak;
+  memoryLeak.runOnModule(*module);
+  FileChecker fileLeak;
+  fileLeak.runOnModule(*module);
+  EXPECT_GT(getReportCountForType(manager, "Double Free"), doubleFreeBefore);
+  EXPECT_GT(getMemoryLeakReportCount(manager), memoryLeakBefore);
+  EXPECT_GT(getReportCountForType(manager, "File Descriptor Leak") +
+                getReportCountForType(manager, "File Descriptor Leak 2"),
+            fileLeakBefore);
+  EXPECT_TRUE(reportHasStepTip(getLastReportForType(manager, "Double Free"),
+                               "Path feasibility not checked (Saber no-SMT mode)"));
+}
+
+TEST(SaberConditionAllocatorTest,
+     NoSMTModeRetainsMutuallyExclusiveFreeCandidates) {
+  SaberOptionScope options;
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+    define i32 @main(i1 %condition) {
+    entry:
+      %pointer = call i8* @malloc(i64 8)
+      br i1 %condition, label %left, label %right
+    left:
+      call void @free(i8* %pointer)
+      br label %exit
+    right:
+      call void @free(i8* %pointer)
+      br label %exit
+    exit:
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &manager = BugReportMgr::get_instance();
+  const size_t before = getReportCountForType(manager, "Double Free");
+  SaberNoSMT = false;
+  DoubleFreeChecker withSMT;
+  withSMT.runOnModule(*module);
+  EXPECT_EQ(getReportCountForType(manager, "Double Free"), before);
+
+  SaberNoSMT = true;
+  DoubleFreeChecker withoutSMT;
+  withoutSMT.runOnModule(*module);
+  EXPECT_EQ(getReportCountForType(manager, "Double Free"), before + 1);
+}
 TEST(SaberConditionAllocatorTest, FileCheckerReportsFopenCallsiteAsSourceStep) {
   LLVMContext context;
   auto module = parseModule(context, R"(

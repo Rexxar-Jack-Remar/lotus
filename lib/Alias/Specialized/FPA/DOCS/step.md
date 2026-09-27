@@ -51,7 +51,7 @@ struct B b = { .a = { .handler = (void*)copy_with_check } };
 
 - case4:除了处理上述3种情况，在遍历子常量时还有可能出现子常量中出现指向其它复杂数据类型全局变量的指针，这个在test4得到体现，
 跟之前的区别在于之前多层结构体是直接包含变量本身而不是用指针指向下层结构体。
-对于这类case，TypeDive会接着去访问对应下层结构体变量的initializer， 同时把下层结构体类型添加进 `typeCapSet` 集合。
+对于这类case，MLTA会接着去访问对应下层结构体变量的initializer， 同时把下层结构体类型添加进 `typeCapSet` 集合。
 比如下面示例中在访问 `b` 的initializer时遇到 `ba` 的指针随后访问 `ba` 的initializer，同时 `struct A` 会被添加进 `typeCapSet`。
 
 ```cpp
@@ -147,13 +147,13 @@ call void @scene2_b(%struct.S* %s), !dbg !69
 
 对应 `MLTA::findCalleesWithMLTA` 函数。
 
-对于一个callee expression，TypeDive会求出该callee expression对应的type-chain，以及dependent type对应的type chain，并计算target set。
+对于一个callee expression，MLTA会求出该callee expression对应的type-chain，以及dependent type对应的type chain，并计算target set。
 target采用交集运算。
 
 比如 `var.f1.func(..)`，对应的type-chain为 `(type(var), idx(f1)) --> (type(type(var).f1), idx(..func))`，
 则在 `typeIdxFuncsMap` 查询对应两个typeidx的target set取交集。
 
-至于 dependent type, TypeDive会分别通过BFS查询这两个type idx依赖的其它type idx。
+至于 dependent type, MLTA会分别通过BFS查询这两个type idx依赖的其它type idx。
 所谓依赖即 `(FromType, FromIdx) --> (ToType, ToIdx)` 则 `(ToType, ToIdx)` 依赖于 `(FromType, FromIdx)`。
 
 求出dependent type后也会做同样的操作。

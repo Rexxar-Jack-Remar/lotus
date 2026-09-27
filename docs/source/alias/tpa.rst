@@ -50,6 +50,9 @@ The analysis pipeline is organized as:
 Core Components
 ===============
 
+Class inventory grouped by directory; the Architecture diagram above shows the
+order in which these stages run.
+
 1. **Front-End** (``FrontEnd/``)
    - **TypeCollector**: Collects and analyzes types from the LLVM module
    - **TypeAnalysis**: Performs type-based analysis
@@ -217,7 +220,7 @@ TPA integrates with other Lotus components:
 
 * **Annotation System**: Uses external pointer annotations for library functions
 * **Alias Analysis Wrapper**: Provides unified interface for alias queries
-* **Type System**: Leverages LLVM type information for memory modeling
+* **Type System**: Reads LLVM types through ``TypeCollector``/``TypeLayout`` to recover struct and array offsets used by the memory model
 
 The analysis results (points-to sets) can be queried through the
 ``PointerAnalysis`` base class interface, which provides methods to:

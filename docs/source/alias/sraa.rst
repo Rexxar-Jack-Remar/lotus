@@ -14,6 +14,10 @@ The technique combines:
 * A symbolic Range Analysis pass, and
 * A constraint solver for strict inequalities.
 
+Reference: Maroua Bouiada-Pidault et al., `Pointer Disambiguation via Strict
+Inequalities <https://homepages.dcc.ufmg.br/~fernando/publications/papers/CGO17_Maroua.pdf>`_
+(CGO 2017).
+
 * **Location**: ``lib/Alias/Specialized/SRAA``
 
 Highlights
@@ -28,7 +32,8 @@ Usage
 
 Register the ``StrictRelations`` pass (``-sraa``) inside an LLVM pass pipeline or via the Lotus AA wrapper.
 
-This document focuses solely on the algorithmic workflow of SRAA as implemented in the artifact.
+This document describes the algorithmic workflow of SRAA as implemented in
+``lib/Alias/Specialized/SRAA/``.
 
 Inputs / Outputs / Invariants
 -----------------------------
@@ -234,7 +239,7 @@ Notes:
 6. PDG Memory-Node Reduction (Applicability)
 ============================================
 
-For dependence-graph construction (as used in the paper’s applicability study):
+For dependence-graph construction (as in the CGO'17 applicability study):
 
 If two memory objects are proven disjoint,
 the PDG pass merges or eliminates corresponding memory nodes.
@@ -259,6 +264,3 @@ Summary of Properties
 * Produces **strict (<, ≤) disjointness proofs**, not approximate heuristics.
 * Complements and composes with LLVM’s baseline alias analyses.
 
-================
-End of document.
-================

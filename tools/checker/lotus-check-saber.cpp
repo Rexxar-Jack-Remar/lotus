@@ -49,6 +49,7 @@ int runSaberCheckerTool(const char *argv0) {
   (void)&lotus::analysis::SaberCxtLimit;
   (void)&lotus::analysis::SaberMaxStepInWrapper;
   (void)&lotus::analysis::SaberDumpSlice;
+  (void)&lotus::analysis::SaberNoSMT;
   (void)&lotus::analysis::SaberValidateTests;
   (void)&lotus::analysis::SaberCollectExtRetGlobals;
 
@@ -65,6 +66,9 @@ int runSaberCheckerTool(const char *argv0) {
   const bool runLeak = selected.count("memory-leak");
   const bool runDoubleFree = selected.count("double-free");
   const bool runFile = selected.count("file-leak");
+  if (lotus::analysis::SaberNoSMT)
+    outs() << "Saber no-SMT mode: reporting conservative value-flow "
+              "candidates without path-feasibility filtering\n";
 
   // Count how many checkers will run
   int checkerCount = 0;

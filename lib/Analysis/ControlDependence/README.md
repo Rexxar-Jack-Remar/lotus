@@ -12,10 +12,11 @@ Whole-ICFG clients include
 `CanaryICFGControlDependence` adapter target.
 
 Reusable declarations live under `include/Analysis/ControlDependence/`.
-Baseline implementations are split into `SCD.cpp`, `NTSCD.cpp`, `DOD.cpp`,
-and `ControlClosure.cpp`. The new compact algorithms live separately in
-`CompactNTSCD.cpp`, `CompactDOD.cpp`, and `CompactClosure.cpp`, preserving the
-old implementations as experimental baselines. `ControlDependence.cpp` and
+The baseline implementations are `SCD.cpp`, `NTSCD.cpp`, `DOD.cpp`,
+and `ControlClosure.cpp`; the compact inevitability/biclique variants live
+separately in
+`CompactNTSCD.cpp`, `CompactDOD.cpp`, and `CompactClosure.cpp` and are usable
+as experimental comparison points. `ControlDependence.cpp` and
 `ICFGControlDependence.cpp` are LLVM/Lotus graph adapters.
 
 The core algorithms and function adapter are linked as

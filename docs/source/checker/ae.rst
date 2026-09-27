@@ -12,7 +12,8 @@ The ``AE`` subsystem provides abstract-execution-based bug detection.
 Overview
 --------
 
-AE runs abstract interpretation and specialized detectors to report memory
+AE runs **abstract execution**: an abstract-interpretation fixpoint over the
+program, plus specialized detectors, to report memory
 safety issues such as buffer overflows, null dereferences, use-after-free, and
 invalid frees.
 

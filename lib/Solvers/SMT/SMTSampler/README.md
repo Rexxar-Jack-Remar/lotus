@@ -21,7 +21,10 @@ formulas, each optimized for a different strategy.
   hit-and-run) to propose samples, then validates against the original formula.
 
 ## Related Work
-- FMCAD 19: GUIDEDSAMPLER: Coverage-guided
-Sampling of SMT SolutionsRafael Dutra, Jonathan Bachrach and Koushik Sen. https://github.com/RafaelTupynamba/GuidedSampler
-- ICSE 18: Efficient Sampling
-of SAT Solutions for Testing. https://github.com/RafaelTupynamba/quicksampler (We have an imple in this repo)
+
+- FMCAD '19: "GUIDEDSAMPLER: Coverage-guided Sampling of SMT Solutions",
+  Rafael Dutra, Jonathan Bachrach, Koushik Sen.
+  https://github.com/RafaelTupynamba/GuidedSampler
+- ICSE '18: "Efficient Sampling of SAT Solutions for Testing".
+  https://github.com/RafaelTupynamba/quicksampler (implemented here as
+  `QuickSampler.cpp`)

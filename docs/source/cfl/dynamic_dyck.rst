@@ -159,10 +159,11 @@ Benchmark workflow
 ``SOURCE->TARGET[label="op--TYPE"]`` / ``cp--TYPE`` graph records and
 ``A|D SOURCE TARGET LABEL`` sequence records, interning names and suffixes
 as strings. Default stdout is one elapsed-seconds value and a trailing space,
-with no newline, matching the original table scripts. Timing retains the
-original scopes; ``--stats`` and ``--print-components`` add diagnostics.
+with no newline, matching the table scripts. Timing measures update calls
+only, excluding parsing and initial saturation; ``--stats`` and
+``--print-components`` add diagnostics.
 
-Run the original table scripts directly; paths are resolved relative to the
+Run the table scripts directly; paths are resolved relative to the
 repository, with ``DYCK_REACH_BINARY`` and ``DYCK_BENCHMARK_ROOT`` overrides:
 
 .. code-block:: bash
@@ -170,10 +171,10 @@ repository, with ``DYCK_REACH_BINARY`` and ``DYCK_BENCHMARK_ROOT`` overrides:
    bash scripts/cfl/dynamic-dyck/gen_table3.sh
    bash scripts/cfl/dynamic-dyck/gen_table4.sh
 
-The original C++ benchmark inputs live in
+The C++ benchmark inputs live in
 ``benchmarks/real-world/CFL/DynamicDyck`` and the scripts in
-``scripts/cfl/dynamic-dyck``. Unused backup snapshots are omitted.
+``scripts/cfl/dynamic-dyck``.
 The optional ``run_benchmarks.py`` runner
 supports case selection, dry-run input validation, and partition comparison
-without changing the original table ordering; ``--binary`` selects another
-build. DDlog is not migrated.
+without changing the table ordering; ``--binary`` selects another
+build. The DDlog encoding is not accepted by this CLI.

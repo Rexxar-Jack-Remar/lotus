@@ -100,6 +100,7 @@ build/bin/lotus-check --engine=taint test.bc \
 
 ```bash
 build/bin/lotus-check --engine=saber test.bc --checks=all
+build/bin/lotus-check --engine=saber test.bc --checks=all --saber.no-smt
 build/bin/lotus-check --engine=ae test.bc --checks=all
 build/bin/lotus-check --engine=symex test.bc --checks=null-deref,use-after-free
 build/bin/lotus-check --engine=fitx test.bc --checks=use-after-free
