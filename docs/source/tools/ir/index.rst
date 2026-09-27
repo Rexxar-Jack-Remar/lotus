@@ -80,25 +80,25 @@ Relevant options:
 - ``--seed-index=N`` adds closure seeds; the function entry is always included.
 - ``--format=text|json|csv`` selects the output format.
 
-Use History (lotus-ir-usehistory)
----------------------------------
+UseTraceSSA (lotus-ir-usetracessa)
+----------------------------------
 
 Driver for value-flow use histories and defect detection (such as double-free
 and use-after-free) over Lotus SVFG.
 
-**Binary**: ``lotus-ir-usehistory``  
-**Location**: ``tools/ir/lotus-ir-usehistory.cpp``
+**Binary**: ``lotus-ir-usetracessa``  
+**Location**: ``tools/ir/lotus-ir-usetracessa.cpp``
 
 **Usage**:
 
 .. code-block:: bash
 
    # Check for defects
-   ./build/bin/lotus-ir-usehistory --check=double-free program.bc
-   ./build/bin/lotus-ir-usehistory --check=use-after-free program.bc
+   ./build/bin/lotus-ir-usetracessa --check=double-free program.bc
+   ./build/bin/lotus-ir-usetracessa --check=use-after-free program.bc
 
    # Query flow path between SVFG nodes
-   ./build/bin/lotus-ir-usehistory --source-node=1 --sink-node=5 program.bc
+   ./build/bin/lotus-ir-usetracessa --source-node=1 --sink-node=5 program.bc
 
 Relevant options:
 

@@ -20,5 +20,5 @@ target_link_libraries(lotus-ir-control-dependence
   LLVMIRReader
 )
 
-add_executable(lotus-ir-usehistory lotus-ir-usehistory.cpp)
-target_link_libraries(lotus-ir-usehistory PRIVATE CanaryUseHistorySVFG LLVMIRReader)
+add_executable(lotus-ir-usetracessa lotus-ir-usetracessa.cpp)
+target_link_libraries(lotus-ir-usetracessa PRIVATE CanaryUseTraceSSASVFG LLVMIRReader)

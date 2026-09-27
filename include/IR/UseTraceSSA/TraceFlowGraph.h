@@ -1,0 +1,132 @@
+#ifndef LOTUS_IR_USETRACESSA_TRACEFLOWGRAPH_H
+#define LOTUS_IR_USETRACESSA_TRACEFLOWGRAPH_H
+
+#include "IR/UseTraceSSA/UseTraceSSA.h"
+#include <functional>
+#include <map>
+#include <optional>
+#include <utility>
+
+namespace lotus {
+namespace usetracessa {
+
+using FlowNodeID = ID;
+using FlowEdgeID = ID;
+using FunctionID = ID;
+using ObjectID = std::uint64_t;
+using NativeID = std::uint64_t;
+using CallSiteID = std::uint64_t;
+constexpr NativeID NoNativeID = std::numeric_limits<NativeID>::max();
+
+/// Unknown is TOP, not the empty set. A known empty set is BOTTOM. IDs are
+/// opaque IDs from the upstream pointer analysis, never equivalence classes.
+class ObjectSet {
+public:
+  static ObjectSet unknown();
+  static ObjectSet known(std::vector<ObjectID> objects);
+  bool isUnknown() const { return Unknown; }
+  bool empty() const { return !Unknown && Objects.empty(); }
+  bool contains(ObjectID object) const;
+  bool intersects(const ObjectSet &other) const;
+  const std::vector<ObjectID> &objects() const { return Objects; }
+private:
+  bool Unknown = true;
+  std::vector<ObjectID> Objects;
+};
+
+enum class Event : std::uint32_t {
+  None = 0, Source = 1u << 0, Sink = 1u << 1, Sanitize = 1u << 2,
+  Allocate = 1u << 3, Release = 1u << 4, Dereference = 1u << 5,
+  Read = 1u << 6, Write = 1u << 7, NonNull = 1u << 8,
+  IsNull = 1u << 9, CopyLength = 1u << 10, NetworkWrite = 1u << 11,
+  UnknownEffect = 1u << 12, Exit = 1u << 13
+};
+inline Event operator|(Event a, Event b) {
+  return static_cast<Event>(static_cast<std::uint32_t>(a) |
+                            static_cast<std::uint32_t>(b));
+}
+inline bool hasEvent(Event value, Event mask) {
+  return (static_cast<std::uint32_t>(value) & static_cast<std::uint32_t>(mask)) != 0;
+}
+
+enum class Certainty { Must, May };
+enum class FlowKind { History, Direct, Memory, Call, Return, Summary,
+                      Dependence, Thread };
+
+struct FlowNode {
+  FlowNodeID id = InvalidID;
+  std::string label;
+  FunctionID function = InvalidID;
+  VersionID version = InvalidID;
+  NativeID native = NoNativeID;
+  Event events = Event::None;
+  Certainty certainty = Certainty::Must;
+  /// Present ONLY for an object-history lane, not arbitrary memory value flow.
+  std::optional<ObjectID> object;
+};
+
+struct FlowEdge {
+  FlowEdgeID id = InvalidID;
+  FlowNodeID from = InvalidID, to = InvalidID;
+  FlowKind kind = FlowKind::Direct;
+  CallSiteID callSite = NoNativeID;
+  ObjectSet objects = ObjectSet::unknown();
+  NativeID native = NoNativeID;
+  /// Retains the original upstream enum without making assumptions about it.
+  std::uint64_t nativeKind = 0;
+  RegionID predecessor = InvalidID;
+  std::string guard;
+  bool enabled = true;
+};
+
+struct HistoryLayer {
+  FunctionID function = InvalidID;
+  std::string name;
+  Graph history;
+  std::vector<FlowNodeID> versions;
+};
+
+/// Non-mutating overlay: history edges encode temporal uses; imported SVFG
+/// edges encode value transfer. Keep them typed: this is NOT a transitive
+/// closure of may-alias, nor a new pointer analysis.
+class TraceFlowGraph {
+public:
+  FlowNodeID addNode(FlowNode node);
+  FlowEdgeID addEdge(FlowEdge edge);
+  /// One layer per FunctionID. Object lanes may use distinct layer IDs.
+  void addHistory(FunctionID function, std::string name, Graph history);
+  FlowNodeID version(FunctionID function, VersionID version) const;
+  FlowNodeID definition(FunctionID function, ValueID value) const;
+  FlowNodeID before(FunctionID function, SiteID site, ValueID value) const;
+  FlowNodeID after(FunctionID function, SiteID site, ValueID value) const;
+  const HistoryLayer &layer(FunctionID function) const;
+  void annotate(FlowNodeID id, Event events, Certainty certainty = Certainty::Must);
+  void setObject(FlowNodeID id, ObjectID object);
+  void setNative(FlowNodeID id, NativeID native);
+  void disableEdge(FlowEdgeID id);
+  void addIssue(std::string issue);
+  bool complete() const { return Issues.empty(); }
+  const std::vector<std::string> &issues() const { return Issues; }
+  const std::vector<FlowNode> &nodes() const { return Nodes; }
+  const std::vector<FlowEdge> &edges() const { return Edges; }
+  const FlowNode &node(FlowNodeID id) const { return Nodes.at(id); }
+  const FlowEdge &edge(FlowEdgeID id) const { return Edges.at(id); }
+  const std::vector<FlowEdgeID> &outgoing(FlowNodeID id) const { return Out.at(id); }
+  const std::vector<FlowEdgeID> &incoming(FlowNodeID id) const { return In.at(id); }
+  std::vector<FlowNodeID> select(Event events) const;
+  std::uint64_t revision() const { return Revision; }
+  bool verify(std::string *error = nullptr) const;
+  void printDOT(std::ostream &out) const;
+  void printJSON(std::ostream &out) const;
+private:
+  std::vector<FlowNode> Nodes;
+  std::vector<FlowEdge> Edges;
+  std::vector<std::vector<FlowEdgeID>> Out, In;
+  std::map<FunctionID, HistoryLayer> Layers;
+  std::vector<std::string> Issues;
+  std::uint64_t Revision = 0;
+};
+
+} // namespace usetracessa
+} // namespace lotus
+#endif
