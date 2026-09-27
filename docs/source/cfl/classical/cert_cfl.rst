@@ -35,7 +35,7 @@ for ``A -> B C`` with a shared pivot block ``K`` is the strict inequality
 i.e. ``left.out + right.in > |K|``, written to avoid unsigned overflow.
 Multiple proofs combine using maximum, not addition. Nullable identity
 participates in these lower bounds but never sets the ``may`` bits, which
-permits exact ``IDENTITY`` tiles without refining them into singleton
+permits exactly-nullable identity tiles without refining them into singleton
 diagonals.
 
 Refinement

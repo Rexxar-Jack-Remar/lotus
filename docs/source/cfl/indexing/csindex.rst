@@ -33,18 +33,18 @@ The main public APIs are:
 SCS
 ---
 
-``SCS`` adds sanitizer-aware reachability, primarily encapsulated by the 
-``SCSIndex`` and ``FactorizedSCSIndex`` data structures. Every input edge has 
-independent structural and security-event labels. The policy automaton product 
-(``PolicyAutomaton``) is built before FLARE's summary-edge and indexing 
+``SCS`` adds sanitizer-aware reachability, primarily encapsulated by the
+``scs::Index`` and ``scs::FactorizedIndex`` data structures. Every input edge has
+independent structural and security-event labels. The policy automaton product
+(``scs::PolicyAutomaton``) is built before FLARE's summary-edge and indexing
 transformations, ensuring both constraints refer to the same witness path.
 
-The public namespace is ``lotus::cfl::cs_index::scs`` and exposes ``SCSGraph``,
-``PolicyAutomaton``, ``SCSIndex``, and ``FactorizedSCSIndex``. 
+The public namespace is ``lotus::cfl::cs_index::scs`` and exposes ``scs::Graph``,
+``scs::PolicyAutomaton``, ``scs::Index``, and ``scs::FactorizedIndex``.
 
-* ``SCSIndex`` supports explicit or source-rooted lazy product construction, point 
+* ``scs::Index`` supports explicit or source-rooted lazy product construction, point
   and fixed-batch queries, optional witness replay, and construction/query statistics.
-* ``FactorizedSCSIndex`` enables disjunctive composition of independently 
+* ``scs::FactorizedIndex`` enables disjunctive composition of independently
   maintained indexes for scalable security queries.
 
 Build and tools

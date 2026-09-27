@@ -1,0 +1,98 @@
+#ifndef LOTUS_IR_USEHISTORY_LLVMHISTORY_H
+#define LOTUS_IR_USEHISTORY_LLVMHISTORY_H
+
+#include "IR/UseHistory/UseHistory.h"
+#include <unordered_map>
+
+namespace llvm {
+class BasicBlock;
+class Function;
+class Instruction;
+class Use;
+class Value;
+} // namespace llvm
+
+namespace lotus {
+namespace usehistory {
+
+struct LLVMHistoryOptions {
+  /// False: track all eligible SSA values. True: track pointer values only.
+  bool pointersOnly = false;
+  /// Track directly referenced global-variable ADDRESSES as entry definitions.
+  /// This does not add memory-state or alias analysis.
+  bool trackGlobalAddresses = false;
+  /// Record pointer-null branch assumptions on the appropriate CFG edges.
+  bool recordNullGuards = true;
+};
+
+struct LLVMEdge {
+  const llvm::BasicBlock *from = nullptr;
+  const llvm::BasicBlock *to = nullptr;
+  unsigned successorIndex = 0;
+};
+
+struct LLVMNullGuard {
+  EdgeID edge = InvalidID;
+  SiteID site = InvalidID;
+  ValueID value = InvalidID;
+  bool nonnull = false;
+};
+
+struct LLVMOperandVersion {
+  /// InvalidID for an ordinary operand; concrete CFG edge for a phi operand.
+  EdgeID edge = InvalidID;
+  UseVersion history;
+};
+
+/// Owns the UseHistory graph, but not the LLVM function/values/uses. Rebuild after any
+/// LLVM mutation; in particular, operand replacement can change use histories
+/// without changing the CFG. The result must not outlive its LLVM function.
+class LLVMHistoryResult {
+public:
+  const Graph &graph() const { return History; }
+  const llvm::Function &function() const { return *Function; }
+  ValueID valueID(const llvm::Value &value) const;
+  const llvm::Value *value(ValueID id) const { return Values.at(id); }
+  VersionID definition(const llvm::Value &value) const;
+  const std::vector<LLVMEdge> &edges() const { return Edges; }
+  BlockID blockID(const llvm::BasicBlock &block) const;
+  /// Ordinary instruction sites. PHI outputs are an atomic definition batch;
+  /// use uses(operand) for their incoming-edge operand sites.
+  SiteID siteID(const llvm::Instruction &instruction) const;
+  const std::vector<LLVMNullGuard> &nullGuards() const { return NullGuards; }
+
+  /// Exact llvm::Use identity, not merely its User. An untracked/debug/dead use
+  /// returns an empty vector. Repeated ordinary operands share one history.
+  std::vector<LLVMOperandVersion> uses(const llvm::Use &operand) const;
+
+private:
+  struct Binding {
+    SiteID site;
+    ValueID value;
+    EdgeID edge;
+  };
+  const llvm::Function *Function = nullptr;
+  Graph History;
+  std::vector<const llvm::Value *> Values;
+  std::vector<LLVMEdge> Edges;
+  std::vector<LLVMNullGuard> NullGuards;
+  std::unordered_map<const llvm::Instruction *, SiteID> InstructionSites;
+  std::unordered_map<const llvm::Value *, ValueID> ValueIDs;
+  std::unordered_map<const llvm::BasicBlock *, BlockID> BlockIDs;
+  std::unordered_map<const llvm::Use *, std::vector<Binding>> Bindings;
+  friend class LLVMHistoryBuilder;
+};
+
+class LLVMHistoryBuilder {
+public:
+  /// Non-mutating import and construction. Verifies LLVM SSA first. Throws
+  /// invalid_argument with diagnostics on invalid input or a tracked non-void
+  /// callbr result (whose availability differs across LLVM versions).
+  /// Function declarations yield an empty graph.
+  static LLVMHistoryResult build(const llvm::Function &function,
+                            LLVMHistoryOptions options = {});
+};
+
+} // namespace usehistory
+} // namespace lotus
+#endif

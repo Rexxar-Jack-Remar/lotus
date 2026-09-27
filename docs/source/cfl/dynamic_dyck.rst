@@ -1,9 +1,9 @@
 Dynamic Bidirected Dyck Reachability
 ====================================
 
-The module provides two independent algorithms: the existing POPL 2022
+The module provides two independent algorithms: the POPL 2022
 ``WeightedQuotientSolver`` and the POPL 2024 ``PrimaryComponentSolver`` described below. Both link through
-``CanaryDynamicDyck``; existing callers and the original CLI are unchanged.
+``CanaryDynamicDyck`` and are driven by the same ``lotus-cfl-dynamic-dyck`` CLI.
 
 ``WeightedQuotientSolver`` directly ports the C++ dynamic algorithms from Li,
 Satya, and Zhang's `Efficient Algorithms for Dynamic Bidirected
@@ -20,24 +20,25 @@ The public solver headers live in their respective algorithm directories:
 ``WeightedQuotient/WeightedQuotientSolver.h`` and
 ``PrimaryComponent/PrimaryComponentSolver.h``. Their source files have the
 same relative paths under ``lib/CFL/DynamicDyck/``, with a ``.cpp`` extension.
-Shared ``Graph.cpp`` and the original file-workflow adapter
-``IO.cpp`` remain at the implementation root. Each algorithm owns its sources
-and CMake source list: ``WeightedQuotient/`` contains the original solver,
+Shared ``Graph.cpp`` and the file-workflow adapter
+``IO.cpp`` live at the implementation root. Each algorithm owns its sources
+and CMake source list: ``WeightedQuotient/`` contains the POPL 2022 solver,
 weighted engine, cycle-deletion correction and artifact DOT parser;
 ``PrimaryComponent/`` contains the primary-component solver and its two
 connectivity backends. Internal headers mirror those directories and use the
 ``weighted_quotient`` and ``primary_component`` namespaces. The
-``CanaryDynamicDyck`` target is unchanged. Template/container support
-remains header-only.
+``CanaryDynamicDyck`` target builds both algorithms; template/container support
+is header-only.
 
-The original degree-based merging, fully compressed disjoint sets, indexed
-linked worklists, weighted quotient updates, and acyclic recursive splitting
-are retained. Original global state belongs to a solver instance. Bug fixes
-reset preprocessing state, correct duplicate/missing-edge degree accounting,
-and avoid invalid arrow parsing. The `2024 cycle correction
+The POPL 2022 solver is built from degree-based merging, fully compressed
+disjoint sets, indexed linked worklists, weighted quotient updates, and acyclic
+recursive splitting. All mutable state belongs to a solver instance;
+preprocessing state is reset after every update, so duplicate insertions and
+missing deletions keep degree accounting correct and invalid arrow records are
+rejected. The `2024 cycle correction
 <https://arxiv.org/html/2401.03570v1>`_ motivates a conservative deletion
-fallback: if the old affected quotient contains cycles, preprocess the
-remaining original graph again. No original-paper update-time bound is claimed.
+fallback: if the affected quotient contains cycles, preprocess the
+remaining graph again. No original-paper update-time bound is claimed.
 
 Library API
 -----------
@@ -62,8 +63,8 @@ because representative queries compress paths.
    solver.deleteEdge({30, 20, 0, Parenthesis::Close});
    assert(!solver.connected(10, 20));
 
-``IO.h`` exposes ``runFiles`` for the original opaque string-ID workflow,
-returning original timing results and final partitions. ``Graph.h`` offers
+``IO.h`` exposes ``runFiles`` for the opaque string-ID workflow,
+returning timing results and final partitions. ``Graph.h`` offers
 stricter numeric convenience parsers separately. Only one Dyck language is
 supported; neutral and interleaved bracket constraints are outside this module.
 
@@ -80,8 +81,7 @@ whole-input Dyck-reachability rebuild.
 
 The default edge convention is **reference counted**, unlike ``WeightedQuotientSolver``.
 Each insertion, including a complementary reverse record, adds one reference;
-deletion removes one reference. Choose ``PrimaryComponentEdgeSemantics::Set`` to match
-the existing solver's duplicate and deletion behavior. Both conventions
+deletion removes one reference. Choose ``PrimaryComponentEdgeSemantics::Set`` to match ``WeightedQuotientSolver``'s duplicate and deletion behavior. Both conventions
 create missing endpoints on insertion and retain vertices after deletion.
 ``graph()`` exports unique opening pairs; use ``edgeCounts()`` to retain counts.
 
@@ -134,17 +134,18 @@ same opaque node IDs and type suffixes. It defaults to **set semantics** for
 compatibility; ``--counted`` enables reference counts. ``--backend`` selects
 ``deterministic`` (default) or ``hdt``. Sequence endpoints are preallocated and
 timing covers update calls only, excluding parsing and initial saturation.
-The original timing-only output format is preserved; ``--stats`` identifies
+The default output is the timing-only format consumed by the table scripts;
+``--stats`` identifies
 the selected algorithm, backend and semantics. POPL 2024 rejects
-``0``/``--recompute``. Without ``--algorithm`` the original solver and its modes
-remain unchanged. There are no separate POPL 2024 tool executables.
+``0``/``--recompute``. Omitting ``--algorithm`` selects the POPL 2022 solver and its modes;
+POPL 2024 is exposed by the same executable, with no separate tool.
 Tests include a Boolean Dyck-grammar oracle, primary-connectivity BFS,
 pre-fixpoint phase invariants, allocation failures, parser checks and
-set-mode comparisons against the existing solver. Instrumented phase hooks
+set-mode comparisons against ``WeightedQuotientSolver``. Instrumented phase hooks
 are compiled into a separate test-only library, never the production target.
 
-Original benchmark workflow
----------------------------
+Benchmark workflow
+------------------
 
 .. code-block:: bash
 

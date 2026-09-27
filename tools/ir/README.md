@@ -18,6 +18,23 @@ The current IR tool binary is emitted under `build/bin/`.
 | --- | --- | --- |
 | `lotus-ir-pdg-query` | Query the Program Dependence Graph | Implemented by `tools/ir/lotus-ir-pdg-query.cpp`; supports Cypher-style queries, slicing, chopping, shortest paths, summaries, resource-flow queries, and multiple output formats. |
 | `lotus-ir-control-dependence` | Run control-dependence experiments | Separates baseline and compact NTSCD/DOD timing, biclique statistics, exact pair enumeration, closure, and consistency checking; emits text, JSON, or CSV. |
+| `lotus-ir-usehistory` | Build UseHistory from Lotus SVFG | Emits text, JSON or DOT; queries node reachability and checks potential double-free/use-after-free. |
+
+### UseHistory
+
+```bash
+build/bin/lotus-ir-usehistory test.bc --format=json
+build/bin/lotus-ir-usehistory test.bc --format=dot
+build/bin/lotus-ir-usehistory test.bc --source-node=12 --sink-node=34
+build/bin/lotus-ir-usehistory test.bc --check=double-free
+build/bin/lotus-ir-usehistory test.bc --check=use-after-free
+```
+
+The tool builds ICFG and AserPTA-backed SVFG with MemorySSA, then derives
+UseHistory and object histories. `--dump-svfg=path.dot` saves the source SVFG.
+The resource checks use `malloc`/`calloc`, `free`, and load/store events.
+`Found` is a potential witness in the abstraction; incomplete external models
+or cross-function resource effects prevent a negative safety conclusion.
 
 ## Typical usage
 

@@ -1,7 +1,8 @@
 CFL Reachability Components
 ===========================
 
-Advanced CFL reachability algorithms and graph analysis frameworks.
+This page lists the CFL reachability subsystems, their source locations, and
+the reachability guarantee each one provides.
 
 Classical CFL Reachability
 --------------------------
@@ -20,8 +21,9 @@ The two client implementations consistently use ``AliasClient.*`` and
 
 * One canonical grammar parser with EBNF expansion and binary normalization
 * Labeled graph construction for text, DOT, PAG, and PEG-style encodings
-* Sparse-set, sparse-bitvector, Graspan epoch/delta, transitive-specialized,
-  POCR/hierarchical-POCR, and fully ordered edge-critical-graph backends
+* Solver backends selected by the classical driver: sparse-set, sparse-bitvector,
+  Graspan epoch/delta, transitive-specialized, POCR/hierarchical-POCR, and fully
+  ordered edge-critical-graph
 * PEARL multi-derivation, Sqid relation chaining, Stg staged solving, and
   CERT-CFL cardinality-certified solving
 * Native POCR grammar/graph input, unidirectional summarization, client graph
@@ -111,7 +113,7 @@ typed underapproximation hierarchy.
 * Indexed worklist saturation and tuple reachability pruning
 * Concrete path witnesses from retained derivation DAGs
 * ``G_d^circ`` and ``G_d^+`` grammar generation for arbitrary dimensions
-* Artifact-compatible staged condensation, DOT input, and command-line tool
+* Dimension-ordered condensation, DOT input, and command-line tool
 * Adapter from the shared typed interleaved-Dyck graph
 
 Guarantee Summary
@@ -125,7 +127,7 @@ Guarantee Summary
      - Intended use
      - Guarantee
    * - ``interleaved_dyck::mcfl::InterleavedDyckSolver``
-     - Certified typed pairs through ``G_d``
+     - Proven typed pairs through ``G_d``
      - Underapproximation
    * - ``interleaved_dyck::unary::FixedCounterSolver``
      - POPL 2022 exact fixed-counter baseline
@@ -140,7 +142,8 @@ Guarantee Summary
 CSIndex (Context-Sensitive Indexing)
 ------------------------------------
 
-Context-sensitive indexing for CFL reachability.
+Precomputed summaries and reachability indexes that answer context-sensitive
+queries without re-running the base solver.
 
 **Location**: ``include/CFL/CSIndex/``, ``lib/CFL/CSIndex/``
 
@@ -149,12 +152,11 @@ extended-Dyck graph and indexing algorithms; SCS builds policy products and
 then reuses FLARE. See :doc:`/cfl/indexing/csindex` for the public namespaces and directory
 layout.
 
-**Features**: Context-aware indexing algorithms for efficient CFL queries.
-
 **Components**:
-* Context-sensitive graph indexing
-* Reachability query optimization
-* Memory-efficient representations
+
+* FLARE path-tree, Grail, and tabulation indexes over an extended-Dyck graph
+* SCS sanitizer-aware product index with optional witness replay
+* Point queries, fixed-batch queries, and construction/query statistics
 
 
 Interleaved-Dyck Graph Reduction
@@ -170,7 +172,7 @@ DOT graph and does not itself return the final reachability relation.
 * Two-color summary construction and degree-based node merging
 * Iterative Python orchestration until no further edge is removed
 * Explicit directed versus already-bidirected input mode
-* Private legacy summary representation under the ``lib`` subtree
+* Summary representation kept internal to the ``lib`` subtree
 
 See also :doc:`/cfl/classical/classical`, :doc:`/cfl/indexing/csindex`,
 :doc:`/cfl/interleaved_dyck/unary`,
