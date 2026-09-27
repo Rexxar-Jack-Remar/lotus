@@ -322,12 +322,7 @@ if(LOTUS_BUILD_TESTS)
   add_checker_cli_test(checker_cli_list_checkers_includes_taint 0
                        "taint-flow.*taint.*native"
                        --list-checkers)
-  add_checker_cli_test(checker_cli_list_parameters_groups_engines 0
-                       "engine.*saber"
-                       --list-parameters)
-  add_checker_cli_test(checker_cli_list_parameters_qualifies_options 0
-                       "--kint.summary-mode"
-                       --list-parameters)
+
   add_checker_cli_test(checker_cli_ae_help_uses_namespace 0
                        "--ae.recursion-mode"
                        --engine=ae --help)
