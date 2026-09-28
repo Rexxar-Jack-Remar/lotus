@@ -1,8 +1,7 @@
 #include "IR/ICFG/ICFGBuilder.h"
 #include "IR/SVFG/SVFGBuilder.h"
-#include "IR/UseTraceSSA/DefectDetector.h"
+#include "IR/UFG/DefectDetector.h"
 #include "IR/UseTraceSSA/SVFGBridge.h"
-#include "IR/UseTraceSSA/Query.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -12,6 +11,7 @@
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <algorithm>
 #include <chrono>
 #include <iomanip>
 #include <iostream>
@@ -51,6 +51,9 @@ llvm::cl::opt<unsigned> Source("source-node",
 llvm::cl::opt<unsigned> Sink("sink-node",
                               llvm::cl::desc("SVFG sink node ID for a flow query"),
                               llvm::cl::init(std::numeric_limits<unsigned>::max()));
+llvm::cl::opt<std::uint64_t> Object("object",
+                                    llvm::cl::desc("Object ID for a UFG node query"),
+                                    llvm::cl::init(UnknownResource));
 
 const char *statusName(QueryStatus status) {
   switch (status) {
@@ -62,7 +65,8 @@ const char *statusName(QueryStatus status) {
 }
 
 std::string findingSite(const FlowNode &node) {
-  const std::string &label = node.label;
+  const auto objectSuffix = node.label.rfind(" @object:");
+  const std::string label = node.label.substr(0, objectSuffix);
   const auto functionEnd = label.find(".temporal:");
   const std::string function = label.substr(0, functionEnd);
   const auto open = label.rfind(" [");
@@ -77,7 +81,7 @@ std::string findingSite(const FlowNode &node) {
 
 int main(int argc, char **argv) {
   llvm::InitLLVM init(argc, argv);
-  llvm::cl::ParseCommandLineOptions(argc, argv, "Lotus SVFG use histories\n");
+  llvm::cl::ParseCommandLineOptions(argc, argv, "Lotus object-expanded use-flow graph\n");
   const std::optional<std::size_t> contextLimit =
       ContextLimit.getNumOccurrences() ?
           std::optional<std::size_t>(ContextLimit.getValue()) : std::nullopt;
@@ -85,28 +89,28 @@ int main(int argc, char **argv) {
                Sink != std::numeric_limits<unsigned>::max();
   if ((Source == std::numeric_limits<unsigned>::max()) !=
       (Sink == std::numeric_limits<unsigned>::max())) {
-    llvm::errs() << "lotus-ir-usetracessa: supply both --source-node and --sink-node\n";
+    llvm::errs() << "lotus-ir-ufg: supply both --source-node and --sink-node\n";
     return 1;
   }
   if (Format != "text" && Format != "json" && Format != "dot") {
-    llvm::errs() << "lotus-ir-usetracessa: --format must be text, json, or dot\n";
+    llvm::errs() << "lotus-ir-ufg: --format must be text, json, or dot\n";
     return 1;
   }
   if (query && Format != "text") {
-    llvm::errs() << "lotus-ir-usetracessa: queries require --format=text\n";
+    llvm::errs() << "lotus-ir-ufg: queries require --format=text\n";
     return 1;
   }
   if (!Check.empty() && query) {
-    llvm::errs() << "lotus-ir-usetracessa: --check cannot be combined with a node query\n";
+    llvm::errs() << "lotus-ir-ufg: --check cannot be combined with a node query\n";
     return 1;
   }
   if (!Check.empty() && Format != "text") {
-    llvm::errs() << "lotus-ir-usetracessa: --check requires --format=text\n";
+    llvm::errs() << "lotus-ir-ufg: --check requires --format=text\n";
     return 1;
   }
   if (!Check.empty() && Check != "double-free" && Check != "use-after-free" &&
       Check != "memory-leak" && Check != "file-leak") {
-    llvm::errs() << "lotus-ir-usetracessa: unsupported --check rule\n";
+    llvm::errs() << "lotus-ir-ufg: unsupported --check rule\n";
     return 1;
   }
 
@@ -138,21 +142,24 @@ int main(int argc, char **argv) {
                              Check == "file-leak" ? NativeHistoryMode::FileLeak :
                                                           NativeHistoryMode::Full;
     auto result = buildUseTraceSSAFromLotusSVFG(*svfg, *module, mode);
+    const auto builtShared = Clock::now();
+    lotus::ufg::UFGGraph expanded(result.graph);
     const auto builtHistory = Clock::now();
     std::optional<DefectScan> checkReport;
     std::map<std::string, std::vector<std::size_t>> findingGroups;
     std::map<std::string, std::set<ObjectID>> findingObjects;
     std::optional<QueryResult> nodeQuery;
+    std::optional<ObjectID> queryObject;
     if (!Check.empty()) {
       DefectKind kind = Check == "double-free" ? DefectKind::DoubleFree :
                         Check == "use-after-free" ? DefectKind::UseAfterFree :
                         Check == "memory-leak" ? DefectKind::MemoryLeak :
                                                  DefectKind::FileLeak;
-      checkReport = DefectDetector(result.graph, contextLimit).scan(kind);
+      checkReport = lotus::ufg::DefectDetector(expanded, contextLimit).scan(kind);
       for (std::size_t index = 0; index < checkReport->findings.size(); ++index) {
         const auto &witness = checkReport->findings[index].result.nodes;
         if (witness.empty()) continue;
-        const auto &sink = result.graph.node(witness.back());
+        const auto &sink = expanded.graph().node(witness.back());
         std::string site = findingSite(sink);
         findingGroups[site].push_back(index);
         const auto &objects = checkReport->findings[index].objects;
@@ -168,13 +175,32 @@ int main(int argc, char **argv) {
       request.sources = {source->second};
       request.sinks = {sink->second};
       request.contextLimit = contextLimit;
-      nodeQuery = QueryEngine(result.graph).run(request);
+      if (Object.getNumOccurrences() &&
+          !std::binary_search(expanded.objects().begin(), expanded.objects().end(), Object))
+        throw std::invalid_argument("requested object is absent from the UFG universe");
+      for (auto object : expanded.objects()) {
+        if (Object.getNumOccurrences() && object != Object) continue;
+        auto answer = expanded.runObject(request, object);
+        if (!nodeQuery || answer.found() ||
+            (answer.status == QueryStatus::Unknown &&
+             nodeQuery->status == QueryStatus::NotFound)) {
+          nodeQuery = std::move(answer);
+          queryObject = object;
+        }
+        if (nodeQuery->found()) break;
+      }
+      if (!nodeQuery) {
+        nodeQuery.emplace();
+        nodeQuery->status = QueryStatus::Unknown;
+        nodeQuery->message = "no object lanes were constructed";
+      }
     }
     const auto analyzed = Clock::now();
-    if (Format == "json") result.graph.printJSON(std::cout);
-    else if (Format == "dot") result.graph.printDOT(std::cout);
+    if (Format == "json") expanded.printJSON(std::cout);
+    else if (Format == "dot") expanded.printDOT(std::cout);
     else {
       const auto stats = result.graph.statistics();
+      const auto ufgStats = expanded.statistics();
       std::cout << "svfg_nodes=" << svfg->getNumNodes()
                 << " svfg_edges=" << svfg->getStat().numEdges
                 << " context_limit=" << (contextLimit ?
@@ -186,6 +212,9 @@ int main(int argc, char **argv) {
                 << " guarded_effects=" << stats.guardedEffects
                 << " known_object_cardinality=" << stats.knownObjectCardinality
                 << " unknown_object_sets=" << stats.unknownObjectSets
+                << " ufg_objects=" << ufgStats.objects
+                << " ufg_nodes=" << ufgStats.nodes
+                << " ufg_edges=" << ufgStats.edges
                 << " issues=" << result.graph.issues().size() << '\n';
       if (!Quiet)
         for (const auto &issue : result.graph.issues())
@@ -197,13 +226,10 @@ int main(int argc, char **argv) {
                   << " finding_sites=" << findingGroups.size()
                   << " exhaustive=" << (scan.exhaustive ? "yes" : "no") << '\n';
         const auto &qs = scan.statistics;
-        std::cout << "batch_products=" << qs.productStates
-                  << " product_edges=" << qs.productEdges
+        std::cout << "lane_product_states=" << qs.productStates
+                  << " lane_product_edges=" << qs.productEdges
                   << " edges_examined=" << qs.edgesExamined
-                  << " summary_pairs=" << qs.summaryPairs
-                  << " mask_intersections=" << qs.maskIntersections
-                  << " mask_unions=" << qs.maskUnions
-                  << " nonempty_deltas=" << qs.nonemptyDeltas
+                  << " summary_facts=" << qs.summaryPairs
                   << " candidate_objects=" << qs.candidateObjects
                   << " found_objects=" << qs.foundObjects
                   << " notfound_objects=" << qs.notFoundObjects
@@ -216,7 +242,7 @@ int main(int argc, char **argv) {
                       << " candidates=" << group.second.size()
                       << " objects=" << findingObjects.at(group.first).size() << '\n';
             for (auto id : scan.findings[group.second.front()].result.nodes) {
-              const auto &node = result.graph.node(id);
+              const auto &node = expanded.graph().node(id);
               std::cout << "witness_node=" << id << " label=" << node.label;
               auto object = scan.findings[group.second.front()].witnessObject;
               if (object) std::cout << " object=" << *object;
@@ -227,6 +253,7 @@ int main(int argc, char **argv) {
       if (nodeQuery) {
         const auto &answer = *nodeQuery;
         std::cout << "query=" << statusName(answer.status)
+                  << " object=" << (queryObject ? std::to_string(*queryObject) : "none")
                   << " witness_edges=" << answer.edges.size()
                   << " product_states=" << answer.productStates
                   << " edges_examined=" << answer.edgesExamined
@@ -245,12 +272,14 @@ int main(int argc, char **argv) {
       std::cerr << std::fixed << std::setprecision(3)
                 << "timing_ms parse=" << millis(start, parsed)
                 << " svfg=" << millis(parsed, builtSVFG)
-                << " usetracessa=" << millis(builtSVFG, builtHistory)
+                << " shared_temporal=" << millis(builtSVFG, builtShared)
+                << " ufg_expand=" << millis(builtShared, builtHistory)
+                << " ufg=" << millis(builtSVFG, builtHistory)
                 << " check=" << millis(builtHistory, analyzed)
                 << " total=" << millis(start, analyzed) << '\n';
     }
   } catch (const std::exception &error) {
-    llvm::errs() << "lotus-ir-usetracessa: " << error.what() << '\n';
+    llvm::errs() << "lotus-ir-ufg: " << error.what() << '\n';
     return 1;
   }
   return 0;

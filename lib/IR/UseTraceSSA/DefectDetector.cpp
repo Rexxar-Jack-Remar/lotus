@@ -18,7 +18,8 @@ ObjectUniverse candidates(const TraceFlowGraph &graph) {
   // Generic resource annotations have no finite guard. Keep an anonymous
   // candidate for these clients as well as for unknown resource effects.
   for (const auto &n : graph.nodes())
-    if (hasEvent(n.events, Event::Allocate | Event::Release | Event::Dereference)) {
+    if (hasEvent(n.events, Event::Allocate | Event::Release |
+                               Event::Dereference | Event::Open | Event::Close)) {
       objects.push_back(UnknownResource); break;
     }
   return ObjectUniverse(std::move(objects));
@@ -27,7 +28,8 @@ ObjectUniverse candidates(const TraceFlowGraph &graph) {
 
 DefectReport DefectDetector::run(DefectKind kind, std::vector<FlowNodeID> roots,
                                  std::vector<FlowNodeID> uses) const {
-  if (kind == DefectKind::DoubleFree || kind == DefectKind::UseAfterFree) {
+  if (kind == DefectKind::DoubleFree || kind == DefectKind::UseAfterFree ||
+      kind == DefectKind::MemoryLeak || kind == DefectKind::FileLeak) {
     auto scanResult = scan(kind);
     if (!scanResult.findings.empty()) return std::move(scanResult.findings.front());
     QueryResult result; result.status = scanResult.status; result.message = scanResult.message;
@@ -36,6 +38,7 @@ DefectReport DefectDetector::run(DefectKind kind, std::vector<FlowNodeID> roots,
   Query q;
   if (kind == DefectKind::Taint) q = queries::taint(Graph);
   else q = queries::uncheckedUse(std::move(roots), std::move(uses));
+  q.contextLimit = ContextLimit;
   QueryResult result;
   if (q.sources.empty() || q.sinks.empty()) {
     result.status = QueryStatus::Unknown;
@@ -45,12 +48,18 @@ DefectReport DefectDetector::run(DefectKind kind, std::vector<FlowNodeID> roots,
 }
 
 DefectScan DefectDetector::scan(DefectKind kind) const {
-  if (kind != DefectKind::DoubleFree && kind != DefectKind::UseAfterFree)
+  if (kind != DefectKind::DoubleFree && kind != DefectKind::UseAfterFree &&
+      kind != DefectKind::MemoryLeak && kind != DefectKind::FileLeak)
     throw std::invalid_argument("UseTraceSSA: scan supports resource rules only");
   DefectScan scan;
   Query q = kind == DefectKind::DoubleFree ? queries::doubleFree(Graph) :
-                                            queries::useAfterFree(Graph);
-  if (Graph.select(Event::Release).empty() || q.sinks.empty()) {
+            kind == DefectKind::UseAfterFree ? queries::useAfterFree(Graph) :
+            kind == DefectKind::MemoryLeak ? queries::memoryLeak(Graph) :
+                                             queries::fileLeak(Graph);
+  q.contextLimit = ContextLimit;
+  const Event required = kind == DefectKind::FileLeak ? Event::Open :
+      kind == DefectKind::MemoryLeak ? Event::Allocate : Event::Release;
+  if (Graph.select(required).empty() || q.sinks.empty()) {
     scan.status = QueryStatus::Unknown; scan.exhaustive = false;
     scan.message = "required defect facts were not supplied";
     return scan;

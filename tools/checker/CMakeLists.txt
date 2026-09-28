@@ -108,6 +108,10 @@ if(LOTUS_BUILD_TESTS)
   add_checker_cli_test(checker_cli_fitx_rejects_unknown_check 2
                        "unknown fitx check 'foobar'"
                        --engine=fitx --checks=foobar ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test(checker_cli_saber_uaf_selection 0
+                       "Running Use After Free candidate checker"
+                       --engine=saber --checks=use-after-free
+                       ${CHECKER_CLI_MINIMAL})
   add_checker_cli_test(checker_cli_concur_rejects_substring_check 2
                        "unknown concur check 'raceXYZ'"
                        --engine=concur --checks=raceXYZ ${CHECKER_CLI_MINIMAL})

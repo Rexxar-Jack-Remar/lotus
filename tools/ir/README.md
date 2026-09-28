@@ -18,7 +18,8 @@ The current IR tool binary is emitted under `build/bin/`.
 | --- | --- | --- |
 | `lotus-ir-pdg-query` | Query the Program Dependence Graph | Implemented by `tools/ir/lotus-ir-pdg-query.cpp`; supports Cypher-style queries, slicing, chopping, shortest paths, summaries, resource-flow queries, and multiple output formats. |
 | `lotus-ir-control-dependence` | Run control-dependence experiments | Separates baseline and compact NTSCD/DOD timing, biclique statistics, exact pair enumeration, closure, and consistency checking; emits text, JSON, or CSV. |
-| `lotus-ir-usetracessa` | Build UseTraceSSA from Lotus SVFG | Emits text, JSON or DOT; queries node reachability and checks potential double-free/use-after-free. |
+| `lotus-ir-usetracessa` | Build UseTraceSSA from Lotus SVFG | Emits text, JSON or DOT; queries node reachability and checks double-free, use-after-free, memory-leak, and file-leak candidates. |
+| `lotus-ir-ufg` | Build the object-expanded UFG baseline from the same SVFG facts | Uses the same resource checks and reports physical lane/node/edge counts. |
 
 ### UseTraceSSA
 
@@ -28,13 +29,49 @@ build/bin/lotus-ir-usetracessa test.bc --format=dot
 build/bin/lotus-ir-usetracessa test.bc --source-node=12 --sink-node=34
 build/bin/lotus-ir-usetracessa test.bc --check=double-free
 build/bin/lotus-ir-usetracessa test.bc --check=use-after-free
+build/bin/lotus-ir-usetracessa test.bc --check=use-after-free --context-limit=3
+build/bin/lotus-ir-usetracessa test.bc --check=memory-leak
+build/bin/lotus-ir-usetracessa test.bc --check=file-leak
 ```
 
-The tool builds ICFG and AserPTA-backed SVFG with MemorySSA, then derives
-UseTraceSSA with shared temporal histories and guarded object effects. `--dump-svfg=path.dot` saves the source SVFG.
-The resource checks use `malloc`/`calloc`, `free`, and load/store events.
+The tool builds ICFG and an AserPTA-backed SVFG, then derives UseTraceSSA with
+shared temporal histories and guarded object effects. Full graph mode also
+builds MemorySSA. `--dump-svfg=path.dot` saves the source SVFG. Resource checks
+model `malloc`/`calloc` with `free`, `fopen` with `fclose`, and load/store uses.
 `Found` is a potential witness in the abstraction; incomplete external models
 or cross-function resource effects prevent a negative safety conclusion.
+
+### UFG baseline
+
+```bash
+build/bin/lotus-ir-ufg test.bc --check=double-free --timing
+build/bin/lotus-ir-ufg test.bc --check=use-after-free --quiet
+build/bin/lotus-ir-ufg test.bc --check=use-after-free --context-limit=3
+build/bin/lotus-ir-ufg test.bc --check=memory-leak
+build/bin/lotus-ir-ufg test.bc --check=file-leak
+build/bin/lotus-ir-ufg test.bc --format=json
+```
+
+The UFG tool uses the same SVFG importer, pointer facts, and defect rules as
+UseTraceSSA. It materializes one temporal graph lane per abstract object and
+uses its own tabulation engine to collect all defect sites in one search per
+object. See `lib/IR/UFG/README.md` for the API and construction scope.
+
+For batch experiments, `scripts/evaluate_usetracessa.py` runs
+UseTraceSSA, UFG, and the checks supported by Saber. It records graph size,
+phase timings, peak process RSS, result status, and findings in JSON. Use
+`--max-workers 1` when comparing timing and memory; that is the default.
+The script passes the same `--context-limit` to all three tools (default 3).
+In every tool, k=0 immediately merges older call context; use the script's
+`--unbounded-context` flag with only UseTraceSSA/UFG to omit the limit. Records
+retain the system-baseline versus representation-comparison distinction.
+The `mode` column describes SMT configuration: UseTraceSSA, UFG, and Saber UAF
+all use `nosmt`. Saber UAF remains an object/ICFG reachability candidate,
+recorded separately in `analysis_scope`. Memory-leak and file-leak now run in
+all three tools; the IR implementations are exit-path candidates with limited
+ownership-escape modeling, also recorded in `analysis_scope`.
+IR findings group objects by sink, while Saber emits bug reports; the JSON
+records each tool's `finding_unit` and the IR object counts separately.
 
 ## Typical usage
 

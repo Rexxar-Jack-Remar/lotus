@@ -10,7 +10,7 @@
 namespace lotus {
 namespace usetracessa {
 
-enum class NativeHistoryMode { Full, DoubleFree, UseAfterFree };
+enum class NativeHistoryMode { Full, DoubleFree, UseAfterFree, MemoryLeak, FileLeak };
 
 /// Construct ordered histories from this revision's SVFG and the LLVM CFG.
 /// Sites are derived from instructions, memory phases, CFG edges and function

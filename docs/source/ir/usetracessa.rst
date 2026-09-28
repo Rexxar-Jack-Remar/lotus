@@ -25,15 +25,19 @@ Integration status
 ``buildUseTraceSSAFromLotusSVFG`` constructs the overlay from Lotus SVFG and
 the LLVM module CFG. ``lotus-ir-usetracessa`` first builds ICFG and
 SVFG, then exports JSON/DOT, runs a structural query between SVFG node IDs, or
-checks possible double-free and use-after-free using object IDs and resource
+checks possible double-free, use-after-free, memory-leak, and file-leak using
+object IDs and resource
 histories. Ambiguous native locations are reported as graph issues.
 
-``DefectDetector`` is the C++ interface for double-free, use-after-free, taint
-and unchecked-use rules. The command-line tool automatically
-supplies release and dereference facts for its two resource checks. Taint
+``DefectDetector`` is the C++ interface for double-free, use-after-free,
+memory-leak, file-leak, taint and unchecked-use rules. The command-line tool
+automatically supplies native resource facts for these checks. Taint
 sources/sinks, sanitizers and full external-call semantics require client
 models. A ``Found`` result means a potential witness in the SVFG abstraction;
 it does not prove concrete path feasibility.
+Leak rules search for an acquired resource reaching a root exit without a
+modeled release. Ownership transfer through globals or containers is not fully
+modeled, so these are candidates rather than definitive leak reports.
 
 See ``lib/IR/UseTraceSSA/README.md`` for the native mapping contract, query
 semantics, models, complexity, and full API examples.

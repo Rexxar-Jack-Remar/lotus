@@ -10,7 +10,9 @@ enum class DefectKind {
   DoubleFree,
   UseAfterFree,
   Taint,
-  UncheckedUse
+  UncheckedUse,
+  MemoryLeak,
+  FileLeak
 };
 
 struct DefectReport {
@@ -37,17 +39,20 @@ struct DefectScan {
 /// Clients supply generic events or guarded temporal effects before calling run.
 class DefectDetector {
 public:
-  explicit DefectDetector(const TraceFlowGraph &graph) : Graph(graph) {}
+  explicit DefectDetector(const TraceFlowGraph &graph,
+                          std::optional<std::size_t> contextLimit = std::nullopt)
+      : Graph(graph), ContextLimit(contextLimit) {}
   DefectReport run(DefectKind kind,
                    std::vector<FlowNodeID> roots = {},
                    std::vector<FlowNodeID> uses = {}) const;
-  /// Enumerate one witness per release/dereference site for a resource rule.
+  /// Enumerate one witness per resource sink site.
   /// An issue can make the negative result Unknown even after all modeled
   /// sites have been visited.
   DefectScan scan(DefectKind kind) const;
 
 private:
   const TraceFlowGraph &Graph;
+  std::optional<std::size_t> ContextLimit;
 };
 
 } // namespace usetracessa

@@ -27,6 +27,8 @@ struct Automaton {
   static Automaton ordered(std::vector<Event> sequence);
   static Automaton doubleFree();
   static Automaton useAfterFree();
+  static Automaton memoryLeak();
+  static Automaton fileLeak();
 };
 
 struct Query {
@@ -37,6 +39,9 @@ struct Query {
   /// Must events block; May events retain the no-effect alternative.
   Event trapEvents = Event::None;
   ContextMode context = ContextMode::Realizable;
+  /// Unset uses unbounded Dyck summaries. A supplied k retains call strings
+  /// using Saber's limit semantics: k=0 merges context from the first call.
+  std::optional<std::size_t> contextLimit;
   Automaton automaton;
   bool requireNonEmpty = false;
   /// Threads have no sequential call-stack interpretation. Ignoring a reached

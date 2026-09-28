@@ -83,8 +83,8 @@ Relevant options:
 UseTraceSSA (lotus-ir-usetracessa)
 ----------------------------------
 
-Driver for value-flow use histories and defect detection (such as double-free
-and use-after-free) over Lotus SVFG.
+Driver for value-flow use histories and defect detection (double-free,
+use-after-free, memory-leak, and file-leak) over Lotus SVFG.
 
 **Binary**: ``lotus-ir-usetracessa``  
 **Location**: ``tools/ir/lotus-ir-usetracessa.cpp``
@@ -96,13 +96,16 @@ and use-after-free) over Lotus SVFG.
    # Check for defects
    ./build/bin/lotus-ir-usetracessa --check=double-free program.bc
    ./build/bin/lotus-ir-usetracessa --check=use-after-free program.bc
+   ./build/bin/lotus-ir-usetracessa --check=memory-leak program.bc
+   ./build/bin/lotus-ir-usetracessa --check=file-leak program.bc
 
    # Query flow path between SVFG nodes
    ./build/bin/lotus-ir-usetracessa --source-node=1 --sink-node=5 program.bc
 
 Relevant options:
 
-- ``--check=double-free|use-after-free`` – Run defect detection
+- ``--check=double-free|use-after-free|memory-leak|file-leak`` – Run detection
+- ``--context-limit=k`` – Use a bounded call string; omit for unbounded
 - ``--source-node=<ID>`` and ``--sink-node=<ID>`` – Query flow reachability
 - ``--format=text|json|dot`` – Select output format (default: ``text``)
 - ``--dump-svfg=<file>`` – Write the source SVFG to a DOT file

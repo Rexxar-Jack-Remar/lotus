@@ -16,6 +16,8 @@ Overview
 Saber-style analysis tracks source-sink relationships over the sparse
 value-flow graph to detect resource-management bugs. In the current tree it is
 used primarily for memory leaks, double-free bugs, and file-descriptor leaks.
+The use-after-free extension pairs SVFG object facts with an on-demand,
+context-bounded ICFG order query.
 
 Main components
 ---------------
@@ -23,6 +25,8 @@ Main components
 - ``LeakChecker`` checks unmatched allocations and partial leaks.
 - ``DoubleFreeChecker`` reports repeated frees on the same path.
 - ``FileChecker`` handles file-descriptor style resources.
+- ``UseAfterFreeChecker`` reports free-to-dereference candidates across
+  functions using matched call/return sites up to the context limit.
 - ``SaberCheckerAPI`` and ``SrcSnkSolver`` expose reusable source-sink solving
   infrastructure.
 
@@ -34,6 +38,7 @@ Typical usage
    ./build/bin/lotus-check --engine=saber input.bc
    ./build/bin/lotus-check --engine=saber input.bc --checks=all
    ./build/bin/lotus-check --engine=saber input.bc --checks=double-free,file-leak
+   ./build/bin/lotus-check --engine=saber input.bc --checks=use-after-free
 
 Behavior
 --------
@@ -44,11 +49,16 @@ Behavior
 - Saber tuning parameters are explicitly namespaced, for example
   ``--saber.context-limit``, ``--saber.max-forward-items``, and
   ``--saber.solver-timeout-ms``.
-- ``--saber.no-smt`` skips SMT path-condition propagation and solving for all
-  Saber checks. It retains source/sink value-flow traversal and reports
+- The default call-string limit is 3. A limit of 0 immediately merges contexts;
+  it does not request unbounded context sensitivity. Report this setting when
+  comparing Saber with analyses that use unbounded call/return matching.
+- ``--saber.no-smt`` skips SMT path-condition propagation and solving for the
+  original Saber source/sink checks. It retains value-flow traversal and reports
   conservative candidates: a reachable pair of frees can be reported even
   when their branches are mutually exclusive; a reachable close/free does
-  not prove all paths are covered. The default retains SMT filtering.
+  not prove all paths are covered. The default retains SMT filtering for those
+  checks. The use-after-free extension always reports path-insensitive
+  candidates; it does not invoke SMT in either mode.
 
 Interpreting findings
 ---------------------
@@ -62,10 +72,11 @@ alias configuration consistently when comparing runs or triaging results.
 Scope and alternatives
 ----------------------
 
-Saber currently implements resource-management checks only: memory leaks,
-double frees, and file-descriptor leaks.  In particular, it is not a general
-use-after-free or null-dereference checker.  Use ``ae``, ``pulse``, ``fitx``,
-or ``symex`` for the latter memory-safety classes.  See
+Saber checks memory leaks, double frees, file-descriptor leaks, and
+use-after-free candidates. The use-after-free extension checks load/store
+dereferences and ordinary ``free`` calls, with bounded call context; it does
+not prove branch/path feasibility. Use ``ae``, ``pulse``, ``fitx``, or ``symex``
+for other memory-safety checks or stronger UAF validation. See
 :ref:`Choosing a Checker <choosing-a-checker>` for engine selection.
 
 See also

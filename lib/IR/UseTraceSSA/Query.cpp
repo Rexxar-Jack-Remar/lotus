@@ -1,8 +1,10 @@
 #include "IR/UseTraceSSA/Query.h"
 #include <algorithm>
 #include <deque>
+#include <map>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -54,6 +56,25 @@ Automaton Automaton::useAfterFree() {
     return state;
   };
   return a;
+}
+namespace {
+Automaton resourceLeak(Event acquire, Event release) {
+  Automaton a; a.states = 3; a.accepting = {2};
+  a.transition = [acquire, release](ID state, Event event) -> ID {
+    if (state == 2) return 2;
+    if (hasEvent(event, acquire)) return 1;
+    if (hasEvent(event, release | Event::Escape)) return 0;
+    if (state == 1 && hasEvent(event, Event::Exit)) return 2;
+    return state;
+  };
+  return a;
+}
+} // namespace
+Automaton Automaton::memoryLeak() {
+  return resourceLeak(Event::Allocate, Event::Release);
+}
+Automaton Automaton::fileLeak() {
+  return resourceLeak(Event::Open, Event::Close);
 }
 QueryResult QueryEngine::run(const Query &q) const {
   QueryResult result;
@@ -127,6 +148,101 @@ QueryResult QueryEngine::run(const Query &q) const {
     }
   } catch (const Budget &) { limited = true; }
   result.productStates = pn.size();
+
+  if (q.contextLimit && q.context != ContextMode::Insensitive) {
+    struct ContextState {
+      ID product;
+      std::vector<CallSiteID> calls;
+      bool truncated = false;
+      bool positive = false;
+    };
+    struct ContextParent { ID previous = InvalidID, edge = InvalidID; };
+    std::map<std::tuple<ID, std::vector<CallSiteID>, bool, bool>, ID> known;
+    std::vector<ContextState> states;
+    std::vector<ContextParent> parents;
+    std::deque<ID> queue;
+    auto insert = [&](ContextState state, ID previous, ID edge) {
+      auto identity = std::make_tuple(state.product, state.calls,
+                                      state.truncated, state.positive);
+      auto found = known.find(identity);
+      if (found != known.end()) return;
+      bound(states.size(), q.maxSummaryPairs);
+      ID id = asID(states.size());
+      known.emplace(std::move(identity), id);
+      states.push_back(std::move(state));
+      parents.push_back({previous, edge});
+      queue.push_back(id);
+    };
+    ID accepted = InvalidID;
+    try {
+      for (ID root : roots) insert({root, {}, false, false}, InvalidID, InvalidID);
+      while (!queue.empty()) {
+        ID id = queue.front(); queue.pop_front();
+        ContextState current = states[id];
+        ProductNode productNode = pn[current.product];
+        if (sinks[productNode.node] && accepts[productNode.state] &&
+            (!q.requireNonEmpty || current.positive) &&
+            (q.context != ContextMode::Balanced || current.calls.empty())) {
+          accepted = id;
+          break;
+        }
+        for (ID edgeID : pout[current.product]) {
+          tick();
+          const ProductEdge &step = pe[edgeID];
+          const FlowEdge &edge = G.edge(step.original);
+          ContextState next = current;
+          next.product = step.to;
+          next.positive = true;
+          if (edge.kind == FlowKind::Call) {
+            if (next.calls.size() >= *q.contextLimit) {
+              if (!next.calls.empty()) next.calls.erase(next.calls.begin());
+              next.truncated = true;
+            }
+            next.calls.push_back(edge.callSite);
+          } else if (edge.kind == FlowKind::Return) {
+            if (next.calls.empty()) {
+              if (q.context == ContextMode::Balanced && !next.truncated) continue;
+            } else {
+              if (next.calls.back() != edge.callSite) continue;
+              next.calls.pop_back();
+            }
+          }
+          insert(std::move(next), id, edgeID);
+        }
+      }
+    } catch (const Budget &) { limited = true; }
+    result.summaryPairs = states.size();
+    if (accepted == InvalidID) {
+      result.status = limited || incomplete ? QueryStatus::Unknown : QueryStatus::NotFound;
+      result.message = limited ? "bounded-context query budget exhausted" :
+                       incomplete ? "incomplete model or omitted thread edges" :
+                                    "no witness in the supplied graph abstraction";
+      return result;
+    }
+    result.status = QueryStatus::Found;
+    result.message = "witness in the bounded-context abstraction";
+    std::vector<ID> path;
+    for (ID id = accepted; parents[id].previous != InvalidID;
+         id = parents[id].previous)
+      path.push_back(parents[id].edge);
+    std::reverse(path.begin(), path.end());
+    ID root = states[accepted].product;
+    if (!path.empty()) root = pe[path.front()].from;
+    result.nodes.push_back(pn[root].node);
+    result.automatonStates.push_back(pn[root].state);
+    for (ID edgeID : path) {
+      if (q.maxWitnessEdges && result.edges.size() >= q.maxWitnessEdges) {
+        result.witnessComplete = false;
+        result.message += "; witness rendering truncated";
+        break;
+      }
+      const ProductEdge &edge = pe[edgeID];
+      result.edges.push_back(edge.original);
+      result.nodes.push_back(pn[edge.to].node);
+      result.automatonStates.push_back(pn[edge.to].state);
+    }
+    return result;
+  }
 
   // Sparse Dyck saturation: D ::= epsilon | local | D D | call_c D return_c.
   // Recipes only refer to previously inserted recipes, forming a witness DAG.
@@ -204,7 +320,8 @@ QueryResult QueryEngine::run(const Query &q) const {
             for (std::size_t cx = c_idx; cx < c_end; ++cx) {
               for (std::size_t rx = r_idx; rx < r_end; ++rx) {
                 tick();
-                insert({pe[cIn[cx]].from, pe[rOut[rx]].to, RecipeKind::Match, cIn[cx], rOut[rx], rid, true});
+                insert({pe[cIn[cx]].from, pe[rOut[rx]].to, RecipeKind::Match,
+                        cIn[cx], rOut[rx], rid, true});
               }
             }
             c_idx = c_end;

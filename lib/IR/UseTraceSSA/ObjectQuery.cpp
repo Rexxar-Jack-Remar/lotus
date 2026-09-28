@@ -100,7 +100,8 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
         unite(it->second, c.objects);
       }
       classes.clear();
-      for (auto &c : merged) classes.push_back({std::move(c.second), c.first.first, c.first.second});
+      for (auto &c : merged)
+        classes.push_back({std::move(c.second), c.first.first, c.first.second});
     }
     return partitions.emplace(id, std::move(classes)).first->second;
   };
@@ -186,6 +187,93 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
     }
   } catch (const Budget &) { limited = true; }
   stats.productStates = pn.size(); stats.productEdges = pe.size();
+
+  if (q.contextLimit && q.context != ContextMode::Insensitive) {
+    struct ContextState {
+      ID product;
+      std::vector<CallSiteID> calls;
+      bool truncated = false;
+      bool positive = false;
+    };
+    std::map<std::tuple<ID, std::vector<CallSiteID>, bool, bool>, ID> known;
+    std::vector<ContextState> states;
+    std::vector<ObjectMask> visited;
+    std::deque<Delta> queue;
+    auto push = [&](ContextState state, const ObjectMask &objects) {
+      if (objects.none()) return;
+      auto identity = std::make_tuple(state.product, state.calls,
+                                      state.truncated, state.positive);
+      auto found = known.find(identity);
+      ID id;
+      if (found == known.end()) {
+        bound(states.size(), q.maxSummaryPairs);
+        if (states.size() >= InvalidID) throw Budget{};
+        id = states.size();
+        known.emplace(std::move(identity), id);
+        states.push_back(std::move(state));
+        visited.push_back(u.none());
+      } else {
+        id = found->second;
+      }
+      auto delta = difference(objects, visited[id]);
+      if (delta.none()) return;
+      unite(visited[id], delta);
+      ++stats.nonemptyDeltas;
+      queue.push_back({id, std::move(delta)});
+    };
+    try {
+      for (const auto &root : roots)
+        push({root.first, {}, false, false}, root.second);
+      while (!queue.empty()) {
+        Delta delta = std::move(queue.front()); queue.pop_front();
+        ContextState current = states[delta.id];
+        ProductNode point = pn[current.product];
+        if (sinks[point.node] && accepts[point.state] &&
+            (!q.requireNonEmpty || current.positive) &&
+            (q.context != ContextMode::Balanced || current.calls.empty())) {
+          unite(result.found, delta.objects);
+          unite(result.foundAt.emplace(point.node, u.none()).first->second,
+                delta.objects);
+        }
+        for (ID edgeID : pout[current.product]) {
+          tick();
+          const ProductEdge &step = pe[edgeID];
+          auto permitted = intersect(delta.objects, step.objects);
+          if (permitted.none()) continue;
+          const FlowEdge &edge = G.edge(step.original);
+          ContextState next = current;
+          next.product = step.to;
+          next.positive = true;
+          if (edge.kind == FlowKind::Call) {
+            if (next.calls.size() >= *q.contextLimit) {
+              if (!next.calls.empty()) next.calls.erase(next.calls.begin());
+              next.truncated = true;
+            }
+            next.calls.push_back(edge.callSite);
+          } else if (edge.kind == FlowKind::Return) {
+            if (next.calls.empty()) {
+              if (q.context == ContextMode::Balanced && !next.truncated) continue;
+            } else {
+              if (next.calls.back() != edge.callSite) continue;
+              next.calls.pop_back();
+            }
+          }
+          push(std::move(next), permitted);
+        }
+      }
+    } catch (const Budget &) { limited = true; }
+    stats.summaryPairs = states.size();
+    result.unknown = difference(limited ? u.all() : incomplete, result.found);
+    result.complete = !limited && incomplete.none();
+    result.notFound = difference(difference(u.all(), result.found), result.unknown);
+    stats.foundObjects = result.found.count();
+    stats.notFoundObjects = result.notFound.count();
+    stats.unknownObjects = result.unknown.count();
+    result.message = limited ? "bounded-context query budget exhausted" :
+        incomplete.any() ? "incomplete model or omitted thread edges" :
+                           "bounded-context mask tabulation complete";
+    return result;
+  }
 
   // D ::= epsilon | local | D D | call_c D return_c. Sequential composition
   // intersects; alternative derivations union for the SAME relation pair.

@@ -1,4 +1,5 @@
 #include "IR/UseTraceSSA/Models.h"
+#include <set>
 #include <stdexcept>
 
 namespace lotus {
@@ -21,7 +22,9 @@ bool need(TraceFlowGraph &g, const CallPorts &c, std::size_t args) {
 }
 void needPorts(TraceFlowGraph &g, const CallPorts &c, const std::vector<FlowNodeID> &ports,
                const char *what) {
-  if (ports.empty()) g.addIssue(c.callee + ": missing " + what + " (no address-as-content fallback)");
+  if (ports.empty())
+    g.addIssue(c.callee + ": missing " + what +
+               " (no address-as-content fallback)");
 }
 } // namespace
 LibraryModels::LibraryModels() {
@@ -112,12 +115,36 @@ Query taint(const TraceFlowGraph &g) {
 // A resource may enter through a formal parameter without a visible allocation.
 // Starting at release events preserves these bugs while Allocate still resets state.
 Query doubleFree(const TraceFlowGraph &g) {
-  Query q; q.sources = g.select(Event::Allocate | Event::Release); q.sinks = g.select(Event::Release);
+  Query q;
+  q.sources = g.select(Event::Allocate | Event::Release);
+  q.sinks = g.select(Event::Release);
   q.automaton = Automaton::doubleFree(); return q;
 }
 Query useAfterFree(const TraceFlowGraph &g) {
-  Query q; q.sources = g.select(Event::Allocate | Event::Release); q.sinks = g.select(Event::Dereference);
+  Query q;
+  q.sources = g.select(Event::Allocate | Event::Release);
+  q.sinks = g.select(Event::Dereference);
   q.automaton = Automaton::useAfterFree(); return q;
+}
+namespace {
+std::vector<FlowNodeID> rootExits(const TraceFlowGraph &g) {
+  std::set<FunctionID> called;
+  for (const auto &edge : g.edges())
+    if (edge.enabled && edge.kind == FlowKind::Call)
+      called.insert(g.node(edge.to).function);
+  std::vector<FlowNodeID> exits;
+  for (auto id : g.select(Event::Exit))
+    if (!called.count(g.node(id).function)) exits.push_back(id);
+  return exits;
+}
+} // namespace
+Query memoryLeak(const TraceFlowGraph &g) {
+  Query q; q.sources = g.select(Event::Allocate); q.sinks = rootExits(g);
+  q.automaton = Automaton::memoryLeak(); return q;
+}
+Query fileLeak(const TraceFlowGraph &g) {
+  Query q; q.sources = g.select(Event::Open); q.sinks = rootExits(g);
+  q.automaton = Automaton::fileLeak(); return q;
 }
 Query uncheckedUse(std::vector<FlowNodeID> sources, std::vector<FlowNodeID> uses) {
   Query q; q.sources = std::move(sources); q.sinks = std::move(uses);

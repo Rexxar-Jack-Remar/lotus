@@ -18,6 +18,7 @@ constexpr NativeCheckDescriptor AE_CHECKS[] = {
 constexpr NativeCheckDescriptor SABER_CHECKS[] = {
     {"memory-leak", "Memory leak"},
     {"double-free", "Double free"},
+    {"use-after-free", "Use after free (context-bounded candidates)"},
     {"file-leak", "File descriptor leak"},
 };
 constexpr NativeCheckDescriptor PULSE_CHECKS[] = {

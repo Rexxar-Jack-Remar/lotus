@@ -27,3 +27,5 @@ add_lotus_targeted_test(usetracessa_scaling_test UseTraceSSA/ScalingTest.cpp
   LINK_LIBS CanaryUseTraceSSACore)
 add_lotus_targeted_test(usetracessa_native_test UseTraceSSA/NativeFactorizedTest.cpp
   LINK_LIBS CanaryUseTraceSSASVFG)
+add_lotus_targeted_test(ufg_test UFG/UFGTest.cpp
+  LINK_LIBS CanaryUFG CanaryUseTraceSSASVFG LLVMAsmParser)

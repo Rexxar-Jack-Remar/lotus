@@ -39,11 +39,22 @@ intersect masks; alternative paths union them. Call/return summaries match
 lazily with the fixed-object engine. `UnknownResource` is a candidate sentinel
 with no separate graph structure.
 
-`DefectDetector` supplies double-free, use-after-free, taint and unchecked-use
-rules. Its resource scan searches all objects and sinks symbolically, returning
+Queries also accept `contextLimit`: leaving it unset uses unbounded Dyck
+summaries. A supplied k uses Saber's call-string limit semantics, including
+k=0 for immediate context merging. The CLI exposes this as
+`--context-limit=k`; omit the option for unbounded matching.
+
+`DefectDetector` supplies double-free, use-after-free, memory-leak, file-leak,
+taint and unchecked-use rules. Its resource scan searches all objects and sinks
+symbolically, returning
 one concrete witness and the accepted objects per sink. Found means a potential
 witness in the supplied abstraction, not proven path feasibility. Missing models,
 unsupported exceptional calls and exhausted budgets can make negatives Unknown.
+Leak checks are candidate exit-path analyses. They track `malloc`/`calloc` with
+`free` and `fopen` with `fclose` through root function exits. A pointer returned
+from a root function is treated as escaped; ownership transfer through globals
+and containers is not fully modeled. Direct release of an acquisition result is
+recognized as a definite close/free.
 
 ## Build and use
 

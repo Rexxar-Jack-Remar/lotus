@@ -39,7 +39,8 @@ enum class Event : std::uint32_t {
   Allocate = 1u << 3, Release = 1u << 4, Dereference = 1u << 5,
   Read = 1u << 6, Write = 1u << 7, NonNull = 1u << 8,
   IsNull = 1u << 9,
-  UnknownEffect = 1u << 10, Exit = 1u << 11
+  UnknownEffect = 1u << 10, Exit = 1u << 11,
+  Open = 1u << 12, Close = 1u << 13, Escape = 1u << 14
 };
 inline Event operator|(Event a, Event b) {
   return static_cast<Event>(static_cast<std::uint32_t>(a) |

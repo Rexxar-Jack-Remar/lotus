@@ -50,6 +50,8 @@ Query taint(const TraceFlowGraph &graph);
 /// Includes release roots so a visible allocation is not required.
 Query doubleFree(const TraceFlowGraph &graph);
 Query useAfterFree(const TraceFlowGraph &graph);
+Query memoryLeak(const TraceFlowGraph &graph);
+Query fileLeak(const TraceFlowGraph &graph);
 /// Safety-check query: pass the relevant roots/dereferences. NonNull traps
 /// must be attached to the successful CFG EDGE, never the comparison itself.
 Query uncheckedUse(std::vector<FlowNodeID> sources, std::vector<FlowNodeID> uses);

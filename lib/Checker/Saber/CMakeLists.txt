@@ -9,6 +9,7 @@ set(Saber_SOURCES
   ProgSlice.cpp
   LeakChecker.cpp
   DoubleFreeChecker.cpp
+  UseAfterFreeChecker.cpp
   FileChecker.cpp
   SaberCheckerAPI.cpp
   Z3Expr.cpp
