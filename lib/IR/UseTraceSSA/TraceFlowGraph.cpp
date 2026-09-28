@@ -31,6 +31,16 @@ std::string quoted(const std::string &s) {
   out << '"';
   return out.str();
 }
+void printObjects(std::ostream &out, const ObjectSet &objects) {
+  if (objects.isUnknown()) { out << "null"; return; }
+  out << '[';
+  bool first = true;
+  for (auto object : objects.objects()) {
+    if (!first) out << ',';
+    first = false; out << quoted(std::to_string(object));
+  }
+  out << ']';
+}
 const char *kindName(FlowKind kind) {
   switch (kind) {
   case FlowKind::History: return "history";
@@ -141,8 +151,55 @@ void TraceFlowGraph::annotate(FlowNodeID id, Event e, Certainty c) {
     throw std::invalid_argument("UseTraceSSA: split events with different certainties into nodes");
   n.events = n.events | e; n.certainty = c; ++Revision;
 }
-void TraceFlowGraph::setObject(FlowNodeID id, ObjectID object) {
-  Nodes.at(id).object = object; ++Revision;
+void TraceFlowGraph::annotate(FlowNodeID id, Event events, ObjectSet objects, Certainty c) {
+  if (events == Event::None) throw std::invalid_argument("UseTraceSSA: empty guarded effect");
+  if (c != Certainty::Must && c != Certainty::May)
+    throw std::invalid_argument("UseTraceSSA: invalid effect certainty");
+  Nodes.at(id).effects.push_back({events, std::move(objects), c});
+  ++Revision;
+}
+EffectiveEvent TraceFlowGraph::effectiveEvent(FlowNodeID id, ObjectID object) const {
+  const auto &n = node(id);
+  EffectiveEvent result{n.events, n.certainty};
+  for (const auto &effect : n.effects) if (effect.objects.contains(object)) {
+    result.events = result.events | effect.events;
+    if (effect.certainty == Certainty::May || effect.objects.isUnknown())
+      result.certainty = Certainty::May;
+  }
+  return result;
+}
+std::vector<ObjectID> TraceFlowGraph::resourceCandidates() const {
+  std::vector<ObjectID> result;
+  for (const auto &n : Nodes) for (const auto &effect : n.effects) {
+    if (effect.objects.isUnknown()) result.push_back(UnknownResource);
+    else result.insert(result.end(), effect.objects.objects().begin(),
+                       effect.objects.objects().end());
+  }
+  for (const auto &edge : Edges)
+    if (!edge.objects.isUnknown())
+      result.insert(result.end(), edge.objects.objects().begin(), edge.objects.objects().end());
+  std::sort(result.begin(), result.end());
+  result.erase(std::unique(result.begin(), result.end()), result.end());
+  return result;
+}
+FlowStatistics TraceFlowGraph::statistics() const {
+  FlowStatistics s;
+  s.flowEdges = Edges.size();
+  for (const auto &layer : Layers) for (const auto &n : layer.second.history.nodes()) {
+    ++s.historyNodes;
+    s.historyPsiNodes += n.kind == NodeKind::Psi;
+    s.historyPhiNodes += n.kind == NodeKind::Phi;
+  }
+  auto count = [&](const ObjectSet &objects) {
+    if (objects.isUnknown()) ++s.unknownObjectSets;
+    else s.knownObjectCardinality += objects.objects().size();
+  };
+  for (const auto &n : Nodes) for (const auto &effect : n.effects) {
+    ++s.guardedEffects;
+    count(effect.objects);
+  }
+  for (const auto &e : Edges) count(e.objects);
+  return s;
 }
 void TraceFlowGraph::setNative(FlowNodeID id, NativeID native) {
   auto &n = Nodes.at(id);
@@ -154,7 +211,12 @@ void TraceFlowGraph::disableEdge(FlowEdgeID id) { Edges.at(id).enabled = false; 
 void TraceFlowGraph::addIssue(std::string issue) { Issues.push_back(std::move(issue)); ++Revision; }
 std::vector<FlowNodeID> TraceFlowGraph::select(Event events) const {
   std::vector<FlowNodeID> result;
-  for (const auto &n : Nodes) if (hasEvent(n.events, events)) result.push_back(n.id);
+  for (const auto &n : Nodes) {
+    bool selected = hasEvent(n.events, events);
+    for (const auto &effect : n.effects)
+      selected |= !effect.objects.empty() && hasEvent(effect.events, events);
+    if (selected) result.push_back(n.id);
+  }
   return result;
 }
 bool TraceFlowGraph::verify(std::string *error) const {
@@ -163,6 +225,18 @@ bool TraceFlowGraph::verify(std::string *error) const {
   std::vector<unsigned> seenOut(Edges.size()), seenIn(Edges.size());
   for (std::size_t i = 0; i < Nodes.size(); ++i) {
     if (Nodes[i].id != i) return fail("node ID mismatch");
+    if (Nodes[i].certainty != Certainty::Must && Nodes[i].certainty != Certainty::May)
+      return fail("invalid certainty");
+    for (const auto &effect : Nodes[i].effects) {
+      if (effect.events == Event::None) return fail("empty guarded effect");
+      if (effect.certainty != Certainty::Must && effect.certainty != Certainty::May)
+        return fail("invalid guarded certainty");
+      const auto &objects = effect.objects.objects();
+      if ((effect.objects.isUnknown() && !objects.empty()) ||
+          !std::is_sorted(objects.begin(), objects.end()) ||
+          std::adjacent_find(objects.begin(), objects.end()) != objects.end())
+        return fail("malformed guarded object set");
+    }
     for (auto e : Out[i]) {
       if (e >= Edges.size() || Edges[e].from != i) return fail("outgoing edge mismatch");
       ++seenOut[e];
@@ -183,15 +257,31 @@ bool TraceFlowGraph::verify(std::string *error) const {
 }
 void TraceFlowGraph::printDOT(std::ostream &out) const {
   out << "digraph UseTraceSSA {\n";
-  for (const auto &n : Nodes) out << "  n" << n.id << " [label=" << quoted(n.label) << "];\n";
-  for (const auto &e : Edges) if (e.enabled)
+  for (const auto &n : Nodes) {
+    std::ostringstream label;
+    label << n.label << "\nevents=" << static_cast<std::uint32_t>(n.events)
+          << " " << (n.certainty == Certainty::Must ? "must" : "may");
+    for (const auto &effect : n.effects) {
+      label << "\neffect=" << static_cast<std::uint32_t>(effect.events)
+            << " " << (effect.certainty == Certainty::Must ? "must" : "may") << " @";
+      printObjects(label, effect.objects);
+    }
+    out << "  n" << n.id << " [label=" << quoted(label.str()) << "];\n";
+  }
+  for (const auto &e : Edges) if (e.enabled) {
+    std::ostringstream label;
+    label << kindName(e.kind);
+    if (!e.guard.empty()) label << ':' << e.guard;
+    label << " @";
+    printObjects(label, e.objects);
     out << "  n" << e.from << " -> n" << e.to << " [label="
-        << quoted(std::string(kindName(e.kind)) + (e.guard.empty() ? "" : ":" + e.guard))
+        << quoted(label.str())
         << "];\n";
+  }
   out << "}\n";
 }
 void TraceFlowGraph::printJSON(std::ostream &out) const {
-  out << "{\"schema\":\"lotus-usetracessa-1\",\"complete\":" << (complete() ? "true" : "false")
+  out << "{\"schema\":\"lotus-usetracessa-2\",\"complete\":" << (complete() ? "true" : "false")
       << ",\"issues\":[";
   for (std::size_t i = 0; i < Issues.size(); ++i) out << (i ? "," : "") << quoted(Issues[i]);
   out << "],\"nodes\":[";
@@ -201,9 +291,18 @@ void TraceFlowGraph::printJSON(std::ostream &out) const {
         << ",\"native\":" << quoted(std::to_string(n.native))
         << ",\"events\":" << static_cast<std::uint32_t>(n.events)
         << ",\"certainty\":" << quoted(n.certainty == Certainty::Must ? "must" : "may")
-        << ",\"object\":";
-    if (n.object) out << quoted(std::to_string(*n.object)); else out << "null";
-    out << "}";
+        << ",\"effects\":[";
+    bool first = true;
+    for (const auto &effect : n.effects) {
+      if (!first) out << ',';
+      first = false;
+      out << "{\"events\":" << static_cast<std::uint32_t>(effect.events)
+          << ",\"certainty\":" << quoted(effect.certainty == Certainty::Must ? "must" : "may")
+          << ",\"objects\":";
+      printObjects(out, effect.objects);
+      out << '}';
+    }
+    out << "]}";
   }
   out << "],\"edges\":[";
   for (const auto &e : Edges) {
@@ -214,14 +313,7 @@ void TraceFlowGraph::printJSON(std::ostream &out) const {
         << ",\"native_kind\":" << e.nativeKind << ",\"predecessor\":" << e.predecessor
         << ",\"enabled\":" << (e.enabled ? "true" : "false")
         << ",\"guard\":" << quoted(e.guard) << ",\"objects\":";
-    if (e.objects.isUnknown()) out << "null";
-    else {
-      out << '[';
-      bool first = true;
-      for (auto o : e.objects.objects()) { if (!first) out << ','; first = false;
-        out << quoted(std::to_string(o)); }
-      out << ']';
-    }
+    printObjects(out, e.objects);
     out << '}';
   }
   out << "]}\n";

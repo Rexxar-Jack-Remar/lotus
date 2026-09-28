@@ -1,6 +1,6 @@
 #include "IR/UseTraceSSA/DefectDetector.h"
 #include "IR/UseTraceSSA/Models.h"
-#include "IR/UseTraceSSA/ResourceHistory.h"
+#include "IR/UseTraceSSA/TemporalHistory.h"
 #include "IR/UseTraceSSA/SVFGImporter.h"
 #include <algorithm>
 #include <functional>
@@ -140,6 +140,12 @@ void nativeContract() {
   CHECK(r.nodes.size()==2); CHECK(r.edges.size()==1);
   CHECK(f.g.edge(r.edges.at(900)).native==900);
 }
+Query resourceQuery(const TraceFlowGraph &g, bool doubleFree) {
+  auto q = doubleFree ? queries::doubleFree(g) : queries::useAfterFree(g);
+  auto objects = g.resourceCandidates();
+  if (!objects.empty()) q.memoryObject = objects.front();
+  return q;
+}
 void paperResources() {
   Program p; auto entry=p.addBlock("entry"), nonnull=p.addBlock("nonnull"), join=p.addBlock("join");
   auto alloc=p.addOperation(entry,"malloc"), check=p.addOperation(entry,"compare null");
@@ -149,55 +155,60 @@ void paperResources() {
   auto read=p.addOperation(nonnull,"*p"), first=p.addOperation(nonnull,"free(p)");
   p.addEdge(nonnull,join); auto second=p.addOperation(join,"free(q), q aliases p");
   ObjectSet obj=ObjectSet::known({41});
-  std::vector<ResourceAccess> accesses={{alloc,obj,Event::Allocate,Certainty::Must},
+  std::vector<TemporalEffect> accesses={{alloc,obj,Event::Allocate,Certainty::Must},
     {check,obj,Event::None,Certainty::Must},{guard,obj,Event::NonNull,Certainty::Must},
     {read,obj,Event::Dereference,Certainty::Must},{first,obj,Event::Release,Certainty::Must},
     {second,obj,Event::Release,Certainty::Must}};
-  TraceFlowGraph g; auto h=ResourceHistoryBuilder::append(g,0,"paper",p,accesses);
-  auto df=QueryEngine(g).run(queries::doubleFree(g)); CHECK(df.found());
+  TraceFlowGraph g; auto h=TemporalHistory::append(g,0,"paper",p,accesses);
+  auto df=QueryEngine(g).run(resourceQuery(g,true)); CHECK(df.found());
   witness(g,df,ContextMode::Realizable);
-  auto safe=queries::uncheckedUse({h.after(g,alloc,41)},{h.after(g,read,41)});
+  auto safe=queries::uncheckedUse({h.after(g,alloc)},{h.after(g,read)}); safe.memoryObject=41;
   CHECK(QueryEngine(g).allPathsHitTraps(safe).status==CoverageStatus::AllPathsTrapped);
-  auto path=query(h.after(g,first,41),h.after(g,second,41)); CHECK(QueryEngine(g).run(path).found());
-  CHECK(!QueryEngine(g).run(queries::useAfterFree(g)).found());
+  auto path=query(h.after(g,first),h.after(g,second)); CHECK(QueryEngine(g).run(path).found());
+  CHECK(!QueryEngine(g).run(resourceQuery(g,false)).found());
 }
 void noAliasUnion() {
   Program p; auto b=p.addBlock("b"); auto x=p.addOperation(b,"free through {1,2}");
   auto y=p.addOperation(b,"free through {2,3}"); TraceFlowGraph g;
-  auto h=ResourceHistoryBuilder::append(g,0,"aliases",p,
+  auto h=TemporalHistory::append(g,0,"aliases",p,
     {{x,ObjectSet::known({1,2}),Event::Release,Certainty::May},
      {y,ObjectSet::known({2,3}),Event::Release,Certainty::May}});
-  auto q=query(h.after(g,x,1),h.after(g,y,3)); q.automaton=Automaton::doubleFree();
+  auto q=query(h.after(g,x),h.after(g,y)); q.automaton=Automaton::doubleFree();
+  q.memoryObject=1;
   CHECK(QueryEngine(g).run(q).status==QueryStatus::NotFound);
-  q=query(h.after(g,x,2),h.after(g,y,2)); q.automaton=Automaton::doubleFree();
+  q.memoryObject=3; CHECK(QueryEngine(g).run(q).status==QueryStatus::NotFound);
+  q=query(h.after(g,x),h.after(g,y)); q.automaton=Automaton::doubleFree();
+  q.memoryObject=2;
   CHECK(QueryEngine(g).run(q).found());
 }
 void unknownAlias() {
   Program p; auto b=p.addBlock("b"); auto x=p.addOperation(b,"free unknown");
   auto y=p.addOperation(b,"free known"); TraceFlowGraph g;
-  auto h=ResourceHistoryBuilder::append(g,0,"unknown",p,
+  auto h=TemporalHistory::append(g,0,"unknown",p,
     {{x,ObjectSet::unknown(),Event::Release,Certainty::May},
      {y,ObjectSet::known({2}),Event::Release,Certainty::Must}});
-  auto q=query(h.after(g,x,2),h.after(g,y,2)); q.automaton=Automaton::doubleFree();
-  CHECK(QueryEngine(g).run(q).found()); CHECK(h.values.count(UnknownResource));
+  auto q=query(h.after(g,x),h.after(g,y)); q.automaton=Automaton::doubleFree();
+  q.memoryObject=2;
+  CHECK(QueryEngine(g).run(q).found()); auto candidates = g.resourceCandidates();
+  CHECK(std::find(candidates.begin(), candidates.end(), UnknownResource) != candidates.end());
 }
 void resourceLoop(bool reset) {
   Program p; auto e=p.addBlock("entry"), b=p.addBlock("loop"), x=p.addBlock("exit");
   p.addEdge(e,b); p.addEdge(b,b); p.addEdge(b,x);
   auto alloc=p.addOperation(reset?b:e,"allocate"); auto free=p.addOperation(b,"free");
   TraceFlowGraph g; auto obj=ObjectSet::known({1});
-  ResourceHistoryBuilder::append(g,0,"loop",p,
+  TemporalHistory::append(g,0,"loop",p,
     {{alloc,obj,Event::Allocate,Certainty::Must},{free,obj,Event::Release,Certainty::Must}});
-  auto q=queries::doubleFree(g); auto r=QueryEngine(g).run(q);
+  auto q=resourceQuery(g,true); auto r=QueryEngine(g).run(q);
   CHECK(r.found()!=reset); if(r.found()) witness(g,r,ContextMode::Realizable);
 }
 void useAfterFree() {
   Program p; auto b=p.addBlock("b"); auto a=p.addOperation(b,"alloc"),f=p.addOperation(b,"free"),
     u=p.addOperation(b,"read"); TraceFlowGraph g; auto o=ObjectSet::known({77});
-  ResourceHistoryBuilder::append(g,0,"uaf",p,{{a,o,Event::Allocate,Certainty::Must},
+  TemporalHistory::append(g,0,"uaf",p,{{a,o,Event::Allocate,Certainty::Must},
     {f,o,Event::Release,Certainty::Must},{u,o,Event::Dereference,Certainty::Must}});
-  CHECK(QueryEngine(g).run(queries::useAfterFree(g)).found());
-  CHECK(QueryEngine(g).run(queries::doubleFree(g)).status==QueryStatus::NotFound);
+  CHECK(QueryEngine(g).run(resourceQuery(g,false)).found());
+  CHECK(QueryEngine(g).run(resourceQuery(g,true)).status==QueryStatus::NotFound);
 }
 void unallocatedResource() {
   Program p;
@@ -207,20 +218,20 @@ void unallocatedResource() {
   auto second = p.addOperation(block, "free(formal alias q)");
   auto object = ObjectSet::known({93});
   TraceFlowGraph g;
-  ResourceHistoryBuilder::append(g, 0, "borrowed-object", p,
+  TemporalHistory::append(g, 0, "borrowed-object", p,
       {{first, object, Event::Release, Certainty::Must},
        {read, object, Event::Dereference, Certainty::Must},
        {second, object, Event::Release, Certainty::Must}});
   CHECK(g.select(Event::Allocate).empty());
-  auto df = QueryEngine(g).run(queries::doubleFree(g));
+  auto df = QueryEngine(g).run(resourceQuery(g,true));
   CHECK(df.found());
   witness(g, df, ContextMode::Realizable);
-  CHECK(QueryEngine(g).run(queries::useAfterFree(g)).found());
+  CHECK(QueryEngine(g).run(resourceQuery(g,false)).found());
 
   TraceFlowGraph onlyOne;
-  ResourceHistoryBuilder::append(onlyOne, 0, "single-release", p,
+  TemporalHistory::append(onlyOne, 0, "single-release", p,
       {{first, object, Event::Release, Certainty::Must}});
-  CHECK(QueryEngine(onlyOne).run(queries::doubleFree(onlyOne)).status == QueryStatus::NotFound);
+  CHECK(QueryEngine(onlyOne).run(resourceQuery(onlyOne,true)).status == QueryStatus::NotFound);
 }
 void matchingCalls() {
   TraceFlowGraph g; auto a=node(g,"source"),b=node(g,"callee"),c=node(g,"wrong caller sink");
@@ -265,28 +276,28 @@ void resourceCall() {
   auto call=caller.addOperation(b,"callee"); auto free=caller.addOperation(b,"free");
   Program callee; auto cb=callee.addBlock("entry"); auto cf=callee.addOperation(cb,"free");
   auto o=ObjectSet::known({1}); TraceFlowGraph g;
-  auto h=ResourceHistoryBuilder::append(g,0,"caller",caller,
+  auto h=TemporalHistory::append(g,0,"caller",caller,
     {{alloc,o,Event::Allocate,Certainty::Must},{call,o,Event::None,Certainty::Must},
-     {free,o,Event::Release,Certainty::Must}},{1});
-  auto t=ResourceHistoryBuilder::append(g,1,"callee",callee,
-    {{cf,o,Event::Release,Certainty::Must}},{1});
-  ResourceHistoryBuilder::connectCall(g,h,call,9,{t});
-  auto q=queries::doubleFree(g); q.context=ContextMode::Balanced;
+     {free,o,Event::Release,Certainty::Must}});
+  auto t=TemporalHistory::append(g,1,"callee",callee,
+    {{cf,o,Event::Release,Certainty::Must}});
+  TemporalHistory::connectCall(g,h,call,9,{t});
+  auto q=resourceQuery(g,true); q.context=ContextMode::Balanced;
   auto r=QueryEngine(g).run(q); witness(g,r,q.context);
-  CHECK(std::find(r.nodes.begin(),r.nodes.end(),t.after(g,cf,1))!=r.nodes.end());
+  CHECK(std::find(r.nodes.begin(),r.nodes.end(),t.after(g,cf))!=r.nodes.end());
 }
 void calleeTrap() {
   Program p; auto b=p.addBlock("caller"); auto a=p.addOperation(b,"source"),
     call=p.addOperation(b,"call"),s=p.addOperation(b,"sink");
   Program c; auto cb=c.addBlock("callee"); auto check=c.addOperation(cb,"sanitize");
   auto o=ObjectSet::known({1}); TraceFlowGraph g;
-  auto h=ResourceHistoryBuilder::append(g,0,"caller",p,
+  auto h=TemporalHistory::append(g,0,"caller",p,
     {{a,o,Event::Source,Certainty::Must},{call,o,Event::None,Certainty::Must},
-     {s,o,Event::Sink,Certainty::Must}},{1});
-  auto t=ResourceHistoryBuilder::append(g,1,"callee",c,
-    {{check,o,Event::Sanitize,Certainty::Must}},{1});
-  ResourceHistoryBuilder::connectCall(g,h,call,7,{t});
-  CHECK(QueryEngine(g).allPathsHitTraps(queries::taint(g)).status==CoverageStatus::AllPathsTrapped);
+     {s,o,Event::Sink,Certainty::Must}});
+  auto t=TemporalHistory::append(g,1,"callee",c,
+    {{check,o,Event::Sanitize,Certainty::Must}});
+  TemporalHistory::connectCall(g,h,call,7,{t});
+  CHECK(QueryEngine(g).allPathsHitTraps([&] { auto q=queries::taint(g); q.memoryObject=1; return q; }()).status==CoverageStatus::AllPathsTrapped);
 }
 void limits() {
   TraceFlowGraph g; auto a=node(g,"a"),b=node(g,"b"),c=node(g,"c"); edge(g,a,b);edge(g,b,c);
@@ -355,7 +366,7 @@ void slices() {
 }
 void serialization() {
   TraceFlowGraph g;auto a=node(g,"quote\" backslash\\ newline\n");auto b=node(g,"b");
-  g.setObject(a,18446744073709551610ULL);edge(g,a,b,FlowKind::Memory,NoNativeID,ObjectSet::known({1,2}));
+  g.annotate(a,Event::Release,ObjectSet::known({18446744073709551610ULL}));edge(g,a,b,FlowKind::Memory,NoNativeID,ObjectSet::known({1,2}));
   std::ostringstream x,y;g.printJSON(x);g.printJSON(y);CHECK(x.str()==y.str());
   CHECK(x.str().find("18446744073709551610")!=std::string::npos);
   CHECK(x.str().find("\\\"")!=std::string::npos);CHECK(g.verify());
@@ -486,11 +497,11 @@ void defectDetector() {
   auto release = node(resource, "free", Event::Release);
   auto reset = node(resource, "fresh allocation", Event::Allocate);
   auto later = node(resource, "second free", Event::Release);
-  for (auto id : {release, reset, later}) resource.setObject(id, 42);
+
   edge(resource, release, reset, FlowKind::History);
   edge(resource, reset, later, FlowKind::History);
   auto result = DefectDetector(resource).run(DefectKind::DoubleFree);
-  CHECK(result.specialized);
+  CHECK(!result.witnessObject); // No finding needs a concrete object witness.
   CHECK(result.result.status ==
         QueryEngine(resource).run(queries::doubleFree(resource)).status);
   CHECK(result.result.status == QueryStatus::NotFound);
@@ -505,7 +516,7 @@ void defectDetector() {
                     choice == 2 ? Event::Allocate : Event::None;
       auto id = node(graph, "resource", event,
                      choice == 2 && (rng() % 2) ? Certainty::Must : Certainty::May);
-      graph.setObject(id, 42);
+      (void)id;
     }
     for (FlowNodeID i = 0; i < graph.nodes().size(); ++i)
       for (FlowNodeID j = i + 1; j < graph.nodes().size(); ++j)

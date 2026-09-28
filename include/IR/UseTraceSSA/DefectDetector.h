@@ -16,7 +16,8 @@ enum class DefectKind {
 struct DefectReport {
   DefectKind kind = DefectKind::DoubleFree;
   QueryResult result;
-  bool specialized = false;
+  std::optional<ObjectID> witnessObject;
+  std::vector<ObjectID> objects;
   /// Native SVFG IDs present on witness nodes. History psi/phi nodes have no
   /// native ID, so this list need not have one entry per witness node.
   std::vector<NativeID> nativeWitness;
@@ -25,7 +26,7 @@ struct DefectReport {
 struct DefectScan {
   QueryStatus status = QueryStatus::NotFound;
   std::vector<DefectReport> findings;
-  bool specialized = false;
+  ObjectBatchStatistics statistics;
   bool exhaustive = true;
   std::string message;
 };
@@ -33,7 +34,7 @@ struct DefectScan {
 /// Run a defect rule over an already constructed and annotated UseTraceSSA graph.
 /// Found means a potential defect in the supplied abstraction. No required
 /// facts, incomplete modeling, or exhausted budgets yield Unknown, never Safe.
-/// Clients can annotate events or append object histories before calling run.
+/// Clients supply generic events or guarded temporal effects before calling run.
 class DefectDetector {
 public:
   explicit DefectDetector(const TraceFlowGraph &graph) : Graph(graph) {}

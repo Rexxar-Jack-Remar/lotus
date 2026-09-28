@@ -51,15 +51,17 @@ LibraryModels::LibraryModels() {
   auto release = [](TraceFlowGraph &g, const CallPorts &c) {
     if (!need(g, c, 1)) return;
     const auto &arg = c.arguments[0];
-    needPorts(g, c, arg.resourceUses, "object-history release ports");
-    annotate(g, arg.resourceUses, Event::Release, arg.resourceCertainty);
+    if (arg.resourceEffects.empty()) g.addIssue(c.callee + ": missing resource effect ports");
+    for (const auto &port : arg.resourceEffects)
+      g.annotate(port.node, Event::Release, port.objects, port.certainty);
   };
   registerModel("free", release);
   auto allocate = [](TraceFlowGraph &g, const CallPorts &c) {
-    needPorts(g, c, c.allocatedResources, "allocated object-history ports");
+    if (c.allocationEffects.empty()) g.addIssue(c.callee + ": missing allocation effect ports");
     // A successful fresh-object reset requires a more precise custom model.
     // malloc can fail and allocation-site objects can summarize old instances.
-    annotate(g, c.allocatedResources, Event::Allocate, Certainty::May);
+    for (const auto &port : c.allocationEffects)
+      g.annotate(port.node, Event::Allocate, port.objects, Certainty::May);
   };
   registerModel("malloc", allocate); registerModel("calloc", allocate);
   registerModel("memset", [](TraceFlowGraph &g, const CallPorts &c) {
@@ -77,9 +79,11 @@ void LibraryModels::registerModel(std::string name, Model model) {
 void LibraryModels::apply(TraceFlowGraph &g, const CallPorts &call) const {
   // Validate all supplied ports before invoking a model.
   auto validate = [&](const std::vector<FlowNodeID> &ports) { for (auto n : ports) g.node(n); };
-  validate(call.returnValue); validate(call.allocatedResources);
+  validate(call.returnValue);
+  for (const auto &port : call.allocationEffects) g.node(port.node);
   for (const auto &a : call.arguments) {
-    validate(a.value); validate(a.memoryIn); validate(a.memoryOut); validate(a.resourceUses);
+    validate(a.value); validate(a.memoryIn); validate(a.memoryOut);
+    for (const auto &port : a.resourceEffects) g.node(port.node);
   }
   auto found = Models.find(call.callee);
   // LLVM intrinsic suffixes carry overload types. Only recognized memcpy /

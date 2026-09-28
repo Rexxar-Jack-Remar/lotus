@@ -72,15 +72,18 @@ QueryResult QueryEngine::run(const Query &q) const {
     const auto &n = G.node(id);
     std::vector<ID> out;
     if (traps[id]) return out;
-    if (q.memoryObject && n.object && n.object != q.memoryObject) return out;
-    bool blocked = hasEvent(n.events, q.trapEvents);
+    // One constant object is checked everywhere: this is the old lane's
+    // path-wide predicate, not independent pairwise existential overlap.
+    auto effective = q.memoryObject ? G.effectiveEvent(id, *q.memoryObject) :
+                                     EffectiveEvent{n.events, n.certainty};
+    bool blocked = hasEvent(effective.events, q.trapEvents);
     if (!blocked) {
-      ID next = q.automaton.transition ? q.automaton.transition(state, n.events) : state;
+      ID next = q.automaton.transition ? q.automaton.transition(state, effective.events) : state;
       if (next >= q.automaton.states)
         throw std::invalid_argument("UseTraceSSA: automaton transition out of range");
       out.push_back(next);
     }
-    if (n.certainty == Certainty::May &&
+    if (effective.certainty == Certainty::May &&
         std::find(out.begin(), out.end(), state) == out.end()) out.push_back(state);
     return out;
   };
@@ -109,6 +112,7 @@ QueryResult QueryEngine::run(const Query &q) const {
       // product() can reallocate pn: do not retain references into it.
       ProductNode n = pn[i];
       for (auto eid : G.outgoing(n.node)) {
+        ++result.edgesExamined;
         tick();
         const auto &e = G.edge(eid);
         if (!e.enabled || e.objects.empty() || (q.edgeFilter && !q.edgeFilter(e))) continue;
@@ -139,6 +143,7 @@ QueryResult QueryEngine::run(const Query &q) const {
       if (previous != relation.end() &&
           (recipes[previous->second].positive || !r.positive)) return;
       bound(recipes.size(), q.maxSummaryPairs);
+      if (previous == relation.end()) ++result.summaryPairs;
       ID id = asID(recipes.size());
       relation[k] = id; recipes.push_back(r);
       rout[r.from].push_back(id); rin[r.to].push_back(id); queue.push_back(id);
@@ -209,7 +214,6 @@ QueryResult QueryEngine::run(const Query &q) const {
       }
     } catch (const Budget &) { limited = true; }
   }
-  result.summaryPairs = recipes.size();
 
   // Find a path in the quotient. Realizable segments have unmatched returns
   // only before unmatched calls. Balanced summaries can occur in either phase.

@@ -6,6 +6,12 @@
 namespace lotus {
 namespace usetracessa {
 
+struct ObjectPort {
+  FlowNodeID node = InvalidID;
+  ObjectSet objects;
+  Certainty certainty = Certainty::May;
+};
+
 struct ArgumentPorts {
   /// Value ports denote the operand AFTER its use at this call.
   std::vector<FlowNodeID> value;
@@ -13,16 +19,15 @@ struct ArgumentPorts {
   /// NOT the pointer address itself. They can contain multiple alias regions.
   std::vector<FlowNodeID> memoryIn;
   std::vector<FlowNodeID> memoryOut;
-  /// Object-history after-use nodes; separate from byte-content value flow.
-  std::vector<FlowNodeID> resourceUses;
-  Certainty resourceCertainty = Certainty::May;
+  /// Ordinary temporal use ports with authoritative upstream object guards.
+  std::vector<ObjectPort> resourceEffects;
 };
 struct CallPorts {
   std::string callee;
   CallSiteID callSite = NoNativeID;
   std::vector<ArgumentPorts> arguments;
   std::vector<FlowNodeID> returnValue;
-  std::vector<FlowNodeID> allocatedResources;
+  std::vector<ObjectPort> allocationEffects;
 };
 
 /// Explicit, replaceable library semantics. Pointee contents, address values,

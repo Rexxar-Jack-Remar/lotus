@@ -59,7 +59,7 @@ const char *statusName(QueryStatus status) {
 
 std::string findingSite(const FlowNode &node) {
   const std::string &label = node.label;
-  const auto functionEnd = label.find(".resources:");
+  const auto functionEnd = label.find(".temporal:");
   const std::string function = label.substr(0, functionEnd);
   const auto open = label.rfind(" [");
   if (open != std::string::npos) {
@@ -143,7 +143,8 @@ int main(int argc, char **argv) {
         const auto &sink = result.graph.node(witness.back());
         std::string site = findingSite(sink);
         findingGroups[site].push_back(index);
-        if (sink.object) findingObjects[site].insert(*sink.object);
+        const auto &objects = checkReport->findings[index].objects;
+        findingObjects[site].insert(objects.begin(), objects.end());
       }
     }
     if (query) {
@@ -160,9 +161,16 @@ int main(int argc, char **argv) {
     if (Format == "json") result.graph.printJSON(std::cout);
     else if (Format == "dot") result.graph.printDOT(std::cout);
     else {
+      const auto stats = result.graph.statistics();
       std::cout << "svfg_nodes=" << svfg->getNumNodes()
                 << " svfg_edges=" << svfg->getStat().numEdges
-                << " history_nodes=" << result.graph.nodes().size()
+                << " history_nodes=" << stats.historyNodes
+                << " history_psi=" << stats.historyPsiNodes
+                << " history_phi=" << stats.historyPhiNodes
+                << " flow_edges=" << stats.flowEdges
+                << " guarded_effects=" << stats.guardedEffects
+                << " known_object_cardinality=" << stats.knownObjectCardinality
+                << " unknown_object_sets=" << stats.unknownObjectSets
                 << " issues=" << result.graph.issues().size() << '\n';
       if (!Quiet)
         for (const auto &issue : result.graph.issues())
@@ -173,6 +181,18 @@ int main(int argc, char **argv) {
                   << " findings=" << scan.findings.size()
                   << " finding_sites=" << findingGroups.size()
                   << " exhaustive=" << (scan.exhaustive ? "yes" : "no") << '\n';
+        const auto &qs = scan.statistics;
+        std::cout << "batch_products=" << qs.productStates
+                  << " product_edges=" << qs.productEdges
+                  << " edges_examined=" << qs.edgesExamined
+                  << " summary_pairs=" << qs.summaryPairs
+                  << " mask_intersections=" << qs.maskIntersections
+                  << " mask_unions=" << qs.maskUnions
+                  << " nonempty_deltas=" << qs.nonemptyDeltas
+                  << " candidate_objects=" << qs.candidateObjects
+                  << " found_objects=" << qs.foundObjects
+                  << " notfound_objects=" << qs.notFoundObjects
+                  << " unknown_objects=" << qs.unknownObjects << '\n';
         if (!Quiet && !scan.message.empty())
           std::cout << "message: " << scan.message << '\n';
         if (!Quiet)
@@ -183,7 +203,8 @@ int main(int argc, char **argv) {
             for (auto id : scan.findings[group.second.front()].result.nodes) {
               const auto &node = result.graph.node(id);
               std::cout << "witness_node=" << id << " label=" << node.label;
-              if (node.object) std::cout << " object=" << *node.object;
+              auto object = scan.findings[group.second.front()].witnessObject;
+              if (object) std::cout << " object=" << *object;
               std::cout << '\n';
             }
           }
@@ -191,7 +212,10 @@ int main(int argc, char **argv) {
       if (nodeQuery) {
         const auto &answer = *nodeQuery;
         std::cout << "query=" << statusName(answer.status)
-                  << " witness_edges=" << answer.edges.size() << '\n';
+                  << " witness_edges=" << answer.edges.size()
+                  << " product_states=" << answer.productStates
+                  << " edges_examined=" << answer.edgesExamined
+                  << " summary_pairs=" << answer.summaryPairs << '\n';
         if (!Quiet && !answer.message.empty())
           std::cout << "message: " << answer.message << '\n';
         if (!Quiet)

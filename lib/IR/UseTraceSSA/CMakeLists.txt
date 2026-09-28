@@ -2,12 +2,14 @@ add_library(CanaryUseTraceSSACore STATIC
   UseTraceSSA.cpp
   TraceFlowGraph.cpp
   Query.cpp
+  ObjectQuery.cpp
+  TemporalHistory.cpp
   SVFGImporter.cpp
-  ResourceHistory.cpp
   Models.cpp
   DefectDetector.cpp
 )
 set_target_properties(CanaryUseTraceSSACore PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(CanaryUseTraceSSACore PUBLIC LLVMSupport)
 
 # The API reports invalid construction through C++ exceptions. Do not inherit
 # LLVM's optional -fno-exceptions setting in this component or its consumers.

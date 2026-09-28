@@ -1,5 +1,5 @@
 #include "IR/UseTraceSSA/SVFGBridge.h"
-#include "IR/UseTraceSSA/ResourceHistory.h"
+#include "IR/UseTraceSSA/TemporalHistory.h"
 
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/DebugInfoMetadata.h>
@@ -143,13 +143,6 @@ bool resourceEvent(const llvm::Instruction &instruction, NativeHistoryMode mode)
          ((name == "malloc" || name == "calloc") && call->getType()->isPointerTy());
 }
 
-bool hasResourceEvent(const llvm::Function &function, NativeHistoryMode mode) {
-  for (const auto &block : function)
-    for (const auto &instruction : block)
-      if (resourceEvent(instruction, mode)) return true;
-  return false;
-}
-
 Layout makeResourceLayout(const llvm::Function &function, FunctionID id,
                           NativeHistoryMode mode) {
   Layout layout;
@@ -167,14 +160,17 @@ Layout makeResourceLayout(const llvm::Function &function, FunctionID id,
   for (const auto &block : function) {
     BlockID current = layout.blocks.at(&block);
     for (const auto &instruction : block) {
-      if (!resourceEvent(instruction, mode)) continue;
+      if (!resourceEvent(instruction, mode) && !llvm::isa<llvm::CallBase>(instruction)) continue;
       bool dereference = llvm::isa<llvm::LoadInst>(instruction) ||
                          llvm::isa<llvm::StoreInst>(instruction);
       SiteID site = program.addOperation(current,
                            std::string(dereference ? "before " : "after ") +
                            instructionText(instruction));
       if (dereference) layout.before.emplace(&instruction, site);
-      else layout.after.emplace(&instruction, site);
+      else {
+        layout.after.emplace(&instruction, site);
+        layout.returned.emplace(&instruction, site);
+      }
     }
   }
   return layout;
@@ -304,21 +300,21 @@ ObjectSet resourceObjects(const analysis::SVFG &svfg, const llvm::Value *pointer
   return ObjectSet::known(std::move(objects));
 }
 
-void appendResourceFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
+void appendTemporalFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
                          const llvm::Module &module,
                          const std::map<const llvm::Function *, Layout> &layouts,
                          FunctionID firstLayer, NativeHistoryMode mode) {
-  std::map<const llvm::Function *, std::vector<ResourceAccess>> accesses;
-  std::set<ObjectID> universe;
-  bool hasInternalCall = false;
-  auto add = [&](const llvm::Function &function, SiteID site, ObjectSet objects,
-                 Event event, Certainty certainty) {
-    if (objects.isUnknown())
-      result.graph.addIssue("resource points-to set is unknown in " +
-                            function.getName().str());
-    else
-      universe.insert(objects.objects().begin(), objects.objects().end());
-    accesses[&function].push_back({site, std::move(objects), event, certainty});
+  std::map<const llvm::Function *, std::vector<TemporalEffect>> effects;
+  std::map<const llvm::Instruction *, NativeID> provenance;
+  for (const auto &item : svfg) if (const auto *instruction = anchor(*item.second)) {
+    auto it = provenance.emplace(instruction, item.second->getId());
+    if (!it.second) it.first->second = std::min<NativeID>(it.first->second, item.second->getId());
+  }
+  auto add = [&](const llvm::Function &function, const llvm::Instruction &instruction,
+                 SiteID site, ObjectSet objects, Event event) {
+    auto native = provenance.find(&instruction);
+    effects[&function].push_back({site, std::move(objects), event, Certainty::May,
+                                  native == provenance.end() ? NoNativeID : native->second});
   };
   for (const auto &function : module) {
     auto layout = layouts.find(&function);
@@ -326,38 +322,56 @@ void appendResourceFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
     for (const auto &block : function) for (const auto &instruction : block) {
       if (mode != NativeHistoryMode::DoubleFree) {
         if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(&instruction))
-        add(function, layout->second.before.at(load),
-            resourceObjects(svfg, load->getPointerOperand()), Event::Dereference,
-            Certainty::May);
+          add(function, instruction, layout->second.before.at(load),
+              resourceObjects(svfg, load->getPointerOperand()), Event::Dereference);
         if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(&instruction))
-        add(function, layout->second.before.at(store),
-            resourceObjects(svfg, store->getPointerOperand()), Event::Dereference,
-            Certainty::May);
+          add(function, instruction, layout->second.before.at(store),
+              resourceObjects(svfg, store->getPointerOperand()), Event::Dereference);
       }
       const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
-      if (!call) continue;
-      const auto *callee = call->getCalledFunction();
-      if (callee && !callee->isDeclaration()) hasInternalCall = true;
+      const auto *callee = call ? call->getCalledFunction() : nullptr;
       if (!callee) continue;
       auto name = callee->getName();
       if (name == "free" && call->arg_size() >= 1)
-        add(function, layout->second.after.at(call),
-            resourceObjects(svfg, call->getArgOperand(0)), Event::Release,
-            Certainty::May);
+        add(function, instruction, layout->second.after.at(call),
+            resourceObjects(svfg, call->getArgOperand(0)), Event::Release);
       if ((name == "malloc" || name == "calloc") && call->getType()->isPointerTy())
-        add(function, layout->second.after.at(call),
-            resourceObjects(svfg, call), Event::Allocate, Certainty::May);
+        add(function, instruction, layout->second.after.at(call),
+            resourceObjects(svfg, call), Event::Allocate);
     }
   }
-  if (hasInternalCall)
-    result.graph.addIssue("resource histories across internal calls are not spliced");
-  std::vector<ObjectID> allObjects(universe.begin(), universe.end());
-  for (const auto &item : accesses) {
-    const auto &layout = layouts.at(item.first);
-    ResourceHistoryBuilder::append(result.graph, firstLayer++,
-                                   layout.function.name + ".resources",
-                                   layout.function.control, item.second,
-                                   allObjects);
+  std::map<const llvm::Function *, TemporalHistory> histories;
+  for (const auto &item : layouts) {
+    auto history = TemporalHistory::append(result.graph, firstLayer++,
+        item.second.function.name + ".temporal", item.second.function.control, effects[item.first]);
+    // A CFG sink such as unreachable/resume is not a normal return port.
+    // Full layouts also have one explicit synthetic join of normal returns.
+    for (auto exit = history.exits.begin(); exit != history.exits.end();) {
+      bool normal = item.second.function.control.blocks()[exit->first].name == "usetracessa.exit";
+      for (const auto &block : item.second.blocks)
+        if (block.second == exit->first)
+          normal = llvm::isa<llvm::ReturnInst>(block.first->getTerminator());
+      if (normal) ++exit;
+      else exit = history.exits.erase(exit);
+    }
+    histories.emplace(item.first, std::move(history));
+  }
+  for (const auto &item : layouts) {
+    const auto &caller = histories.at(item.first);
+    for (const auto &block : *item.first) for (const auto &instruction : block) {
+      const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+      const auto *callee = call ? call->getCalledFunction() : nullptr;
+      if (!callee || !histories.count(callee)) continue;
+      SiteID site = item.second.returned.at(call);
+      if (!result.graph.layer(caller.id).history.use(caller.sites.at(site), caller.execution))
+        continue; // Unreachable CFG site.
+      if (llvm::isa<llvm::InvokeInst>(call)) {
+        result.graph.addIssue("exceptional temporal call exits require edge-specific modeling");
+        continue;
+      }
+      TemporalHistory::connectCall(result.graph, caller, site,
+          reinterpret_cast<std::uintptr_t>(call), {histories.at(callee)});
+    }
   }
 }
 
@@ -387,7 +401,7 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
     if (function.isDeclaration()) continue;
     if (mode == NativeHistoryMode::Full)
       layouts.emplace(&function, makeLayout(function, nextFunction++));
-    else if (hasResourceEvent(function, mode))
+    else
       layouts.emplace(&function, makeResourceLayout(function, nextFunction++, mode));
   }
   std::map<const llvm::Function *, llvm::DominatorTree> dominators;
@@ -396,7 +410,7 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
       dominators[entry.first].recalculate(*const_cast<llvm::Function *>(entry.first));
   if (mode != NativeHistoryMode::Full) {
     SVFGHistoryResult result;
-    appendResourceFacts(result, svfg, module, layouts, 1, mode);
+    appendTemporalFacts(result, svfg, module, layouts, 1, mode);
     for (const auto &issue : callIssues(module)) result.graph.addIssue(issue);
     return result;
   }
@@ -431,7 +445,7 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
     input.nodes.push_back(std::move(located));
   }
 
-  input.issues = callIssues(module);
+  for (auto issue : callIssues(module)) input.issues.push_back(std::move(issue));
 
   NativeID nextEdge = 1;
   for (const NativeNode *node : nodes) {
@@ -500,7 +514,7 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
   input.functions.push_back(std::move(globals));
   for (const auto &item : layouts) input.functions.push_back(item.second.function);
   auto result = SVFGImporter::build(input);
-  appendResourceFacts(result, svfg, module, layouts, nextFunction, mode);
+  appendTemporalFacts(result, svfg, module, layouts, nextFunction, mode);
   return result;
 }
 

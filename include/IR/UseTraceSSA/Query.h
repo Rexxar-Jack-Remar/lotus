@@ -2,6 +2,7 @@
 #define LOTUS_IR_USETRACESSA_QUERY_H
 
 #include "IR/UseTraceSSA/TraceFlowGraph.h"
+#include <llvm/ADT/BitVector.h>
 
 namespace lotus {
 namespace usetracessa {
@@ -58,10 +59,52 @@ struct QueryResult {
   std::vector<ID> automatonStates;
   bool witnessComplete = true;
   std::size_t productStates = 0;
+  std::size_t edgesExamined = 0;
   std::size_t summaryPairs = 0;
   std::string message;
   /// Found means a witness IN THIS ABSTRACTION, not a proof of concrete feasibility.
   bool found() const { return status == QueryStatus::Found; }
+};
+
+/// Complements exist only inside this finite query universe. Graph ObjectSet
+/// retains its TOP/BOTTOM lattice; in particular TOP minus a finite set is
+/// never written back to the graph.
+using ObjectMask = llvm::BitVector;
+class ObjectUniverse {
+public:
+  explicit ObjectUniverse(std::vector<ObjectID> objects = {});
+  const std::vector<ObjectID> &objects() const { return Objects; }
+  ObjectMask all() const { return ObjectMask(Objects.size(), true); }
+  ObjectMask none() const { return ObjectMask(Objects.size(), false); }
+  ObjectMask mask(const ObjectSet &set) const;
+  std::size_t index(ObjectID object) const;
+private:
+  std::vector<ObjectID> Objects;
+};
+struct ObjectBatchQuery {
+  /// This API explicitly requests same-object semantics. Ordinary run(Query)
+  /// stays generic unless Query::memoryObject is set. A batch must not also
+  /// specify memoryObject; its universe is the only source of object identity.
+  Query query;
+  ObjectUniverse universe;
+};
+struct ObjectBatchStatistics {
+  std::size_t productStates = 0, productEdges = 0, edgesExamined = 0;
+  std::size_t summaryPairs = 0, maskIntersections = 0, maskUnions = 0;
+  std::size_t nonemptyDeltas = 0, candidateObjects = 0;
+  std::size_t foundObjects = 0, notFoundObjects = 0, unknownObjects = 0;
+};
+struct ObjectBatchResult {
+  ObjectUniverse universe;
+  ObjectMask found, notFound, unknown;
+  /// Accepted masks per sink allow one shared scan with lazy witnesses.
+  std::map<FlowNodeID, ObjectMask> foundAt;
+  ObjectBatchStatistics statistics;
+  /// Stronger than unknown.none(): a budget can stop enumeration after every
+  /// object already has one witness, while other accepting sites remain unseen.
+  bool complete = true;
+  std::string message;
+  QueryStatus status(ObjectID object) const;
 };
 
 enum class CoverageStatus { SinkUnreachable, AllPathsTrapped, UntrappedPath, Unknown };
@@ -74,6 +117,7 @@ class QueryEngine {
 public:
   explicit QueryEngine(const TraceFlowGraph &graph) : G(graph) {}
   QueryResult run(const Query &query) const;
+  ObjectBatchResult runObjects(const ObjectBatchQuery &query) const;
   std::vector<QueryResult> runBatch(const std::vector<Query> &queries) const;
   /// Distinguishes vacuous coverage (sink unreachable even without traps).
   CoverageResult allPathsHitTraps(const Query &query) const;

@@ -22,10 +22,16 @@ ID nextID(std::size_t size) {
 
 std::vector<ValueID> uniqueValues(const std::vector<ValueID> &values) {
   std::vector<ValueID> result;
-  std::unordered_set<ValueID> seen;
-  for (ValueID v : values)
-    if (seen.insert(v).second)
-      result.push_back(v);
+  for (ValueID v : values) {
+    bool found = false;
+    for (ValueID r : result) {
+      if (r == v) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) result.push_back(v);
+  }
   return result;
 }
 
@@ -169,9 +175,9 @@ private:
   std::vector<RegionID> RPO;
   std::vector<ID> RPOIndex;
   std::vector<std::vector<RegionID>> DomChildren, Frontier;
-  std::vector<std::set<RegionID>> DefBlocks, LiveSeeds;
-  std::vector<std::map<ValueID, VersionID>> Phis;
-  std::vector<std::map<ValueID, VersionID>> Psis;
+  std::vector<std::vector<RegionID>> DefBlocks, LiveSeeds;
+  std::vector<std::vector<std::pair<ValueID, VersionID>>> Phis;
+  std::vector<std::vector<std::pair<ValueID, VersionID>>> Psis;
   std::vector<SiteID> OriginalDefs;
 
   void expandEdges() {
@@ -307,25 +313,30 @@ private:
     Psis.resize(P.operations().size());
     Phis.resize(G.Regions.size());
     // Region order, not hash iteration order, controls all generated IDs.
+    std::vector<bool> defined(P.values().size(), false);
+    std::vector<ValueID> reset_defined;
     for (RegionID r = 0; r < G.Regions.size(); ++r) {
       if (!G.Regions[r].reachable) continue;
-      std::unordered_set<ValueID> defined;
       for (SiteID s : G.Regions[r].operations) {
         const Operation &op = P.operations()[s];
         for (ValueID v : op.uses) {
-          if (!defined.count(v)) LiveSeeds[v].insert(r);
-          DefBlocks[v].insert(r); // psi defines the next history
-          defined.insert(v);
+          if (!defined[v]) {
+            if (LiveSeeds[v].empty() || LiveSeeds[v].back() != r) LiveSeeds[v].push_back(r);
+          }
+          if (DefBlocks[v].empty() || DefBlocks[v].back() != r) DefBlocks[v].push_back(r);
+          if (!defined[v]) { defined[v] = true; reset_defined.push_back(v); }
         }
         for (ValueID v : op.definitions) {
           if (OriginalDefs[v] != InvalidID)
             throw std::invalid_argument("UseTraceSSA: multiple SSA definitions of " +
                                         P.values()[v]);
           OriginalDefs[v] = s;
-          DefBlocks[v].insert(r);
-          defined.insert(v);
+          if (DefBlocks[v].empty() || DefBlocks[v].back() != r) DefBlocks[v].push_back(r);
+          if (!defined[v]) { defined[v] = true; reset_defined.push_back(v); }
         }
       }
+      for (ValueID v : reset_defined) defined[v] = false;
+      reset_defined.clear();
     }
   }
 
@@ -350,31 +361,51 @@ private:
   }
 
   void placePhis() {
+    std::vector<bool> isDef(G.Regions.size(), false);
+    std::vector<bool> isLive(G.Regions.size(), false);
+    std::vector<bool> isQueued(G.Regions.size(), false);
+    std::vector<bool> hasPhi(G.Regions.size(), false);
+
     for (ValueID v = 0; v < P.values().size(); ++v) {
       // Sparse backward liveness, killed by original definitions and psis.
-      std::unordered_set<RegionID> live(LiveSeeds[v].begin(), LiveSeeds[v].end());
-      std::vector<RegionID> work(LiveSeeds[v].begin(), LiveSeeds[v].end());
-      for (std::size_t i = 0; i < work.size(); ++i)
-        for (RegionID pred : G.Regions[work[i]].predecessors)
-          if (G.Regions[pred].reachable && !DefBlocks[v].count(pred) &&
-              live.insert(pred).second)
-            work.push_back(pred);
-      work.assign(DefBlocks[v].begin(), DefBlocks[v].end());
-      std::unordered_set<RegionID> queued(work.begin(), work.end());
-      for (std::size_t i = 0; i < work.size(); ++i)
-        for (RegionID join : Frontier[work[i]]) {
-          if (!live.count(join) || Phis[join].count(v)) continue;
+      for (RegionID r : DefBlocks[v]) isDef[r] = true;
+      for (RegionID r : LiveSeeds[v]) isLive[r] = true;
+
+      std::vector<RegionID> liveWork = LiveSeeds[v];
+      for (std::size_t i = 0; i < liveWork.size(); ++i) {
+        for (RegionID pred : G.Regions[liveWork[i]].predecessors)
+          if (G.Regions[pred].reachable && !isDef[pred] && !isLive[pred]) {
+            isLive[pred] = true;
+            liveWork.push_back(pred);
+          }
+      }
+
+      std::vector<RegionID> phiWork = DefBlocks[v];
+      for (RegionID r : phiWork) isQueued[r] = true;
+
+      for (std::size_t i = 0; i < phiWork.size(); ++i) {
+        for (RegionID join : Frontier[phiWork[i]]) {
+          if (!isLive[join] || hasPhi[join]) continue;
+          hasPhi[join] = true;
           VersionID phi = G.addNode(NodeKind::Phi, v, join, InvalidID);
-          Phis[join][v] = phi;
-          if (queued.insert(join).second) work.push_back(join);
+          Phis[join].push_back({v, phi});
+          if (!isQueued[join]) {
+            isQueued[join] = true;
+            phiWork.push_back(join);
+          }
         }
+      }
+
+      for (RegionID r : DefBlocks[v]) isDef[r] = false;
+      for (RegionID r : liveWork) isLive[r] = false;
+      for (RegionID r : phiWork) { isQueued[r] = false; hasPhi[r] = false; }
     }
     // Preallocate psis; renaming fills operands, including backedge operands.
     for (RegionID r = 0; r < G.Regions.size(); ++r)
       if (G.Regions[r].reachable)
         for (SiteID s : G.Regions[r].operations)
           for (ValueID v : P.operations()[s].uses)
-            Psis[s][v] = G.addNode(NodeKind::Psi, v, r, s);
+            Psis[s].push_back({v, G.addNode(NodeKind::Psi, v, r, s)});
   }
 
   void rename() {
@@ -402,7 +433,13 @@ private:
           for (ValueID v : op.uses) {
             if (versions[v].empty())
               throw std::logic_error("UseTraceSSA: missing history during renaming");
-            VersionID before = versions[v].back(), after = Psis[s].at(v);
+            VersionID before = versions[v].back(), after = InvalidID;
+            for (const auto &p : Psis[s]) {
+              if (p.first == v) {
+                after = p.second;
+                break;
+              }
+            }
             G.Nodes[after].incoming.push_back({before, InvalidID});
             G.Uses[s].push_back({s, v, before, after});
             push(v, after);

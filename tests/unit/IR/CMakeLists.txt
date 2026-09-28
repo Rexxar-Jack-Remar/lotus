@@ -19,3 +19,11 @@ add_lotus_collected_test_suite(ir_tests
     CanaryOptimizationIPO
     SVFG
     ${Z3_LIBRARIES})
+
+# No IR-specific helper exists in this checkout; keep this target's link set small.
+add_lotus_targeted_test(usetracessa_objects_test UseTraceSSA/FactorizedTest.cpp
+  LINK_LIBS CanaryUseTraceSSACore)
+add_lotus_targeted_test(usetracessa_scaling_test UseTraceSSA/ScalingTest.cpp
+  LINK_LIBS CanaryUseTraceSSACore)
+add_lotus_targeted_test(usetracessa_native_test UseTraceSSA/NativeFactorizedTest.cpp
+  LINK_LIBS CanaryUseTraceSSASVFG)

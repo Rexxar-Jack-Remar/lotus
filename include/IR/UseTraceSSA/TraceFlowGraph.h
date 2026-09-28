@@ -50,6 +50,18 @@ inline bool hasEvent(Event value, Event mask) {
 }
 
 enum class Certainty { Must, May };
+/// Separate records are intentional: certainty is combined only after selecting
+/// one object (or partitioning a finite query universe).
+struct GuardedEventEffect {
+  Event events = Event::None;
+  ObjectSet objects = ObjectSet::unknown();
+  Certainty certainty = Certainty::Must;
+};
+struct EffectiveEvent {
+  Event events = Event::None;
+  Certainty certainty = Certainty::Must;
+};
+constexpr ObjectID UnknownResource = std::numeric_limits<ObjectID>::max();
 enum class FlowKind { History, Direct, Memory, Call, Return, Summary,
                       Dependence, Thread };
 
@@ -61,8 +73,7 @@ struct FlowNode {
   NativeID native = NoNativeID;
   Event events = Event::None;
   Certainty certainty = Certainty::Must;
-  /// Present ONLY for an object-history lane, not arbitrary memory value flow.
-  std::optional<ObjectID> object;
+  std::vector<GuardedEventEffect> effects;
 };
 
 struct FlowEdge {
@@ -86,6 +97,12 @@ struct HistoryLayer {
   std::vector<FlowNodeID> versions;
 };
 
+struct FlowStatistics {
+  std::size_t historyNodes = 0, historyPsiNodes = 0, historyPhiNodes = 0;
+  std::size_t flowEdges = 0, guardedEffects = 0;
+  std::size_t knownObjectCardinality = 0, unknownObjectSets = 0;
+};
+
 /// Non-mutating overlay: history edges encode temporal uses; imported SVFG
 /// edges encode value transfer. Keep them typed: this is NOT a transitive
 /// closure of may-alias, nor a new pointer analysis.
@@ -93,7 +110,7 @@ class TraceFlowGraph {
 public:
   FlowNodeID addNode(FlowNode node);
   FlowEdgeID addEdge(FlowEdge edge);
-  /// One layer per FunctionID. Object lanes may use distinct layer IDs.
+  /// One layer per channel family; no layer or value encodes object identity.
   void addHistory(FunctionID function, std::string name, Graph history);
   FlowNodeID version(FunctionID function, VersionID version) const;
   FlowNodeID definition(FunctionID function, ValueID value) const;
@@ -101,7 +118,13 @@ public:
   FlowNodeID after(FunctionID function, SiteID site, ValueID value) const;
   const HistoryLayer &layer(FunctionID function) const;
   void annotate(FlowNodeID id, Event events, Certainty certainty = Certainty::Must);
-  void setObject(FlowNodeID id, ObjectID object);
+  void annotate(FlowNodeID id, Event events, ObjectSet objects,
+                Certainty certainty = Certainty::Must);
+  EffectiveEvent effectiveEvent(FlowNodeID id, ObjectID object) const;
+  /// Includes the sentinel only for unknown guarded effects, not ordinary TOP
+  /// history edges. TOP alone never makes the graph incomplete.
+  std::vector<ObjectID> resourceCandidates() const;
+  FlowStatistics statistics() const;
   void setNative(FlowNodeID id, NativeID native);
   void disableEdge(FlowEdgeID id);
   void addIssue(std::string issue);

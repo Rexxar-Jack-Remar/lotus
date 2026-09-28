@@ -66,6 +66,7 @@ struct FunctionLayout {
   /// block or a CFG edge. Give distinct semantic phases distinct sites.
   Program control;
 };
+using LocatedEventEffect = GuardedEventEffect;
 struct LocatedSVFGNode {
   NativeID id = NoNativeID;
   FunctionID function = InvalidID;
@@ -74,6 +75,8 @@ struct LocatedSVFGNode {
   std::string label;
   Event definitionEvents = Event::None;
   Certainty certainty = Certainty::Must;
+  /// Authoritative allocation/resource facts, independent of adjacent edges.
+  std::vector<LocatedEventEffect> definitionEffects;
 };
 struct LocatedSVFGEdge {
   NativeID id = NoNativeID, from = NoNativeID, to = NoNativeID;
@@ -90,6 +93,8 @@ struct LocatedSVFGEdge {
   Event useEvents = Event::None;
   Certainty certainty = Certainty::Must;
   std::string guard;
+  /// Ordinary useEvents remain generic. Resource uses carry their own guards.
+  std::vector<LocatedEventEffect> useEffects;
 };
 struct SVFGConstructionInput {
   std::vector<FunctionLayout> functions;

@@ -14,7 +14,7 @@ enum class NativeHistoryMode { Full, DoubleFree, UseAfterFree };
 
 /// Construct ordered histories from this revision's SVFG and the LLVM CFG.
 /// Sites are derived from instructions, memory phases, CFG edges and function
-/// boundaries. Resource histories are populated for malloc/calloc, free and
+/// boundaries. Shared temporal effects are populated for malloc/calloc, free and
 /// loads/stores using SVFG object IDs. Unsupported or ambiguous facts are
 /// recorded as issues, so negative queries remain Unknown.
 SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,

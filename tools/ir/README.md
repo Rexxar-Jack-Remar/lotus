@@ -31,7 +31,7 @@ build/bin/lotus-ir-usetracessa test.bc --check=use-after-free
 ```
 
 The tool builds ICFG and AserPTA-backed SVFG with MemorySSA, then derives
-UseTraceSSA and object histories. `--dump-svfg=path.dot` saves the source SVFG.
+UseTraceSSA with shared temporal histories and guarded object effects. `--dump-svfg=path.dot` saves the source SVFG.
 The resource checks use `malloc`/`calloc`, `free`, and load/store events.
 `Found` is a potential witness in the abstraction; incomplete external models
 or cross-function resource effects prevent a negative safety conclusion.

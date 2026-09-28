@@ -107,7 +107,7 @@ SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
       if (site == InvalidID || site >= functions.at(to.function)->control.operations().size())
         throw std::invalid_argument("UseTraceSSA: local transfer has no consumer site");
       consumers[e.id] = site;
-    } else if (e.useEvents != Event::None) {
+    } else if (e.useEvents != Event::None || !e.useEffects.empty()) {
       throw std::invalid_argument("UseTraceSSA: boundary edge cannot invent a local use event");
     }
   }
@@ -117,7 +117,8 @@ SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
     for (const auto &b : f.control.blocks()) p.addBlock(b.name);
     if (!f.control.blocks().empty()) p.setEntry(f.control.entry());
     for (const auto &e : f.control.edges()) p.addEdge(e.from, e.to, e.label);
-    std::map<SiteID, std::vector<ValueID>> definitions, uses;
+    std::vector<std::vector<ValueID>> definitions(f.control.operations().size());
+    std::vector<std::vector<ValueID>> uses(f.control.operations().size());
     std::vector<ValueID> entry;
     for (const auto &np : nodes) {
       const auto &n = *np.second;
@@ -157,6 +158,8 @@ SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
     out.graph.setNative(port.resolve(out.graph), n.id);
     if (n.definitionEvents != Event::None)
       out.graph.annotate(port.resolve(out.graph), n.definitionEvents, n.certainty);
+    for (const auto &effect : n.definitionEffects)
+      out.graph.annotate(port.resolve(out.graph), effect.events, effect.objects, effect.certainty);
   }
   for (const auto &e : in.edges) {
     if (!reachable.count(e.from) || !reachable.count(e.to)) continue;
@@ -172,6 +175,9 @@ SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
       edge.consumption = Port::afterUse(function, site, value);
       if (e.useEvents != Event::None)
         out.graph.annotate(edge.consumption->resolve(out.graph), e.useEvents, e.certainty);
+      for (const auto &effect : e.useEffects)
+        out.graph.annotate(edge.consumption->resolve(out.graph), effect.events,
+                           effect.objects, effect.certainty);
     }
     snapshot.edges.push_back(std::move(edge));
   }
