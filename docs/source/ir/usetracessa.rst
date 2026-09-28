@@ -28,8 +28,8 @@ SVFG, then exports JSON/DOT, runs a structural query between SVFG node IDs, or
 checks possible double-free and use-after-free using object IDs and resource
 histories. Ambiguous native locations are reported as graph issues.
 
-``DefectDetector`` is the C++ interface for double-free, use-after-free, taint,
-Heartbleed-style and unchecked-use rules. The command-line tool automatically
+``DefectDetector`` is the C++ interface for double-free, use-after-free, taint
+and unchecked-use rules. The command-line tool automatically
 supplies release and dereference facts for its two resource checks. Taint
 sources/sinks, sanitizers and full external-call semantics require client
 models. A ``Found`` result means a potential witness in the SVFG abstraction;

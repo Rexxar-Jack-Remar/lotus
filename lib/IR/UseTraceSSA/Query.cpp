@@ -145,31 +145,66 @@ QueryResult QueryEngine::run(const Query &q) const {
     };
     try {
       for (ID i = 0; i < pn.size(); ++i) insert({i, i, RecipeKind::Epsilon});
+      auto callSiteOf = [&](ID edgeId) { return G.edge(pe[edgeId].original).callSite; };
       for (ID i = 0; i < pe.size(); ++i) {
         const auto &e = pe[i]; auto kind = G.edge(e.original).kind;
         if (kind == FlowKind::Call) callsIn[e.to].push_back(i);
         else if (kind == FlowKind::Return) returnsOut[e.from].push_back(i);
         else insert({e.from, e.to, RecipeKind::Edge, i, InvalidID, InvalidID, true});
       }
+      for (auto &edges : callsIn) {
+        std::sort(edges.begin(), edges.end(), [&](ID a, ID b) {
+          return callSiteOf(a) < callSiteOf(b);
+        });
+      }
+      for (auto &edges : returnsOut) {
+        std::sort(edges.begin(), edges.end(), [&](ID a, ID b) {
+          return callSiteOf(a) < callSiteOf(b);
+        });
+      }
       while (!queue.empty()) {
         ID rid = queue.front(); queue.pop_front();
         Recipe r = recipes[rid];
-        // Copy adjacency lists: insert() may append and reallocate them.
-        auto preds = rin[r.from], succs = rout[r.to];
-        for (auto l : preds) {
+        // Process current predecessors and successors without copying the vectors.
+        // insert() may append to these vectors, but we only iterate up to their original size.
+        std::size_t num_preds = rin[r.from].size();
+        for (std::size_t i = 0; i < num_preds; ++i) {
+          auto l = rin[r.from][i];
           tick(); Recipe a = recipes[l];
           insert({a.from, r.to, RecipeKind::Concat, l, rid, InvalidID,
                   a.positive || r.positive});
         }
-        for (auto h : succs) {
+        std::size_t num_succs = rout[r.to].size();
+        for (std::size_t i = 0; i < num_succs; ++i) {
+          auto h = rout[r.to][i];
           tick(); Recipe b = recipes[h];
           insert({r.from, b.to, RecipeKind::Concat, rid, h, InvalidID,
                   r.positive || b.positive});
         }
-        for (auto c : callsIn[r.from]) for (auto ret : returnsOut[r.to]) {
-          tick();
-          if (G.edge(pe[c].original).callSite == G.edge(pe[ret].original).callSite)
-            insert({pe[c].from, pe[ret].to, RecipeKind::Match, c, ret, rid, true});
+        const auto &cIn = callsIn[r.from];
+        const auto &rOut = returnsOut[r.to];
+        std::size_t c_idx = 0, r_idx = 0;
+        while (c_idx < cIn.size() && r_idx < rOut.size()) {
+          auto siteC = callSiteOf(cIn[c_idx]);
+          auto siteR = callSiteOf(rOut[r_idx]);
+          if (siteC < siteR) {
+            ++c_idx;
+          } else if (siteR < siteC) {
+            ++r_idx;
+          } else {
+            std::size_t c_end = c_idx + 1;
+            while (c_end < cIn.size() && callSiteOf(cIn[c_end]) == siteC) ++c_end;
+            std::size_t r_end = r_idx + 1;
+            while (r_end < rOut.size() && callSiteOf(rOut[r_end]) == siteR) ++r_end;
+            for (std::size_t cx = c_idx; cx < c_end; ++cx) {
+              for (std::size_t rx = r_idx; rx < r_end; ++rx) {
+                tick();
+                insert({pe[cIn[cx]].from, pe[rOut[rx]].to, RecipeKind::Match, cIn[cx], rOut[rx], rid, true});
+              }
+            }
+            c_idx = c_end;
+            r_idx = r_end;
+          }
         }
       }
     } catch (const Budget &) { limited = true; }

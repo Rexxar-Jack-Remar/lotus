@@ -1,9 +1,7 @@
 #include "IR/UseTraceSSA/DefectDetector.h"
 #include "IR/UseTraceSSA/Models.h"
-#include "IR/UseTraceSSA/ReachabilityIndex.h"
 #include "IR/UseTraceSSA/ResourceHistory.h"
-#include "IR/UseTraceSSA/SVFGAdapter.h"
-#include "IR/UseTraceSSA/SVFGHistoryBuilder.h"
+#include "IR/UseTraceSSA/SVFGImporter.h"
 #include <algorithm>
 #include <functional>
 #include <iostream>
@@ -105,7 +103,7 @@ struct ImportFixture {
   }
 };
 void svfgOrdering() {
-  ImportFixture f; auto imported=SVFGAdapter::append(f.g,f.snapshot);
+  ImportFixture f; auto imported=SVFGImporter::append(f.g,f.snapshot);
   CHECK(imported.nodes.at(100)==f.g.definition(0,f.x));
   auto q=query(f.g.definition(0,f.x),f.g.definition(0,f.y));
   CHECK(QueryEngine(f.g).run(q).found());
@@ -118,14 +116,14 @@ void svfgOrdering() {
 void invalidImport() {
   ImportFixture f; auto size=f.g.edges().size();
   f.snapshot.edges[0].consumption.reset();
-  throws([&]{SVFGAdapter::append(f.g,f.snapshot);}); CHECK(f.g.edges().size()==size);
+  throws([&]{SVFGImporter::append(f.g,f.snapshot);}); CHECK(f.g.edges().size()==size);
   f.snapshot.edges[0].consumption=Port::definition(0,f.x);
-  throws([&]{SVFGAdapter::append(f.g,f.snapshot);}); CHECK(f.g.edges().size()==size);
+  throws([&]{SVFGImporter::append(f.g,f.snapshot);}); CHECK(f.g.edges().size()==size);
   f.snapshot.edges[0].consumption=Port::afterUse(0,f.consume,f.x);
   f.snapshot.edges[0].from=200;
-  throws([&]{SVFGAdapter::append(f.g,f.snapshot);}); CHECK(f.g.edges().size()==size);
+  throws([&]{SVFGImporter::append(f.g,f.snapshot);}); CHECK(f.g.edges().size()==size);
   f.snapshot.edges[0].from=100; f.snapshot.nodes.push_back(f.snapshot.nodes[0]);
-  throws([&]{SVFGAdapter::append(f.g,f.snapshot);}); CHECK(f.g.edges().size()==size);
+  throws([&]{SVFGImporter::append(f.g,f.snapshot);}); CHECK(f.g.edges().size()==size);
 }
 void nativeContract() {
   struct NativeEdge { SVFGEdgeRecord record; };
@@ -137,7 +135,7 @@ void nativeContract() {
   ImportFixture f; NativeEdge e{f.snapshot.edges[0]};
   NativeNode a{f.snapshot.nodes[0],{&e}},b{f.snapshot.nodes[1],{}};
   std::map<NativeID,NativeNode*> native={{100,&a},{200,&b}};
-  auto r=SVFGAdapter::appendNative(f.g,native,
+  auto r=SVFGImporter::appendNative(f.g,native,
       [](const NativeNode &n){return n.record;},[](const NativeEdge &e){return e.record;});
   CHECK(r.nodes.size()==2); CHECK(r.edges.size()==1);
   CHECK(f.g.edge(r.edges.at(900)).native==900);
@@ -307,31 +305,12 @@ void threads() {
   q.includeThreadEdges=true;CHECK(QueryEngine(g).run(q).found());
 }
 void orderedEvents() {
-  TraceFlowGraph g;auto a=node(g,"source"),b=node(g,"length",Event::CopyLength),
-    c=node(g,"send",Event::NetworkWrite);edge(g,a,b);edge(g,b,c);
-  auto q=query(a,c);q.automaton=Automaton::ordered({Event::CopyLength,Event::NetworkWrite});
+  TraceFlowGraph g;auto a=node(g,"source"),b=node(g,"alloc",Event::Allocate),
+    c=node(g,"release",Event::Release);edge(g,a,b);edge(g,b,c);
+  auto q=query(a,c);q.automaton=Automaton::ordered({Event::Allocate,Event::Release});
   CHECK(QueryEngine(g).run(q).found());
-  q.automaton=Automaton::ordered({Event::NetworkWrite,Event::CopyLength});
+  q.automaton=Automaton::ordered({Event::Release,Event::Allocate});
   CHECK(QueryEngine(g).run(q).status==QueryStatus::NotFound);
-}
-void libraryHeartbleed() {
-  TraceFlowGraph g;auto net=node(g,"read buffer contents"),len=node(g,"parsed length"),
-    lengthUse=node(g,"memcpy length"),src=node(g,"memcpy source contents"),
-    dst=node(g,"copied buffer contents"),send=node(g,"send buffer contents");
-  edge(g,net,len,FlowKind::Memory);edge(g,len,lengthUse,FlowKind::History);
-  edge(g,net,src,FlowKind::Memory);edge(g,dst,send,FlowKind::Memory);
-  LibraryModels models;
-  CallPorts read;read.callee="read";read.arguments.resize(3);read.arguments[1].memoryOut={net};
-  models.apply(g,read);
-  CallPorts copy;copy.callee="memcpy";copy.arguments.resize(3);
-  copy.arguments[0].memoryOut={dst};copy.arguments[1].memoryIn={src};copy.arguments[2].value={lengthUse};
-  models.apply(g,copy);
-  CallPorts write;write.callee="send";write.arguments.resize(3);write.arguments[1].memoryIn={send};
-  models.apply(g,write);
-  CHECK(g.complete());auto q=queries::heartbleed(g);auto r=QueryEngine(g).run(q);
-  CHECK(r.found()); CHECK(std::find(r.nodes.begin(),r.nodes.end(),lengthUse)!=r.nodes.end());
-  g.annotate(lengthUse,Event::Sanitize);CHECK(QueryEngine(g).run(q).status==QueryStatus::NotFound);
-  CHECK(QueryEngine(g).run(queries::taint(g)).found()); // independent byte-content path remains
 }
 void noAddressTaint() {
   TraceFlowGraph g;auto addr=node(g,"buffer address"),out=node(g,"contents after read");
@@ -434,7 +413,7 @@ void autoBuilder() {
                {12,0,use,"copy result",Event::Sink,Certainty::Must}};
   LocatedSVFGEdge e;e.id=1;e.from=10;e.to=11;e.useEvents=Event::Sanitize;
   LocatedSVFGEdge e2;e2.id=2;e2.from=10;e2.to=12;e2.objects=ObjectSet::known({41});
-  input.edges={e,e2};auto r=SVFGHistoryBuilder::build(input);
+  input.edges={e,e2};auto r=SVFGImporter::build(input);
   CHECK(r.graph.verify());CHECK(r.native.nodes.size()==3);CHECK(r.native.edges.size()==2);
   auto q=queries::taint(r.graph);CHECK(QueryEngine(r.graph).run(q).status==QueryStatus::NotFound);
   q.trapEvents=Event::None;CHECK(QueryEngine(r.graph).run(q).found());
@@ -458,10 +437,10 @@ void autoMemoryPhi() {
   LocatedSVFGEdge e;e.id=1;e.from=10;e.to=12;e.consumerSite=lu;e.kind=FlowKind::Memory;
   auto e2=e;e2.id=2;e2.from=11;e2.consumerSite=ru;
   auto e3=e;e3.id=3;e3.from=12;e3.to=13;e3.consumerSite=load;
-  in.edges={e,e2,e3};auto r=SVFGHistoryBuilder::build(in);
+  in.edges={e,e2,e3};auto r=SVFGImporter::build(in);
   CHECK(QueryEngine(r.graph).run(queries::taint(r.graph)).found());
   CHECK(!QueryEngine(r.graph).run(query(r.native.nodes.at(10),r.native.nodes.at(11))).found());
-  in.edges[0].consumerSite=phi;throws([&]{SVFGHistoryBuilder::build(in);});
+  in.edges[0].consumerSite=phi;throws([&]{SVFGImporter::build(in);});
 }
 void autoCall() {
   FunctionLayout caller;caller.id=0;caller.name="caller";
@@ -478,17 +457,9 @@ void autoCall() {
   call.callSite=88;call.boundary=true;
   LocatedSVFGEdge local;local.id=2;local.from=3;local.to=4;
   auto back=call;back.id=3;back.from=4;back.to=2;back.kind=FlowKind::Return;
-  in.edges={call,local,back};auto h=SVFGHistoryBuilder::build(in);
+  in.edges={call,local,back};auto h=SVFGImporter::build(in);
   auto q=queries::taint(h.graph);q.context=ContextMode::Balanced;
   witness(h.graph,QueryEngine(h.graph).run(q),q.context);
-}
-void reachabilityIndex() {
-  TraceFlowGraph g;auto a=node(g,"a"),b=node(g,"b"),c=node(g,"c");
-  edge(g,a,b);edge(g,b,a);edge(g,b,c);ReachabilityIndex index(g);
-  CHECK(index.components()==2);CHECK(index.mayReach(a,c));CHECK(index.mayReach(b,c));
-  CHECK(index.cachedSources()==1);CHECK(!index.mayReach(c,a));
-  CHECK(index.mayReachAny({c,b},{a}));index.clearCache();CHECK(index.cachedSources()==0);
-  g.annotate(a,Event::Source);throws([&]{index.mayReach(a,c);});
 }
 void defectDetector() {
   TraceFlowGraph graph;
@@ -567,13 +538,13 @@ int main(int argc,char **argv){
     {"use-after-free",useAfterFree},{"unallocated-resource",unallocatedResource},{"matching-calls",matchingCalls},{"realizable-segments",realizableSegments},
     {"nested-calls",nestedCalls},{"balanced-cycle",balancedCycle},{"recursion",recursion},
     {"resource-call",resourceCall},{"callee-trap",calleeTrap},{"limits",limits},{"threads",threads},
-    {"ordered-events",orderedEvents},{"library-heartbleed",libraryHeartbleed},
+    {"ordered-events",orderedEvents},
     {"no-address-taint",noAddressTaint},{"unknown-library",unknownLibrary},{"missing-memory-ports",missingMemoryPorts},
     {"custom-model",customModel},{"no-memset-kill",noMemsetKill},{"slices",slices},
     {"serialization",serialization},{"invalid-queries",invalidQueries},{"multi-source",multiSource},
     {"random-dyck",randomDyck},{"auto-builder",autoBuilder},
     {"auto-memory-phi",autoMemoryPhi},{"auto-call",autoCall},
-    {"reachability-index",reachabilityIndex},{"defect-detector",defectDetector}};
+    {"defect-detector",defectDetector}};
   try{
     if(argc==2){auto it=tests.find(argv[1]);if(it==tests.end())throw std::runtime_error("unknown test");it->second();}
     else for(const auto &t:tests)t.second();

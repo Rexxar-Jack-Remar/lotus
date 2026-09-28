@@ -2,12 +2,10 @@ add_library(CanaryUseTraceSSACore STATIC
   UseTraceSSA.cpp
   TraceFlowGraph.cpp
   Query.cpp
-  SVFGAdapter.cpp
-  SVFGHistoryBuilder.cpp
+  SVFGImporter.cpp
   ResourceHistory.cpp
   Models.cpp
   DefectDetector.cpp
-  ReachabilityIndex.cpp
 )
 set_target_properties(CanaryUseTraceSSACore PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -17,11 +15,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(CanaryUseTraceSSACore PUBLIC -fexceptions)
 endif()
 
-add_library(CanaryUseTraceSSA STATIC LLVMHistory.cpp LLVMFlow.cpp HistoryPass.cpp)
+add_library(CanaryUseTraceSSA STATIC LLVMImporter.cpp)
 target_link_libraries(CanaryUseTraceSSA PUBLIC CanaryUseTraceSSACore LLVMCore LLVMAnalysis LLVMSupport)
 set_target_properties(CanaryUseTraceSSA PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-add_library(CanaryUseTraceSSASVFG STATIC LotusSVFG.cpp)
+add_library(CanaryUseTraceSSASVFG STATIC SVFGBridge.cpp)
 target_link_libraries(CanaryUseTraceSSASVFG PUBLIC CanaryUseTraceSSA SVFG)
 
 if(LOTUS_BUILD_TESTS)
@@ -47,9 +45,9 @@ if(LOTUS_BUILD_TESTS)
       native-contract paper-resources no-alias-union unknown-alias loop-reset
       loop-double-free use-after-free unallocated-resource matching-calls realizable-segments nested-calls
       balanced-cycle recursion resource-call callee-trap limits threads ordered-events
-      library-heartbleed no-address-taint unknown-library missing-memory-ports
+      no-address-taint unknown-library missing-memory-ports
       custom-model no-memset-kill slices serialization invalid-queries multi-source
-      random-dyck auto-builder auto-memory-phi auto-call reachability-index defect-detector)
+      random-dyck auto-builder auto-memory-phi auto-call defect-detector)
     add_test(NAME UseTraceSSA.Flow.${_case} COMMAND lotus-usetracessa-flow-test ${_case})
   endforeach()
 endif()

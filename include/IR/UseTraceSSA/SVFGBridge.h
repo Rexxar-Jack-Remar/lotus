@@ -1,8 +1,8 @@
-#ifndef LOTUS_IR_USETRACESSA_LOTUSSVFG_H
-#define LOTUS_IR_USETRACESSA_LOTUSSVFG_H
+#ifndef LOTUS_IR_USETRACESSA_SVFGBRIDGE_H
+#define LOTUS_IR_USETRACESSA_SVFGBRIDGE_H
 
 #include "IR/SVFG/SVFG.h"
-#include "IR/UseTraceSSA/SVFGHistoryBuilder.h"
+#include "IR/UseTraceSSA/SVFGImporter.h"
 
 #include <cstdint>
 #include <utility>
@@ -71,7 +71,7 @@ SVFGHistoryResult buildUseTraceSSAFromSVFG(const analysis::SVFG &svfg,
     for (const analysis::SVFGEdge *edge : node.getOutEdges())
       input.edges.push_back(edgeMapper(*edge));
   }
-  return SVFGHistoryBuilder::build(input);
+  return SVFGImporter::build(input);
 }
 
 } // namespace usetracessa

@@ -10,7 +10,6 @@ enum class DefectKind {
   DoubleFree,
   UseAfterFree,
   Taint,
-  Heartbleed,
   UncheckedUse
 };
 

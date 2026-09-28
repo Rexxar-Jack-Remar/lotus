@@ -1,10 +1,85 @@
-#include "IR/UseTraceSSA/SVFGHistoryBuilder.h"
+#include "IR/UseTraceSSA/SVFGImporter.h"
+#include <algorithm>
 #include <set>
 #include <stdexcept>
 
 namespace lotus {
 namespace usetracessa {
-SVFGHistoryResult SVFGHistoryBuilder::build(const SVFGConstructionInput &in) {
+
+// ---------------------------------------------------------------------------
+// Port resolution
+// ---------------------------------------------------------------------------
+
+Port Port::definition(FunctionID f, ValueID v) {
+  Port p; p.function = f; p.value = v; return p;
+}
+Port Port::afterUse(FunctionID f, SiteID s, ValueID v) {
+  Port p; p.kind = PortKind::AfterUse; p.function = f; p.site = s; p.value = v; return p;
+}
+Port Port::flowNode(FlowNodeID id) {
+  Port p; p.kind = PortKind::FlowNode; p.node = id; return p;
+}
+FlowNodeID Port::resolve(const TraceFlowGraph &g) const {
+  switch (kind) {
+  case PortKind::Definition: return g.definition(function, value);
+  case PortKind::BeforeUse: return g.before(function, site, value);
+  case PortKind::AfterUse: return g.after(function, site, value);
+  case PortKind::Version: return g.version(function, version);
+  case PortKind::FlowNode: g.node(node); return node;
+  }
+  throw std::invalid_argument("UseTraceSSA: invalid port kind");
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot import (formerly SVFGAdapter::append)
+// ---------------------------------------------------------------------------
+
+SVFGImportResult SVFGImporter::append(TraceFlowGraph &graph, const SVFGSnapshot &view) {
+  SVFGImportResult result;
+  std::map<NativeID, Port> outputs;
+  for (const auto &n : view.nodes) {
+    if (n.id == NoNativeID || !outputs.emplace(n.id, n.output).second)
+      throw std::invalid_argument("UseTraceSSA: duplicate/invalid SVFG node ID");
+    result.nodes.emplace(n.id, n.output.resolve(graph));
+  }
+  std::map<NativeID, FlowEdge> pending;
+  for (const auto &e : view.edges) {
+    if (e.id == NoNativeID || pending.count(e.id))
+      throw std::invalid_argument("UseTraceSSA: duplicate/invalid SVFG edge ID");
+    if (!result.nodes.count(e.from) || !result.nodes.count(e.to))
+      throw std::invalid_argument("UseTraceSSA: SVFG edge references an unmapped node");
+    FlowNodeID from = result.nodes.at(e.from), to = result.nodes.at(e.to);
+    if (e.consumption) {
+      const Port &use = *e.consumption;
+      if (use.kind != PortKind::AfterUse)
+        throw std::invalid_argument("UseTraceSSA: a consumer must bind an AFTER-use port");
+      from = use.resolve(graph);
+      auto def = graph.definition(use.function, use.value);
+      const Port &origin = outputs.at(e.from);
+      if (origin.resolve(graph) != def)
+        throw std::invalid_argument("UseTraceSSA: consumer uses a different source channel");
+    } else if (!e.sourceIsBoundary) {
+      throw std::invalid_argument("UseTraceSSA: missing consumer binding; raw def-use bypass forbidden");
+    }
+    if ((e.kind == FlowKind::Call || e.kind == FlowKind::Return) &&
+        e.callSite == NoNativeID)
+      throw std::invalid_argument("UseTraceSSA: missing SVFG call-site context");
+    FlowEdge edge;
+    edge.from = from; edge.to = to; edge.kind = e.kind; edge.callSite = e.callSite;
+    edge.objects = e.objects; edge.native = e.id; edge.nativeKind = e.nativeKind;
+    edge.guard = e.guard;
+    pending.emplace(e.id, std::move(edge));
+  }
+  for (const auto &p : pending) result.edges.emplace(p.first, graph.addEdge(p.second));
+  for (const auto &issue : view.issues) graph.addIssue(issue);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Full history construction (formerly SVFGHistoryBuilder::build)
+// ---------------------------------------------------------------------------
+
+SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
   SVFGHistoryResult out;
   std::map<FunctionID, const FunctionLayout *> functions;
   std::map<NativeID, const LocatedSVFGNode *> nodes;
@@ -101,7 +176,7 @@ SVFGHistoryResult SVFGHistoryBuilder::build(const SVFGConstructionInput &in) {
     snapshot.edges.push_back(std::move(edge));
   }
   snapshot.issues = in.issues;
-  out.native = SVFGAdapter::append(out.graph, snapshot);
+  out.native = SVFGImporter::append(out.graph, snapshot);
   return out;
 }
 } // namespace usetracessa

@@ -1,5 +1,4 @@
-#include "IR/UseTraceSSA/HistoryPass.h"
-#include "IR/UseTraceSSA/LLVMFlow.h"
+#include "IR/UseTraceSSA/LLVMImporter.h"
 #include "IR/UseTraceSSA/Models.h"
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Constants.h>
@@ -73,8 +72,7 @@ static void repeatedAndScalar() {
   q.sinks={graph.version(0,h.definition(instruction(f,"plus")))};
   CHECK(QueryEngine(graph).run(q).found());
   auto pointers=LLVMHistoryBuilder::build(f,{true,false,false}); CHECK(pointers.graph().nodes().empty());
-  UseTraceSSALegacyPass pass; CHECK(!pass.runOnFunction(f)); CHECK(pass.getResult().graph().verify());
-  pass.releaseMemory();
+  auto legacyResult = LLVMHistoryBuilder::build(f); CHECK(legacyResult.graph().verify());
 }
 static void parallelPhi() {
   llvm::LLVMContext ctx;

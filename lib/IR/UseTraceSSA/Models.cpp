@@ -37,20 +37,14 @@ LibraryModels::LibraryModels() {
     if (!need(g, c, 3)) return;
     const auto &in = c.arguments[1].memoryIn;
     needPorts(g, c, in, "buffer memory input");
-    annotate(g, in, Event::Sink | Event::NetworkWrite);
+    annotate(g, in, Event::Sink);
   };
   registerModel("write", write); registerModel("send", write); registerModel("sendto", write);
   auto copy = [](TraceFlowGraph &g, const CallPorts &c) {
     if (!need(g, c, 3)) return;
     const auto &src = c.arguments[1].memoryIn, &dst = c.arguments[0].memoryOut;
-    const auto &len = c.arguments[2].value;
     needPorts(g, c, src, "copy source memory"); needPorts(g, c, dst, "copy destination memory");
-    needPorts(g, c, len, "copy length value");
     connect(g, src, dst, FlowKind::Summary, c.callSite);
-    annotate(g, len, Event::CopyLength);
-    // This is a dependency used by the paper's query, NOT ordinary byte taint:
-    // clients can exclude FlowKind::Dependence for content-only taint policies.
-    connect(g, len, dst, FlowKind::Dependence, c.callSite);
     connect(g, c.arguments[0].value, c.returnValue, FlowKind::Summary, c.callSite);
   };
   registerModel("memcpy", copy); registerModel("memmove", copy);
@@ -120,11 +114,6 @@ Query doubleFree(const TraceFlowGraph &g) {
 Query useAfterFree(const TraceFlowGraph &g) {
   Query q; q.sources = g.select(Event::Allocate | Event::Release); q.sinks = g.select(Event::Dereference);
   q.automaton = Automaton::useAfterFree(); return q;
-}
-Query heartbleed(const TraceFlowGraph &g) {
-  Query q; q.sources = g.select(Event::Source); q.sinks = g.select(Event::NetworkWrite);
-  q.automaton = Automaton::ordered({Event::CopyLength, Event::NetworkWrite});
-  q.trapEvents = Event::Sanitize; return q;
 }
 Query uncheckedUse(std::vector<FlowNodeID> sources, std::vector<FlowNodeID> uses) {
   Query q; q.sources = std::move(sources); q.sinks = std::move(uses);

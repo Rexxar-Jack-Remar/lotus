@@ -149,12 +149,6 @@ DefectReport DefectDetector::run(DefectKind kind,
     factsPresent = !Graph.select(Event::Source).empty() &&
                    !Graph.select(Event::Sink).empty();
     break;
-  case DefectKind::Heartbleed:
-    query = queries::heartbleed(Graph);
-    factsPresent = !Graph.select(Event::Source).empty() &&
-                   !Graph.select(Event::CopyLength).empty() &&
-                   !Graph.select(Event::NetworkWrite).empty();
-    break;
   case DefectKind::UncheckedUse:
     query = queries::uncheckedUse(std::move(roots), std::move(uses));
     factsPresent = !query.sources.empty() && !query.sinks.empty();

@@ -1,4 +1,4 @@
-#include "IR/UseTraceSSA/LotusSVFG.h"
+#include "IR/UseTraceSSA/SVFGBridge.h"
 #include "IR/UseTraceSSA/ResourceHistory.h"
 
 #include <llvm/IR/CFG.h>
@@ -499,7 +499,7 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
   }
   input.functions.push_back(std::move(globals));
   for (const auto &item : layouts) input.functions.push_back(item.second.function);
-  auto result = SVFGHistoryBuilder::build(input);
+  auto result = SVFGImporter::build(input);
   appendResourceFacts(result, svfg, module, layouts, nextFunction, mode);
   return result;
 }

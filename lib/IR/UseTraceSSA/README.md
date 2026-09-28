@@ -14,8 +14,8 @@ available for clients with specialized SVFG metadata.
 then prints the UseTraceSSA graph, answers a reachability query, or runs a
 resource defect rule. The native builder adds object-history facts for
 `malloc`/`calloc`, `free`, and LLVM loads/stores using SVFG object IDs.
-`DefectDetector` exposes double-free, use-after-free, taint, Heartbleed-style
-and unchecked-use rules to C++ clients. The latter three need application
+`DefectDetector` exposes double-free, use-after-free, taint
+and unchecked-use rules to C++ clients. The latter two need application
 facts and models; the CLI currently runs the two resource rules.
 
 ```cpp
@@ -108,16 +108,12 @@ Sources, sinks, successful checks, external semantics, resource effects and abst
 | --- | --- |
 | `UseTraceSSA.h` | SSA validation, edge-expanded CFG, pruned history phi insertion, renaming, use/definition lookup and history witnesses |
 | `TraceFlowGraph.h` | Layered history and typed transfer graph, events, certainty, object guards, provenance, DOT/JSON output |
-| `SVFGHistoryBuilder.h` | Constructs channel histories from located, normalized native SVFG records |
-| `SVFGAdapter.h` | Imports already-bound native records without def-use shortcuts; validates before mutation |
-| `LotusSVFG.h` | Native SVFG construction entry point, optional mapper wrapper and edge metadata copier |
+| `SVFGImporter.h` | Strict transactional SVFG import without bypass shortcuts, builds channel histories from located records |
+| `SVFGBridge.h` | Native SVFG construction entry point, optional mapper wrapper and edge metadata copier |
 | `ResourceHistory.h` | Per-abstract-object chronological state, alias-preserving release/allocation histories, matched call splicing |
 | `Query.h` | Traps, event automata, exact call/return matching in the supplied graph, witnesses, coverage and batch queries |
-| `Models.h` | Explicit library summaries and taint, double-free, use-after-free, unchecked-use and Heartbleed-style query factories |
-| `ReachabilityIndex.h` | SCC-based structural reachability cache, revision checks |
-| `LLVMHistory.h` | Optional non-mutating LLVM SSA/site importer, edge-local null guards |
-| `LLVMFlow.h` | Optional scalar transfer supplementation; deliberately no invented load/store memory flow |
-| `HistoryPass.h` | Optional LLVM new-PM analysis/printer and legacy function pass |
+| `Models.h` | Explicit library summaries and taint, double-free, use-after-free and unchecked-use query factories |
+| `LLVMImporter.h` | Optional non-mutating LLVM SSA/site importer, scalar histories and edge-local null guards |
 | `DefectDetector.h` | Defect-query interface with typed outcomes and witness provenance |
 
 ## Command-line entry point

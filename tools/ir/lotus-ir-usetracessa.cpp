@@ -1,7 +1,7 @@
 #include "IR/ICFG/ICFGBuilder.h"
 #include "IR/SVFG/SVFGBuilder.h"
 #include "IR/UseTraceSSA/DefectDetector.h"
-#include "IR/UseTraceSSA/LotusSVFG.h"
+#include "IR/UseTraceSSA/SVFGBridge.h"
 #include "IR/UseTraceSSA/Query.h"
 
 #include <llvm/IR/LLVMContext.h>
