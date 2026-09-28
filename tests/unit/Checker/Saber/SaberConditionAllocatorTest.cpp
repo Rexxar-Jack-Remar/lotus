@@ -1,5 +1,37 @@
 #include "SaberConditionAllocatorTestSupport.h"
 
+TEST(SaberConditionAllocatorTest, OptimizedGraphRemainsActiveForPointsToQueries) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    @saved = global i8* null
+
+    declare i8* @malloc(i64)
+
+    define i32 @main() {
+    entry:
+      %p = call i8* @malloc(i64 8)
+      store i8* %p, i8** @saved
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  class InspectableBuilder : public SaberSVFGBuilder {
+  public:
+    const SVFG *activeGraph() const { return getActiveSVFG(); }
+  } builder;
+  builder.setModule(module.get());
+  auto graph = builder.buildForSaber(&icfg, false);
+  ASSERT_NE(graph, nullptr);
+  EXPECT_EQ(builder.activeGraph(), graph.get());
+  builder.collectGlobals();
+  EXPECT_EQ(builder.activeGraph(), graph.get());
+}
+
 TEST(SaberConditionAllocatorTest, MultiSuccessorGuardsAreExhaustiveAndExclusive) {
   LLVMContext context;
   auto module = parseModule(context, R"(

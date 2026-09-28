@@ -112,6 +112,10 @@ if(LOTUS_BUILD_TESTS)
                        "Running Use After Free candidate checker"
                        --engine=saber --checks=use-after-free
                        ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test(checker_cli_saber_memory_leak_analysis 0
+                       "Memory Leak detected at main"
+                       --engine=saber --checks=memory-leak --saber.no-smt
+                       ${CHECKER_CLI_AE_LEAK})
   add_checker_cli_test(checker_cli_concur_rejects_substring_check 2
                        "unknown concur check 'raceXYZ'"
                        --engine=concur --checks=raceXYZ ${CHECKER_CLI_MINIMAL})

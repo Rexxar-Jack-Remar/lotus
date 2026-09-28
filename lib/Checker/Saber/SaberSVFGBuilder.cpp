@@ -234,7 +234,7 @@ SVFG *SaberSVFGBuilder::buildSVFG(const ICFG *icfg) {
   cfg.resolveIndirectCalls = true;
   cfg.buildMSSA = true;
   SVFG *svfg = build(icfg, cfg);
-  currentSVFG_ = svfg;
+  setCurrentSVFG(svfg);
 
   if (svfg) {
     collectGlobals();
@@ -255,7 +255,7 @@ SaberSVFGBuilder::buildCompatSVFGForSaber(std::unique_ptr<SVFG> graph) {
   if (!optimized->adoptAndOptimize(std::move(graph)))
     return nullptr;
 
-  currentSVFG_ = optimized.get();
+  setCurrentSVFG(optimized.get());
   // Rebuild sink-specific callsite parameter nodes that generic SVFGOPT
   // intentionally discards but SABER relies on for per-call sink identity.
   AddExtActualParmSVFGNodes();
@@ -273,7 +273,7 @@ std::unique_ptr<SVFG> SaberSVFGBuilder::buildForSaber(const ICFG *icfg,
     return nullptr;
 
   if (fullSVFG) {
-    currentSVFG_ = built.get();
+    setCurrentSVFG(built.get());
     return built;
   }
 
@@ -285,7 +285,7 @@ std::unique_ptr<SVFG> SaberSVFGBuilder::buildForSaber(const ICFG *icfg,
 void SaberSVFGBuilder::reset() {
   globs.clear();
   globSVFGNodes.clear();
-  currentSVFG_ = nullptr;
+  setCurrentSVFG(nullptr);
   recursiveFunctionsCache_.clear();
   recursiveFunctionsReady_ = false;
   module_ = nullptr;
