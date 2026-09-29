@@ -14,7 +14,7 @@ the authors' Java implementation or reproduce their entire experimental artifact
 
 Public namespace: `lotus::cfl::interleaved_dyck::spds`.
 Library target: `CanaryInterleavedDyckSPDS`.
-Executable: `lotus-cfl-interleaved-dyck-spds`.
+Executable: `lotus-cfl-interleaved-dyck spds`.
 
 ## Guarantees and scope
 
@@ -309,10 +309,10 @@ and options, then build:
 ```sh
 cmake -S . -B build -DLOTUS_BUILD_TESTS=ON
 cmake --build build --target CanaryInterleavedDyckSPDS \
-  lotus-cfl-interleaved-dyck-spds interleaved_dyck_spds_test
+  lotus-cfl-interleaved-dyck spds interleaved_dyck_spds_test
 ctest --test-dir build -R interleaved_dyck_spds --output-on-failure
 
-build/bin/lotus-cfl-interleaved-dyck-spds --query 0 4 \
+build/bin/lotus-cfl-interleaved-dyck spds --query 0 4 \
   tests/regress/CFL/InterleavedDyck/SPDS/crossing.dot
 ```
 

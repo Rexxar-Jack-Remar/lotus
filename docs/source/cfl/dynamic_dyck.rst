@@ -120,14 +120,11 @@ complexity qualifications, provenance and MIT license.
 
 .. code-block:: bash
 
-   cmake --build build --target lotus-cfl-dynamic-dyck \
-       dynamic_dyck_primary_component_test dynamic_dyck_primary_component_integration_test \
-       dynamic_dyck_primary_component_phases dynamic_dyck_primary_component_allocation_failure \
-       dynamic_dyck_primary_component_sparsification
+   cmake --build build --target lotus-cfl-dynamic-dyck cfl_tests
    build/bin/lotus-cfl-dynamic-dyck --algorithm primary-component --stats initial.dot updates.seq
    build/bin/lotus-cfl-dynamic-dyck --algorithm primary-component --backend hdt --counted \
        --print-components initial.dot updates.seq
-   ctest --test-dir build -R dynamic_dyck --output-on-failure
+   ctest --test-dir build -R 'cfl_tests.PrimaryComponent' --output-on-failure
 
 The existing CLI exposes POPL 2024 with ``--algorithm primary-component`` and accepts the
 same opaque node IDs and type suffixes. It defaults to **set semantics** for

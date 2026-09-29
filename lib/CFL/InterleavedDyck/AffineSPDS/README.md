@@ -47,14 +47,14 @@ The feature budget bounds the observation, not the execution.
 ## Build and integration
 
 Library target: `CanaryInterleavedDyckAffineSPDS`.
-CLI target: `lotus-cfl-interleaved-dyck-affine-spds`.
+CLI target: `lotus-cfl-interleaved-dyck affine-spds`.
 Lotus GoogleTest target: `interleaved_dyck_affine_spds_test`.
 Namespace: `lotus::cfl::interleaved_dyck::affine`.
 
 ```sh
 cmake -S . -B build -DLOTUS_BUILD_TESTS=ON
 cmake --build build --target CanaryInterleavedDyckAffineSPDS \
-  lotus-cfl-interleaved-dyck-affine-spds interleaved_dyck_affine_spds_test
+  lotus-cfl-interleaved-dyck affine-spds interleaved_dyck_affine_spds_test
 ctest --test-dir build -R interleaved_dyck_affine_spds --output-on-failure
 ```
 
@@ -232,7 +232,7 @@ path. The supplied observer tracks x and y in two parity blocks.
 
 ```sh
 FIXTURES=tests/regress/CFL/InterleavedDyck/AffineSPDS
-build/bin/lotus-cfl-interleaved-dyck-affine-spds \
+build/bin/lotus-cfl-interleaved-dyck affine-spds \
   --query 0 14 --observer "$FIXTURES/correlation.observer" \
   --certificate "$FIXTURES/correlation.dot"
 ```

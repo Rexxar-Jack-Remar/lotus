@@ -10,12 +10,12 @@ answer the final reachability relation.
 Pipeline
 --------
 
-The Python driver alternates two compiled phases:
+The Python driver alternates two modes of the shared binary:
 
-``lotus-cfl-interleaved-dyck-graphaux``
+``lotus-cfl-interleaved-dyck graphaux``
    Builds one-color summary components and emits the color-reach graph.
 
-``lotus-cfl-interleaved-dyck-dkmerge``
+``lotus-cfl-interleaved-dyck dkmerge``
    Merges nodes using the specialized degree/color data structure and records
    edges that cannot be removed.
 
@@ -27,9 +27,7 @@ The Python driver alternates two compiled phases:
 
    cmake --build build --target lotus-cfl-interleaved-dyck-graph-reduction
    cp input.dot reduced.dot
-   python3 build/bin/lotus-cfl-interleaved-dyck-graph-reduction.py reduced.dot \
-     --graphaux build/bin/lotus-cfl-interleaved-dyck-graphaux \
-     --dkmerge build/bin/lotus-cfl-interleaved-dyck-dkmerge
+   python3 build/bin/lotus-cfl-interleaved-dyck-graph-reduction.py reduced.dot
 
 Bidirected handling
 -------------------

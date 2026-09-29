@@ -45,7 +45,7 @@ concrete path witness. Do not reinterpret `upper_bound` as exact reachability.
 
 Header: `CFL/InterleavedDyck/LCL/Solver.h`.
 Library: `CanaryInterleavedDyckLCL`.
-Executable: `lotus-cfl-interleaved-dyck-lcl`.
+Executable: `lotus-cfl-interleaved-dyck lcl`.
 
 ```cpp
 #include "CFL/InterleavedDyck/LCL/Solver.h"
@@ -209,7 +209,7 @@ and options, then build:
 ```sh
 cmake -S . -B build -DLOTUS_BUILD_TESTS=ON
 cmake --build build --target CanaryInterleavedDyckLCL \
-  lotus-cfl-interleaved-dyck-lcl interleaved_dyck_lcl_test
+  lotus-cfl-interleaved-dyck lcl interleaved_dyck_lcl_test
 ctest --test-dir build -R interleaved_dyck_lcl --output-on-failure
 ```
 

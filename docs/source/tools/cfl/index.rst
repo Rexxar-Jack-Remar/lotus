@@ -13,9 +13,9 @@ context-free grammars for precise interprocedural analysis.
 **Location**: ``tools/cfl/``
 
 **Tools**: ``lotus-cfl-solve``, ``lotus-cfl-alias``, ``lotus-cfl-vf``,
-``lotus-cfl-interleaved-dyck-mcfl``, ``lotus-cfl-interleaved-dyck-staged-bounds``,
-``lotus-cfl-interleaved-dyck-unary``, ``lotus-cfl-interleaved-dyck-spds``,
-``lotus-cfl-interleaved-dyck-lcl``, ``lotus-cfl-interleaved-dyck-affine-spds``,
+``lotus-cfl-interleaved-dyck mcfl``, ``lotus-cfl-interleaved-dyck staged-bounds``,
+``lotus-cfl-interleaved-dyck unary``, ``lotus-cfl-interleaved-dyck spds``,
+``lotus-cfl-interleaved-dyck lcl``, ``lotus-cfl-interleaved-dyck affine-spds``,
 ``lotus-cfl-interleaved-dyck-graph-reduction``, ``lotus-cfl-dynamic-dyck``, and ``csr``.
 
 Classical CFL solving and clients
@@ -122,18 +122,22 @@ formats, edge-pair semantics, library usage, and deletion limitations.
 MCFL: Multiple Context-Free Language Reachability
 -------------------------------------------------
 
+All interleaved-Dyck engines use the ``lotus-cfl-interleaved-dyck`` binary.
+Select one with a subcommand, or use ``--engine NAME``. Each engine keeps its
+own options; run ``lotus-cfl-interleaved-dyck NAME --help`` for details.
+
 Runs the POPL 2025 MCFL hierarchy for underapproximating interleaved-Dyck
 reachability on artifact-compatible DOT graphs.
 
-**Binary**: ``lotus-cfl-interleaved-dyck-mcfl``
+**Command**: ``lotus-cfl-interleaved-dyck mcfl``
 
 **Location**: ``tools/cfl/interleaved-dyck/mcfl/lotus-cfl-interleaved-dyck-mcfl.cpp``
 
 .. code-block:: bash
 
    cmake -S . -B build -DLOTUS_ENABLE_CFL=ON
-   cmake --build build --target lotus-cfl-interleaved-dyck-mcfl
-   ./build/bin/lotus-cfl-interleaved-dyck-mcfl --dimension 2 input.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   ./build/bin/lotus-cfl-interleaved-dyck mcfl --dimension 2 input.dot
 
 Useful options include ``--simple`` for the weaker ``G_d^circ`` grammar,
 ``--no-condense`` to disable cycle elimination, ``--stats`` for saturation
@@ -199,14 +203,14 @@ on a DOT graph: a certified lower bound, then progressively tighter
 overapproximations through parity refinement, mutual refinement, and on-demand
 checks.
 
-**Binary**: ``lotus-cfl-interleaved-dyck-staged-bounds``
+**Command**: ``lotus-cfl-interleaved-dyck staged-bounds``
 
 **Location**: ``tools/cfl/interleaved-dyck/staged-bounds/lotus-cfl-interleaved-dyck-staged-bounds.cpp``
 
 .. code-block:: bash
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-staged-bounds
-   build/bin/lotus-cfl-interleaved-dyck-staged-bounds \
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck staged-bounds \
      --method mutual-refinement graph.dot
 
 Useful options include ``--analysis taint|value-flow`` to select the client
@@ -222,14 +226,14 @@ Unary Interleaved-Dyck Reachability
 Computes exact bidirected unary ``D1``-interleaved-``D1`` reachability on a DOT
 graph with the adaptive (default) or fixed-counter algorithm.
 
-**Binary**: ``lotus-cfl-interleaved-dyck-unary``
+**Command**: ``lotus-cfl-interleaved-dyck unary``
 
 **Location**: ``tools/cfl/interleaved-dyck/unary/lotus-cfl-interleaved-dyck-unary.cpp``
 
 .. code-block:: bash
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-unary
-   build/bin/lotus-cfl-interleaved-dyck-unary --algorithm adaptive graph.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck unary --algorithm adaptive graph.dot
 
 Useful options include ``--direct`` to skip quotient sparsification,
 ``--bidirect`` to add missing complement reverse arcs (a sound
@@ -247,14 +251,14 @@ reachability on a DOT graph. A retained pair is may-reach rather than a
 certified balanced witness; absence proves unreachability in the supplied
 directed graph.
 
-**Binary**: ``lotus-cfl-interleaved-dyck-lcl``
+**Command**: ``lotus-cfl-interleaved-dyck lcl``
 
 **Location**: ``tools/cfl/interleaved-dyck/lcl/lotus-cfl-interleaved-dyck-lcl.cpp``
 
 .. code-block:: bash
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-lcl
-   build/bin/lotus-cfl-interleaved-dyck-lcl --query 0 3 graph.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck lcl --query 0 3 graph.dot
 
 Useful options include ``--baseline`` for the Algorithm 1 white-node baseline,
 ``--no-feasibility`` to disable the Section 5.3 endpoint filters,
@@ -270,14 +274,14 @@ SPDS Reachability
 Solves synchronized pushdown systems for balanced interleaved-Dyck
 reachability, supporting post*/pre* demand queries over a DOT graph.
 
-**Binary**: ``lotus-cfl-interleaved-dyck-spds``
+**Command**: ``lotus-cfl-interleaved-dyck spds``
 
 **Location**: ``tools/cfl/interleaved-dyck/spds/lotus-cfl-interleaved-dyck-spds.cpp``
 
 .. code-block:: bash
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-spds
-   build/bin/lotus-cfl-interleaved-dyck-spds --all-pairs graph.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck spds --all-pairs graph.dot
 
 Vertices are integer IDs. Query scopes include ``--all-pairs``,
 ``--query SOURCE TARGET``, ``--source V`` (post*), ``--target V`` (pre*), and
@@ -295,14 +299,14 @@ Affine SPDS Reachability
 Combines paired affine-weighted pushdown automata with SPDS reachability and
 reports affine separation certificates.
 
-**Binary**: ``lotus-cfl-interleaved-dyck-affine-spds``
+**Command**: ``lotus-cfl-interleaved-dyck affine-spds``
 
 **Location**: ``tools/cfl/interleaved-dyck/affine-spds/lotus-cfl-interleaved-dyck-affine-spds.cpp``
 
 .. code-block:: bash
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-affine-spds
-   build/bin/lotus-cfl-interleaved-dyck-affine-spds --query 0 3 graph.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck affine-spds --query 0 3 graph.dot
 
 Select the comparison with ``--mode joint|independent|spds`` (``--identity``
 gives the Boolean SPDS specialization), request a separating affine equation
@@ -321,23 +325,20 @@ reachability. It is a graph transformation, not a reachability solver: it
 edits a working copy of a DOT graph in place and produces a smaller graph that
 preserves the reachability property covered by the reduction theorem.
 
-**Binary**: ``lotus-cfl-interleaved-dyck-graph-reduction`` (Python driver) with the
-compiled helpers ``lotus-cfl-interleaved-dyck-graphaux`` and
-``lotus-cfl-interleaved-dyck-dkmerge``
+**Script**: ``lotus-cfl-interleaved-dyck-graph-reduction.py``, using the
+``graphaux`` and ``dkmerge`` modes of ``lotus-cfl-interleaved-dyck``.
 
-**Location**: ``tools/cfl/interleaved-dyck/graph-reduction/``
+**Location**: ``lib/CFL/InterleavedDyck/GraphReduction/graph_simp.py``
 
 .. code-block:: bash
 
    cmake --build build --target lotus-cfl-interleaved-dyck-graph-reduction
    cp input.dot reduced.dot
-   python3 build/bin/lotus-cfl-interleaved-dyck-graph-reduction.py reduced.dot \
-     --graphaux build/bin/lotus-cfl-interleaved-dyck-graphaux \
-     --dkmerge build/bin/lotus-cfl-interleaved-dyck-dkmerge
+   python3 build/bin/lotus-cfl-interleaved-dyck-graph-reduction.py reduced.dot
 
-``lotus-cfl-interleaved-dyck-graphaux`` performs one-color component construction
-(``lotus-cfl-interleaved-dyck-graphaux <graph.dot>``) and
-``lotus-cfl-interleaved-dyck-dkmerge`` performs the degree-based merge phase; the
+``lotus-cfl-interleaved-dyck graphaux`` performs one-color component construction
+(``lotus-cfl-interleaved-dyck graphaux <graph.dot>``) and
+``lotus-cfl-interleaved-dyck dkmerge`` performs the degree-based merge phase; the
 Python driver alternates both colors and removes proven-redundant edges. Pass
 ``--bidirected-input`` when the input already represents both directions. See
 :doc:`/cfl/interleaved_dyck/graph_reduction` for the library API and algorithm

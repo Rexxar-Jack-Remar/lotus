@@ -11,7 +11,10 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <vector>
+#include <gtest/gtest.h>
 
+namespace {
 using namespace lotus::usetracessa;
 
 #define CHECK(condition)                                                       \
@@ -455,8 +458,10 @@ void deepCFG() {
   CHECK(g.regions().size() == 2 * blocks - 1);
 }
 
-int main(int argc, char **argv) {
-  const std::map<std::string, std::function<void()>> tests = {
+using HistoryCase = std::pair<const char *, std::function<void()>>;
+
+const std::vector<HistoryCase> &historyCases() {
+  static const std::vector<HistoryCase> tests = {
       {"straight-line", straightLine}, {"repeated-operands", repeatedOperands},
       {"paper-example", paperExample}, {"diamond", diamond},
       {"pruned-phi", prunedPhi}, {"loop", loop},
@@ -467,23 +472,21 @@ int main(int argc, char **argv) {
       {"deterministic-output", deterministicOutput}, {"irreducible", irreducible},
       {"loop-phi-operands", loopPhiOperands}, {"randomized-histories", randomizedHistories},
       {"deep-cfg", deepCFG}};
-  try {
-    if (argc == 2) {
-      auto it = tests.find(argv[1]);
-      if (it == tests.end()) throw std::runtime_error("unknown test");
-      it->second();
-      std::cout << "PASS " << it->first << '\n';
-    } else if (argc == 1) {
-      for (const auto &test : tests) {
-        test.second();
-        std::cout << "PASS " << test.first << '\n';
-      }
-    } else {
-      throw std::runtime_error("usage: lotus-usetracessa-core-test [test-name]");
-    }
-    return 0;
-  } catch (const std::exception &e) {
-    std::cerr << "FAIL: " << e.what() << '\n';
-    return 1;
-  }
+  return tests;
 }
+
+class UseTraceSSAHistoryTest : public testing::TestWithParam<int> {};
+
+TEST_P(UseTraceSSAHistoryTest, Case) {
+  historyCases().at(GetParam()).second();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    UseTraceSSA, UseTraceSSAHistoryTest,
+    testing::Range(0, static_cast<int>(historyCases().size())),
+    [](const testing::TestParamInfo<int> &info) {
+      std::string name = historyCases().at(info.param).first;
+      std::replace(name.begin(), name.end(), '-', '_');
+      return name;
+    });
+} // namespace

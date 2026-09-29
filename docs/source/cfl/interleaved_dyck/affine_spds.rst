@@ -120,9 +120,9 @@ Command line
 
 .. code-block:: console
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-affine-spds
-   build/bin/lotus-cfl-interleaved-dyck-affine-spds --query 0 4 input.dot
-   build/bin/lotus-cfl-interleaved-dyck-affine-spds --all-pairs --mode independent input.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck affine-spds --query 0 4 input.dot
+   build/bin/lotus-cfl-interleaved-dyck affine-spds --all-pairs --mode independent input.dot
 
 The tool requires exactly one query scope: ``--all-pairs``,
 ``--query SOURCE TARGET``, ``--source V``, ``--target V``, or

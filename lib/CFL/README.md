@@ -21,8 +21,8 @@ module. Interleaved-Dyck tools consistently use the
 | Tool | Purpose |
 |---|---|
 | `lotus-cfl-dynamic-dyck` | Process an initial graph and an edge update sequence |
-| `lotus-cfl-interleaved-dyck-unary` | Run the adaptive or fixed-counter exact unary analysis |
-| `lotus-cfl-interleaved-dyck-staged-bounds` | Compute staged lower and upper bounds |
-| `lotus-cfl-interleaved-dyck-mcfl` | Run the dimension-indexed MCFL underapproximation hierarchy |
+| `lotus-cfl-interleaved-dyck unary` | Run the adaptive or fixed-counter exact unary analysis |
+| `lotus-cfl-interleaved-dyck staged-bounds` | Compute staged lower and upper bounds |
+| `lotus-cfl-interleaved-dyck mcfl` | Run the dimension-indexed MCFL underapproximation hierarchy |
 | `lotus-cfl-interleaved-dyck-graph-reduction.py` | Orchestrate the graph-reduction helpers |
 

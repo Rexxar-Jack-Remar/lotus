@@ -25,7 +25,7 @@ directions are already represented by the input.
 
 ## Build and run
 
-Build the driver and its two compiled helpers:
+Build the shared CLI and copy the Python driver:
 
 ```sh
 cmake --build build --target lotus-cfl-interleaved-dyck-graph-reduction
@@ -35,13 +35,11 @@ Copy a graph before simplifying because the Python driver updates it in place:
 
 ```sh
 cp input.dot reduced.dot
-python3 build/bin/lotus-cfl-interleaved-dyck-graph-reduction.py reduced.dot \
-  --graphaux build/bin/lotus-cfl-interleaved-dyck-graphaux \
-  --dkmerge build/bin/lotus-cfl-interleaved-dyck-dkmerge
+python3 build/bin/lotus-cfl-interleaved-dyck-graph-reduction.py reduced.dot
 ```
 
-The driver takes explicit `--graphaux`/`--dkmerge` tool paths, so it can be
-run from any working directory.
+The driver finds `lotus-cfl-interleaved-dyck` beside the copied script. Use
+`--tool PATH` when running the source script or a binary in another directory.
 
 ## Code organization
 

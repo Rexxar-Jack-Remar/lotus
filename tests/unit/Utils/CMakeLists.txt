@@ -3,6 +3,7 @@
 add_subdirectory(Parallel)
 
 lotus_collect_test_sources(utils_tests
+  UtilsTestMain.cpp
   GraphSlicerTest.cpp
   LLVMCallUtilsTest.cpp
   LLVMFunctionUtilsTest.cpp
@@ -14,7 +15,8 @@ set(LOTUS_UTILS_TEST_LIBS
     CanaryADT
     CanaryLLVMUtils
     CanaryFormats
-    CanaryParallel)
+    CanaryParallel
+    CanaryCSIndexFLARE)
 
 if(TARGET Crab)
   lotus_collect_test_sources(utils_tests CrabMachineIntDomainTest.cpp)

@@ -8,6 +8,7 @@
 #include <unordered_set>
 
 using namespace std;
+namespace {
 string merge_orig_to_colormerge = "tmp_merge_orig_to_color_merge.txt";
 
 void findMatch(unsigned nodeID, SummaryGraph &sGraph, unsigned eid,
@@ -174,9 +175,11 @@ void exportMergeNodes(SummaryGraph &sGraph) {
   }
 }
 
-int main(int argc, char **argv) {
+} // namespace
+
+int runInterleavedDyckGraphAux(int argc, char **argv) {
   if (argc != 2) {
-    cerr << "usage: lotus-cfl-interleaved-dyck-graphaux <graph.dot>\n";
+    cerr << "usage: lotus-cfl-interleaved-dyck graphaux <graph.dot>\n";
     return 1;
   }
   SummaryGraph sGraph(argv[1]);

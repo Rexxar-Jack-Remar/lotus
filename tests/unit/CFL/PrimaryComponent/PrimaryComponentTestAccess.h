@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
-// Deliberately NOT installed into Lotus. Only the instrumented test library
-// includes this file. Normal library builds contain no observers or snapshots.
+// Deliberately NOT installed into Lotus. Test-enabled builds compile the
+// observer hooks into CanaryDynamicDyck; normal builds omit them.
 #include "CFL/DynamicDyck/PrimaryComponent/PrimaryComponentSolver.h"
 
 #include <functional>

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
-// Separate executable: fail each allocation position of an update, one at a
-// time. This validates fail-closed queries and destruction of partially updated
-// state under ASan/LSan, without changing the production allocator or code.
+// Fail each allocation position of an update, one at a time. This validates
+// fail-closed queries and destruction of partially updated state under ASan/LSan.
 #include "CFL/DynamicDyck/PrimaryComponent/PrimaryComponentSolver.h"
 
 #include <cstdlib>
 #include <iostream>
 #include <new>
 #include <stdexcept>
+#include <gtest/gtest.h>
 
 namespace {
 std::ptrdiff_t remaining = -1;
@@ -30,13 +30,11 @@ void operator delete[](void *p) noexcept { std::free(p); }
 void operator delete(void *p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void *p, std::size_t) noexcept { std::free(p); }
 
-int main(int argc, char **argv) {
+int runPrimaryComponentAllocationFailure(bool hdt) {
   using namespace lotus::cfl::dynamic_dyck;
   try {
-    const auto backend =
-        argc == 2 && std::string(argv[1]) == "hdt"
-            ? PrimaryComponentConnectivityBackend::HDT
-            : PrimaryComponentConnectivityBackend::Deterministic;
+    const auto backend = hdt ? PrimaryComponentConnectivityBackend::HDT
+                             : PrimaryComponentConnectivityBackend::Deterministic;
     std::size_t failures = 0;
     for (int operation = 0; operation < 8; ++operation) {
       bool finished = false;
@@ -123,4 +121,12 @@ int main(int argc, char **argv) {
     std::cerr << "FAIL: " << error.what() << '\n';
     return 1;
   }
+}
+
+TEST(PrimaryComponentAllocationFailureTest, Deterministic) {
+  ASSERT_EQ(runPrimaryComponentAllocationFailure(false), 0);
+}
+
+TEST(PrimaryComponentAllocationFailureTest, HDT) {
+  ASSERT_EQ(runPrimaryComponentAllocationFailure(true), 0);
 }

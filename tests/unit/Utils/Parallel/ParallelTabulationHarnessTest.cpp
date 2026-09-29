@@ -5,7 +5,6 @@
 #include <utility>
 #include <vector>
 
-#include <llvm/Support/CommandLine.h>
 #include <gtest/gtest.h>
 
 using Graph = lotus::cfl::cs_index::flare::Graph;
@@ -94,10 +93,3 @@ TEST(ParallelTabulationHarnessTest,
 }
 
 } // namespace
-
-int main(int argc, char **argv) {
-  testing::InitGoogleTest(&argc, argv);
-  llvm::cl::ParseCommandLineOptions(argc, argv,
-                                    "ParallelTabulation harness\n");
-  return RUN_ALL_TESTS();
-}

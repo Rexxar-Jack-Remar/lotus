@@ -13,6 +13,7 @@
 #include <sys/time.h>
 // #include <vector>
 
+namespace {
 using namespace std;
 
 // yuanbo modify
@@ -598,7 +599,9 @@ int arrayversion() {
   return 0;
 }
 
-int main() {
+} // namespace
+
+int runInterleavedDyckDkMerge() {
 
   // readgrammar();
 

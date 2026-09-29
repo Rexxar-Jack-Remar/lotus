@@ -446,10 +446,3 @@ TEST(VASCOParallelHarnessTest, SummarySnapshotKeepsValueAndVersionCoherent) {
 }
 
 } // namespace
-
-int main(int argc, char **argv) {
-  testing::InitGoogleTest(&argc, argv);
-  llvm::cl::ParseCommandLineOptions(argc, argv,
-                                    "VASCO parallel scheduler harness\n");
-  return RUN_ALL_TESTS();
-}

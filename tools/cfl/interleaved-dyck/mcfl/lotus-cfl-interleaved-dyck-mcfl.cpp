@@ -32,7 +32,7 @@ struct CommandLine {
 };
 
 void usage(std::ostream &output) {
-  output << "usage: lotus-cfl-interleaved-dyck-mcfl [options] <graph.dot>\n"
+  output << "usage: lotus-cfl-interleaved-dyck mcfl [options] <graph.dot>\n"
             "\n"
             "Compute the MCFL underapproximation of typed interleaved-Dyck "
             "reachability.\n"
@@ -146,7 +146,7 @@ void printResult(std::ostream &output, const CommandLine &command_line,
 
 } // namespace
 
-int main(int argc, char **argv) {
+int runInterleavedDyckMCFL(int argc, char **argv) {
   try {
     const CommandLine command_line = parseCommandLine(argc, argv);
     const interleaved_dyck::Graph graph =
@@ -176,7 +176,7 @@ int main(int argc, char **argv) {
     printResult(*output, command_line, result, elapsed.count());
     return 0;
   } catch (const std::exception &error) {
-    std::cerr << "lotus-cfl-interleaved-dyck-mcfl: " << error.what() << '\n';
+    std::cerr << "lotus-cfl-interleaved-dyck mcfl: " << error.what() << '\n';
     return 1;
   }
 }

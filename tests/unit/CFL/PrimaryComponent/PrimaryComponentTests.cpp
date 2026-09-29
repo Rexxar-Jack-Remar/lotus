@@ -8,6 +8,7 @@
 #include <numeric>
 #include <random>
 #include <utility>
+#include <gtest/gtest.h>
 
 namespace {
 using namespace test;
@@ -653,7 +654,7 @@ void locality() {
 }
 } // namespace
 
-int main(int argc, char **argv) {
+int runPrimaryComponentTests(int argc, const char *const *argv) {
   try {
     const std::string suite = argc >= 2 ? argv[1] : "all";
     const std::size_t seeds = argc >= 3 ? std::stoull(argv[2]) : 24;
@@ -662,11 +663,13 @@ int main(int argc, char **argv) {
       const std::string backend = argv[4];
       if (backend == "hdt")
         test_backend = PrimaryComponentConnectivityBackend::HDT;
-      else if (backend != "deterministic")
+      else if (backend == "deterministic")
+        test_backend = PrimaryComponentConnectivityBackend::Deterministic;
+      else
         throw std::invalid_argument("unknown backend");
     }
     if (argc > 5)
-      throw std::invalid_argument("usage: dynamic_dyck_primary_component_test "
+      throw std::invalid_argument("usage: primary component test "
                                   "SUITE [SEEDS [STEPS [deterministic|hdt]]]");
     std::cout << "backend="
               << (test_backend == PrimaryComponentConnectivityBackend::HDT
@@ -704,3 +707,27 @@ int main(int argc, char **argv) {
     return 1;
   }
 }
+
+#define PRIMARY_COMPONENT_CASE(name, backend)                                 \
+  TEST(PrimaryComponentTest, name##_##backend) {                              \
+    const char *args[] = {"primary_component", #name, "24", "1200", #backend}; \
+    ASSERT_EQ(runPrimaryComponentTests(5, args), 0);                          \
+  }
+
+PRIMARY_COMPONENT_CASE(regressions, deterministic)
+PRIMARY_COMPONENT_CASE(api, deterministic)
+PRIMARY_COMPONENT_CASE(exhaustive, deterministic)
+PRIMARY_COMPONENT_CASE(random, deterministic)
+PRIMARY_COMPONENT_CASE(connectivity, deterministic)
+PRIMARY_COMPONENT_CASE(dense, deterministic)
+PRIMARY_COMPONENT_CASE(locality, deterministic)
+PRIMARY_COMPONENT_CASE(scaling, deterministic)
+PRIMARY_COMPONENT_CASE(regressions, hdt)
+PRIMARY_COMPONENT_CASE(api, hdt)
+PRIMARY_COMPONENT_CASE(exhaustive, hdt)
+PRIMARY_COMPONENT_CASE(random, hdt)
+PRIMARY_COMPONENT_CASE(dense, hdt)
+PRIMARY_COMPONENT_CASE(locality, hdt)
+PRIMARY_COMPONENT_CASE(scaling, hdt)
+
+#undef PRIMARY_COMPONENT_CASE

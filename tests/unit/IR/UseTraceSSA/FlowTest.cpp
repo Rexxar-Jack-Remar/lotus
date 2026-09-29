@@ -10,7 +10,10 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
+#include <gtest/gtest.h>
 
+namespace {
 using namespace lotus::usetracessa;
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(std::string(__FILE__) + ":" + \
     std::to_string(__LINE__) + ": " #x); } while (false)
@@ -541,25 +544,63 @@ void defectDetector() {
     }
   }
 }
-int main(int argc,char **argv){
-  const std::map<std::string,std::function<void()>> tests={
-    {"traps",traps},{"bypass",bypass},{"weak-trap",weakTrap},{"object-guards",guardSets},
-    {"svfg-ordering",svfgOrdering},{"invalid-import",invalidImport},{"native-contract",nativeContract},
-    {"paper-resources",paperResources},{"no-alias-union",noAliasUnion},{"unknown-alias",unknownAlias},
-    {"loop-reset",[]{resourceLoop(true);}},{"loop-double-free",[]{resourceLoop(false);}},
-    {"use-after-free",useAfterFree},{"unallocated-resource",unallocatedResource},{"matching-calls",matchingCalls},{"realizable-segments",realizableSegments},
-    {"nested-calls",nestedCalls},{"balanced-cycle",balancedCycle},{"recursion",recursion},
-    {"resource-call",resourceCall},{"callee-trap",calleeTrap},{"limits",limits},{"threads",threads},
-    {"ordered-events",orderedEvents},
-    {"no-address-taint",noAddressTaint},{"unknown-library",unknownLibrary},{"missing-memory-ports",missingMemoryPorts},
-    {"custom-model",customModel},{"no-memset-kill",noMemsetKill},{"slices",slices},
-    {"serialization",serialization},{"invalid-queries",invalidQueries},{"multi-source",multiSource},
-    {"random-dyck",randomDyck},{"auto-builder",autoBuilder},
-    {"auto-memory-phi",autoMemoryPhi},{"auto-call",autoCall},
-    {"defect-detector",defectDetector}};
-  try{
-    if(argc==2){auto it=tests.find(argv[1]);if(it==tests.end())throw std::runtime_error("unknown test");it->second();}
-    else for(const auto &t:tests)t.second();
-  }catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}
-  return 0;
+using FlowCase = std::pair<const char *, std::function<void()>>;
+
+const std::vector<FlowCase> &flowCases() {
+  static const std::vector<FlowCase> tests = {
+      {"traps", traps},
+      {"bypass", bypass},
+      {"weak-trap", weakTrap},
+      {"object-guards", guardSets},
+      {"svfg-ordering", svfgOrdering},
+      {"invalid-import", invalidImport},
+      {"native-contract", nativeContract},
+      {"paper-resources", paperResources},
+      {"no-alias-union", noAliasUnion},
+      {"unknown-alias", unknownAlias},
+      {"loop-reset", [] { resourceLoop(true); }},
+      {"loop-double-free", [] { resourceLoop(false); }},
+      {"use-after-free", useAfterFree},
+      {"unallocated-resource", unallocatedResource},
+      {"matching-calls", matchingCalls},
+      {"realizable-segments", realizableSegments},
+      {"nested-calls", nestedCalls},
+      {"balanced-cycle", balancedCycle},
+      {"recursion", recursion},
+      {"resource-call", resourceCall},
+      {"callee-trap", calleeTrap},
+      {"limits", limits},
+      {"threads", threads},
+      {"ordered-events", orderedEvents},
+      {"no-address-taint", noAddressTaint},
+      {"unknown-library", unknownLibrary},
+      {"missing-memory-ports", missingMemoryPorts},
+      {"custom-model", customModel},
+      {"no-memset-kill", noMemsetKill},
+      {"slices", slices},
+      {"serialization", serialization},
+      {"invalid-queries", invalidQueries},
+      {"multi-source", multiSource},
+      {"random-dyck", randomDyck},
+      {"auto-builder", autoBuilder},
+      {"auto-memory-phi", autoMemoryPhi},
+      {"auto-call", autoCall},
+      {"defect-detector", defectDetector}};
+  return tests;
 }
+
+class UseTraceSSAFlowTest : public testing::TestWithParam<int> {};
+
+TEST_P(UseTraceSSAFlowTest, Case) {
+  flowCases().at(GetParam()).second();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    UseTraceSSA, UseTraceSSAFlowTest,
+    testing::Range(0, static_cast<int>(flowCases().size())),
+    [](const testing::TestParamInfo<int> &info) {
+      std::string name = flowCases().at(info.param).first;
+      std::replace(name.begin(), name.end(), '-', '_');
+      return name;
+    });
+} // namespace

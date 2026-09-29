@@ -106,9 +106,9 @@ Command line
 
 .. code-block:: console
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-unary
-   build/bin/lotus-cfl-interleaved-dyck-unary --algorithm adaptive --stats bidirected.dot
-   build/bin/lotus-cfl-interleaved-dyck-unary --algorithm fixed-counter --stats bidirected.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck unary --algorithm adaptive --stats bidirected.dot
+   build/bin/lotus-cfl-interleaved-dyck unary --algorithm fixed-counter --stats bidirected.dot
 
 ``--direct`` disables shared quotient sparsification. ``--shallow K`` applies
 only to Adaptive. ``--bidirect`` explicitly selects symmetrization, and output

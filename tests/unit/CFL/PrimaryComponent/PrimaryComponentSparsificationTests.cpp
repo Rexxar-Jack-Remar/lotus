@@ -5,6 +5,7 @@
 #include <iostream>
 #include <numeric>
 #include <random>
+#include <gtest/gtest.h>
 
 namespace {
 using namespace test;
@@ -228,13 +229,13 @@ void adversarial() {
   }
 }
 } // namespace
-int main(int argc, char **argv) {
+int runPrimaryComponentSparsification(int argc, const char *const *argv) {
   try {
     const std::size_t seeds = argc > 1 ? std::stoull(argv[1]) : 32;
     const std::size_t steps = argc > 2 ? std::stoull(argv[2]) : 1200;
     if (argc > 3 || seeds == 0 || steps == 0)
       throw std::invalid_argument(
-          "usage: dynamic_dyck_primary_component_sparsification [SEEDS "
+          "usage: primary component sparsification [SEEDS "
           "[STEPS]]");
     exhaustive();
     random(seeds, steps);
@@ -247,4 +248,9 @@ int main(int argc, char **argv) {
     std::cerr << "FAIL sparsification: " << e.what() << '\n';
     return 1;
   }
+}
+
+TEST(PrimaryComponentSparsificationTest, Updates) {
+  const char *args[] = {"primary_component_sparsification"};
+  ASSERT_EQ(runPrimaryComponentSparsification(1, args), 0);
 }

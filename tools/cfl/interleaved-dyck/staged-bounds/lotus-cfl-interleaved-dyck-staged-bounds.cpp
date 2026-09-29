@@ -32,7 +32,7 @@ struct CommandLine {
 };
 
 void usage(std::ostream &output) {
-  output << "usage: lotus-cfl-interleaved-dyck-staged-bounds [options] "
+  output << "usage: lotus-cfl-interleaved-dyck staged-bounds [options] "
             "<graph.dot>\n"
             "\n"
             "Compute staged lower and upper bounds for typed interleaved-Dyck\n"
@@ -262,7 +262,7 @@ void printResult(std::ostream &output, const CommandLine &command_line,
 
 } // namespace
 
-int main(int argc, char **argv) {
+int runInterleavedDyckStagedBounds(int argc, char **argv) {
   try {
     const CommandLine command_line = parseCommandLine(argc, argv);
     const interleaved_dyck::Graph graph =
@@ -292,7 +292,7 @@ int main(int argc, char **argv) {
     printResult(*output, command_line, result, elapsed.count());
     return 0;
   } catch (const std::exception &error) {
-    std::cerr << "lotus-cfl-interleaved-dyck-staged-bounds: " << error.what()
+    std::cerr << "lotus-cfl-interleaved-dyck staged-bounds: " << error.what()
               << '\n';
     return 1;
   }

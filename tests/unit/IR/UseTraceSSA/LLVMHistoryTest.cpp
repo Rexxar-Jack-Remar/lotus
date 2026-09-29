@@ -9,7 +9,9 @@
 #include <llvm/Support/raw_ostream.h>
 #include <iostream>
 #include <stdexcept>
+#include <gtest/gtest.h>
 
+namespace {
 using namespace lotus::usetracessa;
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
 static std::unique_ptr<llvm::Module> parse(llvm::LLVMContext &ctx, const char *text) {
@@ -126,8 +128,11 @@ static void addressIsNotContent() {
   q.sinks={g.version(0,h.definition(instruction(f,"r")))};
   CHECK(QueryEngine(g).run(q).status==QueryStatus::NotFound);
 }
-int main() {
-  try { guardsAndUses(); repeatedAndScalar(); parallelPhi(); invokeResult(); addressIsNotContent(); }
-  catch (const std::exception &e) { std::cerr<<e.what()<<'\n';return 1; }
-  return 0;
+TEST(UseTraceSSALLVMHistoryTest, GuardsAndUses) { guardsAndUses(); }
+TEST(UseTraceSSALLVMHistoryTest, RepeatedAndScalar) { repeatedAndScalar(); }
+TEST(UseTraceSSALLVMHistoryTest, ParallelPhi) { parallelPhi(); }
+TEST(UseTraceSSALLVMHistoryTest, InvokeResult) { invokeResult(); }
+TEST(UseTraceSSALLVMHistoryTest, AddressIsNotContent) {
+  addressIsNotContent();
 }
+} // namespace

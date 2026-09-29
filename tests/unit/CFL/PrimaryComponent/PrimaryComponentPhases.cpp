@@ -5,6 +5,7 @@
 #include <iostream>
 #include <limits>
 #include <random>
+#include <gtest/gtest.h>
 
 namespace {
 using namespace test;
@@ -248,7 +249,7 @@ void random(PrimaryComponentConnectivityBackend backend) {
   }
 }
 } // namespace
-int main() {
+int runPrimaryComponentPhases() {
   try {
     for (auto backend : {PrimaryComponentConnectivityBackend::Deterministic,
                          PrimaryComponentConnectivityBackend::HDT}) {
@@ -266,4 +267,8 @@ int main() {
     std::cerr << "FAIL phases: " << e.what() << '\n';
     return 1;
   }
+}
+
+TEST(PrimaryComponentPhaseTest, Invariants) {
+  ASSERT_EQ(runPrimaryComponentPhases(), 0);
 }

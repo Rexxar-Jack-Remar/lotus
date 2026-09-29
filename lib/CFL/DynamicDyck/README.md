@@ -31,13 +31,10 @@ not epsilon. Access to one solver instance requires external synchronization.
 ## Build and run
 
 ```sh
-cmake --build build --target lotus-cfl-dynamic-dyck dynamic_dyck_test \
-    dynamic_dyck_primary_component_test dynamic_dyck_primary_component_integration_test \
-    dynamic_dyck_primary_component_phases dynamic_dyck_primary_component_allocation_failure \
-    dynamic_dyck_primary_component_sparsification
+cmake --build build --target lotus-cfl-dynamic-dyck cfl_tests
 build/bin/lotus-cfl-dynamic-dyck 1 initial.dot updates.seq
 build/bin/lotus-cfl-dynamic-dyck --algorithm primary-component --stats initial.dot updates.seq
-ctest --test-dir build -R dynamic_dyck --output-on-failure
+ctest --test-dir build -R 'cfl_tests.PrimaryComponent' --output-on-failure
 ```
 
 The CLI accepts opaque node IDs and `op--TYPE`/`cp--TYPE` labels. Both algorithms

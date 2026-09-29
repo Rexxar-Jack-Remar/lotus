@@ -98,7 +98,8 @@ elseif(CASE STREQUAL "roundtrip")
 else()
     message(FATAL_ERROR "unknown CLI case ${CASE}")
 endif()
-execute_process(COMMAND "${PROGRAM}" ${args} "${graph}" RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+execute_process(COMMAND "${PROGRAM}" affine-spds ${args} "${graph}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(NOT "${status}" STREQUAL "${expected}")
     message(FATAL_ERROR "${CASE}: exit ${status}, expected ${expected}\n${output}\n${error}")
 endif()
@@ -110,7 +111,8 @@ elseif(NOT output STREQUAL "")
     message(FATAL_ERROR "failure must not emit a partial result: ${output}")
 endif()
 if(CASE STREQUAL "roundtrip")
-    execute_process(COMMAND "${PROGRAM}" --query 0 14 --observer "${WORK}/affine-observer-roundtrip.txt" "${graph}"
+    execute_process(COMMAND "${PROGRAM}" affine-spds --query 0 14
+        --observer "${WORK}/affine-observer-roundtrip.txt" "${graph}"
         RESULT_VARIABLE status2 OUTPUT_VARIABLE output2 ERROR_VARIABLE error2)
     file(REMOVE "${WORK}/affine-observer-roundtrip.txt")
     if(NOT status2 EQUAL 0 OR NOT output STREQUAL output2)

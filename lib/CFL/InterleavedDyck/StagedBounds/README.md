@@ -58,8 +58,8 @@ copy of its Go/Python sources. Its DOT benchmark inputs are stored under
 ## Command line
 
 ```sh
-cmake --build build --target lotus-cfl-interleaved-dyck-staged-bounds
-build/bin/lotus-cfl-interleaved-dyck-staged-bounds \
+cmake --build build --target lotus-cfl-interleaved-dyck
+build/bin/lotus-cfl-interleaved-dyck staged-bounds \
   --method mutual-refinement \
   benchmarks/real-world/CFL/InterleavedDyck/taint/faketaobao.dot
 ```

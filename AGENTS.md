@@ -21,19 +21,17 @@ lotus/
 │   ├── Dataflow/      # APA, IFDS/IDE, Mono, NPA, VASCO, WPDS
 │   ├── IR/            # GSA, GVFG, ICFG, PDG, SSI, SVFG, vSSA, etc.
 │   ├── Solvers/       # Datalog, EGraph, SMT
-│   ├── Transform/     # LLVM bitcode transformations
+│   ├── Transform/     # Bitcode transformations
 │   ├── Utils/         # LLVM utilities, ThreadPool, formats, etc.
 │   └── Verification/  # SIFA, CLAM, smarck, Seahorn, etc.
 ├── lib/               # Implementations (mirrors include)
 ├── tools/             # Command-line tools (alias, checker, verifier, ir, etc.)
 ├── tests/             # GTest-based tests (tests/unit/ mirrors subsystems)
 ├── benchmarks/        # Benchmark programs
-├── third-party/       # CUDD, WPDS, spdlog
+├── third-party/       # CUDD, WPDS, spdlog, etc.
 ├── scripts/           # Python utilities
 └── docs/              # Sphinx documentation (source/)
 ```
-
-**Convention**: `include/` holds headers; `lib/` holds `.cpp` sources. Directory names match between them (e.g., `include/Alias/UnificationBased/DyckAA/`, `lib/Alias/UnificationBased/DyckAA/`).
 
 ## Build System
 
@@ -51,20 +49,6 @@ make test
 
 Custom LLVM path: `cmake .. -DLLVM_BUILD_PATH=/path/to/llvm/lib/cmake/llvm`
 
-## Coding Conventions
-
-| Element        | Style       | Example                    |
-|----------------|------------|----------------------------|
-| Classes        | CamelCase  | `NullCheckAnalysis`        |
-| Functions      | camelCase  | `getPointsToSet`           |
-| Variables      | snake_case | `points_to_set`            |
-| Constants      | UPPER_CASE | `MAX_ITERATIONS`           |
-| Member vars    | m_ or _    | `m_AnalysisMap`            |
-| Indentation    | 2 spaces   | —                          |
-| Line length    | ≤ 100 chars| —                          |
-| Headers        | `#pragma once` or include guards | — |
-
-**Namespaces**: Use `lotus::` for framework code (e.g., `lotus::sifa`). Some modules use `using namespace llvm` in `.cpp` files.
 
 ## Architecture
 
@@ -73,7 +57,7 @@ Tools (lotus-alias-aser-aa, lotus-alias-dyck-aa, lotus-check, clam, etc.)
     ↓
 Analysis Applications (Checkers, Optimization, Verification, etc.)
     ↓
-Core: Alias Analysis | IR  | Dataflow  Analysis | Abstract Interpretation
+Core: Alias Analysis | IR  | Dataflow  Analysis | Abstract Interpretation | etc.
     ↓
 LLVM (Module, Function, BasicBlock, Instruction) | Solvers
 ```
@@ -84,6 +68,5 @@ LLVM (Module, Function, BasicBlock, Instruction) | Solvers
 - Tests live under `tests/unit/` and are grouped by subsystem (`Analysis`, `Checker`, `Concurrency`, `ControlFlow`, `DataFlow`, `Fuzzing`, `IR`, `Pointer`, `Solvers`, `TypeHierarchy`, `Utils`, `Verification`).
 - Shared unit-test build helpers are defined in `tests/unit/UnitTestHelpers.cmake`, which is included by `tests/unit/CMakeLists.txt`.
 - Add new tests with the subsystem-specific helpers from `tests/unit/UnitTestHelpers.cmake`, e.g. `add_lotus_analysis_test`, `add_lotus_concurrency_test`, `add_lotus_ir_test`, `add_lotus_pointer_test`, `add_lotus_verification_test`.
-- Use `add_lotus_targeted_test(...)` only when no existing subsystem helper fits; keep the link set minimal and add subsystem-specific libraries explicitly.
 - Shared test support targets include `lotus_test_utils` and `lotus_test_harness_utils`; prefer them over reintroducing large catch-all link bundles.
 - Run all tests with `cd build && ctest --output-on-failure`, or build specific test targets with `cmake --build build --target <test_name>`.

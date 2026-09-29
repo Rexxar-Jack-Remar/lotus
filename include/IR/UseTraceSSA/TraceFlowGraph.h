@@ -125,8 +125,9 @@ public:
   void annotate(FlowNodeID id, Event events, ObjectSet objects,
                 Certainty certainty = Certainty::Must);
   EffectiveEvent effectiveEvent(FlowNodeID id, ObjectID object) const;
-  /// Includes the sentinel only for unknown guarded effects, not ordinary TOP
-  /// history edges. TOP alone never makes the graph incomplete.
+  /// Uses the property universe when supplied. Otherwise includes the sentinel
+  /// for unknown guarded effects, not ordinary TOP history edges. TOP alone
+  /// never makes the graph incomplete.
   std::vector<ObjectID> resourceCandidates() const;
   /// Restrict candidates to the sources of one property. Event/topology edits
   /// invalidate this derived universe. TOP guards remain TOP in the graph.

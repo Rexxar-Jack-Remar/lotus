@@ -121,12 +121,12 @@ graph and CNF representations used by the other modules. See the
 ## Command line
 
 Configure Lotus with `-DLOTUS_ENABLE_CFL=ON` and build
-`lotus-cfl-interleaved-dyck-mcfl`:
+`lotus-cfl-interleaved-dyck mcfl`:
 
 ```sh
 cmake -S . -B build -DLOTUS_ENABLE_CFL=ON
-cmake --build build --target lotus-cfl-interleaved-dyck-mcfl
-build/bin/lotus-cfl-interleaved-dyck-mcfl --dimension 2 input.dot
+cmake --build build --target lotus-cfl-interleaved-dyck
+build/bin/lotus-cfl-interleaved-dyck mcfl --dimension 2 input.dot
 ```
 
 Use `--simple` for `G_d^circ`, `--no-condense` to disable the artifact's cycle
@@ -135,7 +135,7 @@ cross-product expansion, `--stats` for saturation counters, and
 `--print-pairs` to emit the final relation.
 
 The exact unary algorithms have their own
-`lotus-cfl-interleaved-dyck-unary` executable; see the
+`lotus-cfl-interleaved-dyck unary` executable; see the
 [InterleavedDyckUnary README](../Unary/README.md).
 
 ## Fidelity checks

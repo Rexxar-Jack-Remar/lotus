@@ -150,8 +150,8 @@ Build CFL tools and run the full hierarchy through dimension two:
 .. code-block:: console
 
    cmake -S . -B build -DLOTUS_ENABLE_CFL=ON
-   cmake --build build --target lotus-cfl-interleaved-dyck-mcfl
-   build/bin/lotus-cfl-interleaved-dyck-mcfl --dimension 2 graph.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck mcfl --dimension 2 graph.dot
 
 ``--simple`` selects ``G_d^circ``. ``--no-condense`` disables cycle
 elimination, ``--artifact-compatible`` selects the artifact's condensed
@@ -159,7 +159,7 @@ cross-product expansion, ``--stats`` prints saturation counters, and
 ``--print-pairs`` emits the final endpoint relation.
 
 The exact unary algorithms share the separate
-``lotus-cfl-interleaved-dyck-unary`` executable documented in
+``lotus-cfl-interleaved-dyck unary`` executable documented in
 :doc:`/cfl/interleaved_dyck/unary`.
 
 Validation and Complexity

@@ -11,6 +11,9 @@ lotus_collect_test_sources(ir_tests
   UseTraceSSA/FactorizedTest.cpp
   UseTraceSSA/ScalingTest.cpp
   UseTraceSSA/NativeFactorizedTest.cpp
+  UseTraceSSA/HistoryTest.cpp
+  UseTraceSSA/LLVMHistoryTest.cpp
+  UseTraceSSA/FlowTest.cpp
   UFG/UFGTest.cpp)
 
 add_lotus_collected_test_suite(ir_tests
