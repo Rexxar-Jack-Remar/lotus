@@ -10,8 +10,11 @@
 namespace lotus {
 namespace usetracessa {
 
-using FlowNodeID = ID;
-using FlowEdgeID = ID;
+// The object-expanded UFG shares these records and can exceed 2^32 nodes or
+// edges. Intraprocedural history and automaton IDs remain independently sized.
+using FlowNodeID = std::uint64_t;
+using FlowEdgeID = std::uint64_t;
+constexpr FlowNodeID InvalidFlowID = std::numeric_limits<FlowNodeID>::max();
 using FunctionID = ID;
 using ObjectID = std::uint64_t;
 using NativeID = std::uint64_t;
@@ -67,7 +70,7 @@ enum class FlowKind { History, Direct, Memory, Call, Return, Summary,
                       Dependence, Thread };
 
 struct FlowNode {
-  FlowNodeID id = InvalidID;
+  FlowNodeID id = InvalidFlowID;
   std::string label;
   FunctionID function = InvalidID;
   VersionID version = InvalidID;
@@ -78,8 +81,8 @@ struct FlowNode {
 };
 
 struct FlowEdge {
-  FlowEdgeID id = InvalidID;
-  FlowNodeID from = InvalidID, to = InvalidID;
+  FlowEdgeID id = InvalidFlowID;
+  FlowNodeID from = InvalidFlowID, to = InvalidFlowID;
   FlowKind kind = FlowKind::Direct;
   CallSiteID callSite = NoNativeID;
   ObjectSet objects = ObjectSet::unknown();
@@ -125,6 +128,9 @@ public:
   /// Includes the sentinel only for unknown guarded effects, not ordinary TOP
   /// history edges. TOP alone never makes the graph incomplete.
   std::vector<ObjectID> resourceCandidates() const;
+  /// Restrict candidates to the sources of one property. Event/topology edits
+  /// invalidate this derived universe. TOP guards remain TOP in the graph.
+  void setResourceUniverse(std::vector<ObjectID> objects);
   FlowStatistics statistics() const;
   void setNative(FlowNodeID id, NativeID native);
   void disableEdge(FlowEdgeID id);
@@ -148,6 +154,7 @@ private:
   std::vector<std::vector<FlowEdgeID>> Out, In;
   std::map<FunctionID, HistoryLayer> Layers;
   std::vector<std::string> Issues;
+  std::optional<std::vector<ObjectID>> ResourceUniverse;
   std::uint64_t Revision = 0;
 };
 

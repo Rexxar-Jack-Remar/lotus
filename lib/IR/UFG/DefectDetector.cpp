@@ -45,6 +45,9 @@ DefectScan DefectDetector::scan(DefectKind kind) const {
                 kind == DefectKind::MemoryLeak ? queries::memoryLeak(source) :
                                                  queries::fileLeak(source);
   query.contextLimit = ContextLimit;
+  // The experiment runner supplies time/memory limits. Do not turn resource
+  // exhaustion into a partial result through the generic Query defaults.
+  query.maxProductStates = query.maxSummaryPairs = query.maxWork = 0;
   const Event required = kind == DefectKind::FileLeak ? Event::Open :
       kind == DefectKind::MemoryLeak ? Event::Allocate : Event::Release;
   if (source.select(required).empty() || query.sinks.empty()) {
@@ -102,6 +105,7 @@ DefectReport DefectDetector::run(DefectKind kind, std::vector<FlowNodeID> roots,
     Query query = kind == DefectKind::Taint ? queries::taint(Graph.source()) :
         queries::uncheckedUse(std::move(roots), std::move(uses));
     query.contextLimit = ContextLimit;
+    query.maxProductStates = query.maxSummaryPairs = query.maxWork = 0;
     QueryResult result;
     if (query.sources.empty() || query.sinks.empty()) {
       result.status = QueryStatus::Unknown;

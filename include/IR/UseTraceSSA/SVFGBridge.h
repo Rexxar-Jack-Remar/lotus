@@ -14,13 +14,14 @@ enum class NativeHistoryMode { Full, DoubleFree, UseAfterFree, MemoryLeak, FileL
 
 /// Construct ordered histories from this revision's SVFG and the LLVM CFG.
 /// Sites are derived from instructions, memory phases, CFG edges and function
-/// boundaries. Shared temporal effects are populated for malloc/calloc, free and
-/// loads/stores using SVFG object IDs. Unsupported or ambiguous facts are
-/// recorded as issues, so negative queries remain Unknown.
+/// boundaries. Select the property before construction; Full explicitly builds
+/// the general overlay. Property modes retain their events, source-object
+/// universe, and required call/return topology. Unknown source guards prevent
+/// finite object pruning. Unsupported or ambiguous facts are recorded as issues,
+/// so negative queries remain Unknown. Rebuild for a different property.
 SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
                                                const llvm::Module &module,
-                                               NativeHistoryMode mode =
-                                                   NativeHistoryMode::Full);
+                                               NativeHistoryMode mode);
 
 /// Copy metadata carried by a Lotus SVFG edge. The caller assigns an ID and
 /// supplies the exact consumer site (or marks a genuine boundary). Empty

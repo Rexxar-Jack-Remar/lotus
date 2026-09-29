@@ -3,6 +3,7 @@
 
 #include "IR/UseTraceSSA/TraceFlowGraph.h"
 #include <llvm/ADT/BitVector.h>
+#include <memory>
 
 namespace lotus {
 namespace usetracessa {
@@ -71,6 +72,15 @@ struct QueryResult {
   bool found() const { return status == QueryStatus::Found; }
 };
 
+struct QueryScanResult {
+  QueryStatus status = QueryStatus::NotFound;
+  std::map<FlowNodeID, QueryResult> foundAt;
+  /// False when modeling or budgets prevent exhaustive sink enumeration.
+  bool complete = true;
+  std::size_t productStates = 0, edgesExamined = 0, summaryPairs = 0;
+  std::string message;
+};
+
 /// Complements exist only inside this finite query universe. Graph ObjectSet
 /// retains its TOP/BOTTOM lattice; in particular TOP minus a finite set is
 /// never written back to the graph.
@@ -92,6 +102,9 @@ struct ObjectBatchQuery {
   /// specify memoryObject; its universe is the only source of object identity.
   Query query;
   ObjectUniverse universe;
+  /// Retain shared path provenance for bounded-context and context-insensitive
+  /// queries. Unbounded Dyck queries use runToSinks() for witness construction.
+  bool retainWitnesses = false;
 };
 struct ObjectBatchStatistics {
   std::size_t productStates = 0, productEdges = 0, edgesExamined = 0;
@@ -99,6 +112,7 @@ struct ObjectBatchStatistics {
   std::size_t nonemptyDeltas = 0, candidateObjects = 0;
   std::size_t foundObjects = 0, notFoundObjects = 0, unknownObjects = 0;
 };
+struct ObjectWitnessData;
 struct ObjectBatchResult {
   ObjectUniverse universe;
   ObjectMask found, notFound, unknown;
@@ -110,6 +124,13 @@ struct ObjectBatchResult {
   bool complete = true;
   std::string message;
   QueryStatus status(ObjectID object) const;
+  bool hasWitnesses() const { return bool(Witnesses); }
+  /// Recover evidence for an accepted sink/object without another graph search.
+  /// Returns Unknown when provenance was not retained for this query mode.
+  QueryResult witness(FlowNodeID sink, ObjectID object) const;
+private:
+  friend class QueryEngine;
+  std::shared_ptr<ObjectWitnessData> Witnesses;
 };
 
 enum class CoverageStatus { SinkUnreachable, AllPathsTrapped, UntrappedPath, Unknown };
@@ -122,6 +143,9 @@ class QueryEngine {
 public:
   explicit QueryEngine(const TraceFlowGraph &graph) : G(graph) {}
   QueryResult run(const Query &query) const;
+  /// Build the product and context summaries once, retaining one witness for
+  /// each reachable sink. Supports generic and fixed-object queries.
+  QueryScanResult runToSinks(const Query &query) const;
   ObjectBatchResult runObjects(const ObjectBatchQuery &query) const;
   std::vector<QueryResult> runBatch(const std::vector<Query> &queries) const;
   /// Distinguishes vacuous coverage (sink unreachable even without traps).
@@ -132,6 +156,7 @@ public:
                               bool backward = false,
                               const std::vector<FlowNodeID> &traps = {}) const;
 private:
+  QueryResult runImpl(const Query &query, QueryScanResult *scan) const;
   const TraceFlowGraph &G;
 };
 

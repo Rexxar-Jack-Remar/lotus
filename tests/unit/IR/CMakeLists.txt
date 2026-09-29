@@ -6,7 +6,12 @@ add_subdirectory(SVFG)
 
 # All IR test sources collected from the subdirectories above are linked into
 # one binary so the shared libraries are linked only once.
-lotus_collect_test_sources(ir_tests GraphViewTest.cpp)
+lotus_collect_test_sources(ir_tests
+  GraphViewTest.cpp
+  UseTraceSSA/FactorizedTest.cpp
+  UseTraceSSA/ScalingTest.cpp
+  UseTraceSSA/NativeFactorizedTest.cpp
+  UFG/UFGTest.cpp)
 
 add_lotus_collected_test_suite(ir_tests
   LINK_LIBS
@@ -18,14 +23,7 @@ add_lotus_collected_test_suite(ir_tests
     CanaryShadowMemSSA
     CanaryOptimizationIPO
     SVFG
+    CanaryUseTraceSSACore
+    CanaryUseTraceSSASVFG
+    CanaryUFG
     ${Z3_LIBRARIES})
-
-# No IR-specific helper exists in this checkout; keep this target's link set small.
-add_lotus_targeted_test(usetracessa_objects_test UseTraceSSA/FactorizedTest.cpp
-  LINK_LIBS CanaryUseTraceSSACore)
-add_lotus_targeted_test(usetracessa_scaling_test UseTraceSSA/ScalingTest.cpp
-  LINK_LIBS CanaryUseTraceSSACore)
-add_lotus_targeted_test(usetracessa_native_test UseTraceSSA/NativeFactorizedTest.cpp
-  LINK_LIBS CanaryUseTraceSSASVFG)
-add_lotus_targeted_test(ufg_test UFG/UFGTest.cpp
-  LINK_LIBS CanaryUFG CanaryUseTraceSSASVFG LLVMAsmParser)

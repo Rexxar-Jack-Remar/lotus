@@ -7,6 +7,7 @@
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
+#include <llvm/IR/ModuleSlotTracker.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
@@ -18,18 +19,18 @@ namespace lotus {
 namespace usetracessa {
 namespace {
 
-std::string valueName(const llvm::Value &value) {
+std::string valueName(const llvm::Value &value, llvm::ModuleSlotTracker &slots) {
   std::string result;
   llvm::raw_string_ostream out(result);
-  value.printAsOperand(out, false);
+  value.printAsOperand(out, false, slots);
   out.flush();
   return result;
 }
 
-std::string instructionText(const llvm::Instruction &instruction) {
+std::string instructionText(const llvm::Instruction &instruction, llvm::ModuleSlotTracker &slots) {
   std::string result;
   llvm::raw_string_ostream out(result);
-  instruction.print(out);
+  instruction.print(out, slots);
   out.flush();
   return result;
 }
@@ -44,21 +45,22 @@ bool track(const llvm::Value &value, const LLVMHistoryOptions &options) {
          (options.trackGlobalAddresses && llvm::isa<llvm::GlobalVariable>(value));
 }
 
-std::string edgeLabel(const llvm::Instruction &terminator, unsigned index) {
+std::string edgeLabel(const llvm::Instruction &terminator, unsigned index,
+                      llvm::ModuleSlotTracker &slots) {
   if (const auto *branch = llvm::dyn_cast<llvm::BranchInst>(&terminator)) {
     if (branch->isConditional())
       return std::string(index == 0 ? "true: " : "false: ") +
-             valueName(*branch->getCondition());
+             valueName(*branch->getCondition(), slots);
     return "unconditional";
   }
   if (llvm::isa<llvm::InvokeInst>(terminator))
     return index == 0 ? "normal" : "unwind";
   if (const auto *sw = llvm::dyn_cast<llvm::SwitchInst>(&terminator)) {
-    if (index == 0) return "default: " + valueName(*sw->getCondition());
+    if (index == 0) return "default: " + valueName(*sw->getCondition(), slots);
     auto it = sw->case_begin();
     for (unsigned i = 1; i < index; ++i) ++it;
-    return "case " + valueName(*it->getCaseValue()) + ": " +
-           valueName(*sw->getCondition());
+    return "case " + valueName(*it->getCaseValue(), slots) + ": " +
+           valueName(*sw->getCondition(), slots);
   }
   return std::string(terminator.getOpcodeName()) + " successor " +
          std::to_string(index);
@@ -113,11 +115,13 @@ LLVMHistoryResult LLVMHistoryBuilder::build(const llvm::Function &function,
     throw std::invalid_argument("UseTraceSSA: invalid LLVM function: " + diagnostic);
   }
 
+  llvm::ModuleSlotTracker slots(function.getParent());
+  slots.incorporateFunction(function);
   for (const llvm::BasicBlock &block : function)
-    result.BlockIDs[&block] = program.addBlock(valueName(block));
+    result.BlockIDs[&block] = program.addBlock(valueName(block, slots));
   auto addValue = [&](const llvm::Value &value) {
     if (!track(value, options) || result.ValueIDs.count(&value)) return;
-    ValueID id = program.addValue(valueName(value));
+    ValueID id = program.addValue(valueName(value, slots));
     result.ValueIDs[&value] = id;
     result.Values.push_back(&value);
   };
@@ -137,7 +141,7 @@ LLVMHistoryResult LLVMHistoryBuilder::build(const llvm::Function &function,
     for (unsigned i = 0; i < term.getNumSuccessors(); ++i) {
       const llvm::BasicBlock *dest = term.getSuccessor(i);
       EdgeID id = program.addEdge(result.BlockIDs.at(&block),
-                                  result.BlockIDs.at(dest), edgeLabel(term, i));
+                                  result.BlockIDs.at(dest), edgeLabel(term, i, slots));
       edgeIDs[&block].push_back(id);
       result.Edges.push_back({&block, dest, i});
     }
@@ -203,13 +207,13 @@ LLVMHistoryResult LLVMHistoryBuilder::build(const llvm::Function &function,
           definitions.push_back(found->second);
       }
       result.InstructionSites[&instruction] =
-          addSite(blockID, InvalidID, instructionText(instruction), operands,
+          addSite(blockID, InvalidID, instructionText(instruction, slots), operands,
                   std::move(definitions));
       if (found != result.ValueIDs.end() &&
           llvm::isa<llvm::InvokeInst>(instruction)) {
         // LLVM defines the result on the normal edge, before phi operand uses.
         program.addEdgeOperation(edgeIDs.at(&block).at(0),
-                                  "invoke result " + valueName(instruction), {},
+                                  "invoke result " + valueName(instruction, slots), {},
                                   {found->second});
       }
     }
@@ -236,7 +240,8 @@ LLVMHistoryResult LLVMHistoryBuilder::build(const llvm::Function &function,
       bool truth = desc.successorIndex == 0;
       bool nonnull = (compare->getPredicate() == llvm::CmpInst::ICMP_NE) == truth;
       SiteID site = program.addEdgeOperation(edge,
-          std::string("assume ") + valueName(*pointer) + (nonnull ? " != null" : " == null"),
+          std::string("assume ") + valueName(*pointer, slots) +
+              (nonnull ? " != null" : " == null"),
           {found->second});
       result.NullGuards.push_back({edge, site, found->second, nonnull});
     }

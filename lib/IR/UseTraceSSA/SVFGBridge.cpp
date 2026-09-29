@@ -1,4 +1,5 @@
 #include "IR/UseTraceSSA/SVFGBridge.h"
+#include "IR/UseTraceSSA/InstructionLabels.h"
 #include "IR/UseTraceSSA/TemporalHistory.h"
 
 #include <llvm/IR/CFG.h>
@@ -10,6 +11,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -72,17 +74,8 @@ bool expectedEntry(const NativeNode &node) {
   }
 }
 
-std::string instructionText(const llvm::Instruction &instruction) {
-  std::string text;
-  llvm::raw_string_ostream out(text);
-  instruction.print(out);
-  if (const llvm::DebugLoc &location = instruction.getDebugLoc())
-    out << " [" << location->getFilename() << ':' << location.getLine() << ':'
-        << location.getCol() << ']';
-  return out.str();
-}
-
-Layout makeLayout(const llvm::Function &function, FunctionID id) {
+Layout makeLayout(const llvm::Function &function, FunctionID id,
+                  const detail::InstructionLabels &labels) {
   Layout layout;
   layout.function.id = id;
   layout.function.name = function.getName().str();
@@ -116,7 +109,7 @@ Layout makeLayout(const llvm::Function &function, FunctionID id) {
     layout.phi.emplace(&block, addBlockSite(current, "phi definitions"));
     for (const auto &instruction : block) {
       if (llvm::isa<llvm::PHINode>(instruction)) continue;
-      const std::string description = instructionText(instruction);
+      const std::string &description = labels.get(instruction);
       layout.before.emplace(&instruction,
                             addBlockSite(current, "before " + description));
       if (llvm::isa<llvm::CallBase>(instruction))
@@ -130,25 +123,77 @@ Layout makeLayout(const llvm::Function &function, FunctionID id) {
   return layout;
 }
 
-bool resourceEvent(const llvm::Instruction &instruction, NativeHistoryMode mode) {
-  if ((mode == NativeHistoryMode::MemoryLeak ||
-       mode == NativeHistoryMode::FileLeak) &&
-      llvm::isa<llvm::ReturnInst>(instruction))
-    return true;
-  if (mode == NativeHistoryMode::UseAfterFree &&
-      (llvm::isa<llvm::LoadInst>(instruction) ||
-       llvm::isa<llvm::StoreInst>(instruction)))
-    return true;
-  const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
-  const auto *callee = call ? call->getCalledFunction() : nullptr;
-  if (!callee) return false;
-  auto name = callee->getName();
-  return name == "free" ||
-         ((name == "malloc" || name == "calloc") && call->getType()->isPointerTy());
+struct ResourceProperty {
+  Event events;
+  Event sources;
+  Event required;
+  bool exits;
+};
+
+ResourceProperty resourceProperty(NativeHistoryMode mode) {
+  const Event heap = Event::Allocate | Event::Release;
+  switch (mode) {
+  case NativeHistoryMode::DoubleFree: return {heap, heap, Event::Release, false};
+  case NativeHistoryMode::UseAfterFree:
+    return {heap | Event::Dereference, heap, Event::Release, false};
+  case NativeHistoryMode::MemoryLeak:
+    return {heap | Event::Escape, Event::Allocate, Event::Allocate, true};
+  case NativeHistoryMode::FileLeak:
+    return {Event::Open | Event::Close | Event::Escape, Event::Open, Event::Open, true};
+  case NativeHistoryMode::Full:
+    return {heap | Event::Dereference | Event::Open | Event::Close,
+            Event::None, Event::None, true};
+  }
+  throw std::invalid_argument("UseTraceSSA: invalid native history mode");
 }
 
+Event resourceEvent(const llvm::Instruction &instruction, const ResourceProperty &property) {
+  if (hasEvent(property.events, Event::Escape))
+    if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(&instruction))
+      if (ret->getReturnValue() && ret->getReturnValue()->getType()->isPointerTy())
+        return Event::Escape;
+  if (hasEvent(property.events, Event::Dereference) &&
+      (llvm::isa<llvm::LoadInst>(instruction) ||
+       llvm::isa<llvm::StoreInst>(instruction)))
+    return Event::Dereference;
+  const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+  const auto *callee = call ? call->getCalledFunction() : nullptr;
+  if (!callee) return Event::None;
+  auto name = callee->getName();
+  Event event = Event::None;
+  if (name == "free" && call->arg_size()) event = Event::Release;
+  if ((name == "malloc" || name == "calloc") && call->getType()->isPointerTy())
+    event = Event::Allocate;
+  if (name == "fopen" && call->getType()->isPointerTy()) event = Event::Open;
+  if (name == "fclose" && call->arg_size()) event = Event::Close;
+  return hasEvent(property.events, event) ? event : Event::None;
+}
+
+bool structuralCall(const llvm::Instruction &instruction) {
+  const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+  if (!call) return false;
+  const auto *callee = call->getCalledFunction();
+  // Internal calls retain their control/return behavior even when the callee
+  // has no resource event. Unknown calls retain a conservative placeholder.
+  if (!callee || !callee->isDeclaration()) return true;
+  if (callee->isIntrinsic()) return false;
+  auto name = callee->getName();
+  return name != "free" && name != "malloc" && name != "calloc" &&
+         name != "fopen" && name != "fclose";
+}
+
+struct ResourcePlan {
+  ResourceProperty property;
+  bool hasRequired = false;
+  ObjectSet universe = ObjectSet::unknown();
+  std::map<const llvm::Instruction *, GuardedEventEffect> effects;
+  bool keeps(const llvm::Instruction &instruction) const {
+    return effects.count(&instruction) || structuralCall(instruction);
+  }
+};
+
 Layout makeResourceLayout(const llvm::Function &function, FunctionID id,
-                          NativeHistoryMode mode) {
+                          const ResourcePlan &plan, const detail::InstructionLabels &labels) {
   Layout layout;
   layout.function.id = id;
   layout.function.name = function.getName().str();
@@ -164,16 +209,19 @@ Layout makeResourceLayout(const llvm::Function &function, FunctionID id,
   for (const auto &block : function) {
     BlockID current = layout.blocks.at(&block);
     for (const auto &instruction : block) {
-      if (!resourceEvent(instruction, mode) && !llvm::isa<llvm::CallBase>(instruction)) continue;
+      if (!plan.keeps(instruction)) continue;
       bool dereference = llvm::isa<llvm::LoadInst>(instruction) ||
                          llvm::isa<llvm::StoreInst>(instruction);
+      SiteID returned = InvalidID;
+      if (structuralCall(instruction) && plan.effects.count(&instruction))
+        returned = program.addOperation(current, "returned " + labels.get(instruction));
       SiteID site = program.addOperation(current,
                            std::string(dereference ? "before " : "after ") +
-                           instructionText(instruction));
+                           labels.get(instruction));
       if (dereference) layout.before.emplace(&instruction, site);
       else {
         layout.after.emplace(&instruction, site);
-        layout.returned.emplace(&instruction, site);
+        layout.returned.emplace(&instruction, returned == InvalidID ? site : returned);
       }
     }
   }
@@ -304,116 +352,116 @@ ObjectSet resourceObjects(const analysis::SVFG &svfg, const llvm::Value *pointer
   return ObjectSet::known(std::move(objects));
 }
 
-void appendTemporalFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
-                         const llvm::Module &module,
-                         const std::map<const llvm::Function *, Layout> &layouts,
-                         FunctionID firstLayer, NativeHistoryMode mode) {
-  std::map<const llvm::Function *, std::vector<TemporalEffect>> effects;
-  std::set<const llvm::Function *> calledFunctions;
-  for (const auto &function : module)
-    for (const auto &block : function)
-      for (const auto &instruction : block)
-        if (const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction))
-          if (const auto *callee = call->getCalledFunction())
-            if (!callee->isDeclaration()) calledFunctions.insert(callee);
-  std::map<const llvm::Instruction *, NativeID> provenance;
-  // Native object IDs are 32-bit. Reserve the high half for deterministic
-  // per-allocation-site fallbacks when the points-to producer has no fact.
-  std::map<const llvm::Instruction *, ObjectID> syntheticObjects;
+ResourcePlan planResources(const analysis::SVFG &svfg, const llvm::Module &module,
+                           NativeHistoryMode mode) {
+  ResourcePlan plan{resourceProperty(mode)};
+  plan.hasRequired = mode == NativeHistoryMode::Full;
+  std::set<const llvm::Function *> called;
+  std::map<const llvm::Instruction *, ObjectID> synthetic;
   ObjectID nextSynthetic = ObjectID(1) << 63;
-  if (mode == NativeHistoryMode::MemoryLeak || mode == NativeHistoryMode::FileLeak)
-    for (const auto &function : module)
-      for (const auto &block : function)
-        for (const auto &instruction : block)
-          if (const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction)) {
-            const auto *callee = call->getCalledFunction();
-            if (!callee || !call->getType()->isPointerTy()) continue;
-            auto name = callee->getName();
-            if ((mode == NativeHistoryMode::MemoryLeak &&
-                 (name == "malloc" || name == "calloc")) ||
-                (mode == NativeHistoryMode::FileLeak && name == "fopen"))
-              syntheticObjects.emplace(call, nextSynthetic++);
-          }
-  for (const auto &item : svfg) if (const auto *instruction = anchor(*item.second)) {
-    auto it = provenance.emplace(instruction, item.second->getId());
-    if (!it.second) it.first->second = std::min<NativeID>(it.first->second, item.second->getId());
-  }
-  auto objectsFor = [&](const llvm::Value *pointer) {
-    ObjectSet objects = resourceObjects(svfg, pointer);
-    if (!objects.isUnknown()) return objects;
-    const auto *site = llvm::dyn_cast<llvm::Instruction>(pointer->stripPointerCasts());
-    auto found = syntheticObjects.find(site);
-    return found == syntheticObjects.end() ? objects :
-           ObjectSet::known({found->second});
-  };
-  auto directAcquisition = [&](const llvm::Value *pointer, llvm::StringRef name) {
+  for (const auto &function : module) for (const auto &block : function)
+    for (const auto &instruction : block) {
+      const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+      const auto *callee = call ? call->getCalledFunction() : nullptr;
+      if (callee && !callee->isDeclaration()) called.insert(callee);
+      auto event = resourceEvent(instruction, plan.property);
+      if (mode != NativeHistoryMode::Full && plan.property.exits &&
+          hasEvent(event, plan.property.sources))
+        synthetic.emplace(&instruction, nextSynthetic++);
+    }
+  auto directAcquisition = [](const llvm::Value *pointer, llvm::StringRef name) {
     const auto *call = llvm::dyn_cast<llvm::CallBase>(pointer->stripPointerCasts());
     const auto *callee = call ? call->getCalledFunction() : nullptr;
     return callee && callee->getName() == name;
   };
-  auto add = [&](const llvm::Function &function, const llvm::Instruction &instruction,
-                 SiteID site, ObjectSet objects, Event event,
-                 Certainty certainty = Certainty::May) {
-    auto native = provenance.find(&instruction);
-    effects[&function].push_back({site, std::move(objects), event, certainty,
-                                  native == provenance.end() ? NoNativeID : native->second});
-  };
-  for (const auto &function : module) {
-    auto layout = layouts.find(&function);
-    if (layout == layouts.end()) continue;
-    for (const auto &block : function) for (const auto &instruction : block) {
-      if ((mode == NativeHistoryMode::MemoryLeak ||
-           mode == NativeHistoryMode::FileLeak) &&
-          !calledFunctions.count(&function) && !function.hasAddressTaken())
-        if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(&instruction))
-          if (const llvm::Value *value = ret->getReturnValue())
-            if (value->getType()->isPointerTy())
-              add(function, instruction, layout->second.after.at(ret),
-                  objectsFor(value), Event::Escape, Certainty::Must);
-      if (mode == NativeHistoryMode::Full || mode == NativeHistoryMode::UseAfterFree) {
-        if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(&instruction))
-          add(function, instruction, layout->second.before.at(load),
-              resourceObjects(svfg, load->getPointerOperand()), Event::Dereference);
-        if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(&instruction))
-          add(function, instruction, layout->second.before.at(store),
-              resourceObjects(svfg, store->getPointerOperand()), Event::Dereference);
-      }
-      const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
-      const auto *callee = call ? call->getCalledFunction() : nullptr;
-      if (!callee) continue;
-      auto name = callee->getName();
-      if (mode != NativeHistoryMode::FileLeak &&
-          name == "free" && call->arg_size() >= 1) {
-        const llvm::Value *pointer = call->getArgOperand(0);
-        Certainty certainty = mode == NativeHistoryMode::MemoryLeak &&
-            (directAcquisition(pointer, "malloc") ||
-             directAcquisition(pointer, "calloc")) ? Certainty::Must : Certainty::May;
-        add(function, instruction, layout->second.after.at(call),
-            objectsFor(pointer), Event::Release, certainty);
-      }
-      if (mode != NativeHistoryMode::FileLeak &&
-          (name == "malloc" || name == "calloc") &&
-          call->getType()->isPointerTy())
-        add(function, instruction, layout->second.after.at(call),
-            objectsFor(call), Event::Allocate);
-      if ((mode == NativeHistoryMode::Full || mode == NativeHistoryMode::FileLeak) &&
-          name == "fopen" && call->getType()->isPointerTy())
-        add(function, instruction, layout->second.after.at(call),
-            objectsFor(call), Event::Open);
-      if ((mode == NativeHistoryMode::Full || mode == NativeHistoryMode::FileLeak) &&
-          name == "fclose" && call->arg_size() >= 1) {
-        const llvm::Value *pointer = call->getArgOperand(0);
-        Certainty certainty = mode == NativeHistoryMode::FileLeak &&
-            directAcquisition(pointer, "fopen") ? Certainty::Must : Certainty::May;
-        add(function, instruction, layout->second.after.at(call),
-            objectsFor(pointer), Event::Close, certainty);
-      }
+  auto effectFor = [&](const llvm::Instruction &instruction, Event event) {
+    const llvm::Value *pointer = nullptr;
+    Certainty certainty = Certainty::May;
+    if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(&instruction))
+      pointer = load->getPointerOperand();
+    else if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(&instruction))
+      pointer = store->getPointerOperand();
+    else if (const auto *ret = llvm::dyn_cast<llvm::ReturnInst>(&instruction)) {
+      pointer = ret->getReturnValue(); certainty = Certainty::Must;
+    } else {
+      const auto &call = llvm::cast<llvm::CallBase>(instruction);
+      pointer = hasEvent(event, Event::Allocate | Event::Open) ? &instruction :
+                                                               call.getArgOperand(0);
+      if ((mode == NativeHistoryMode::MemoryLeak && event == Event::Release &&
+           (directAcquisition(pointer, "malloc") || directAcquisition(pointer, "calloc"))) ||
+          (mode == NativeHistoryMode::FileLeak && event == Event::Close &&
+           directAcquisition(pointer, "fopen")))
+        certainty = Certainty::Must;
     }
+    auto objects = resourceObjects(svfg, pointer);
+    if (objects.isUnknown()) {
+      auto site = llvm::dyn_cast<llvm::Instruction>(pointer->stripPointerCasts());
+      auto fallback = synthetic.find(site);
+      if (fallback != synthetic.end()) objects = ObjectSet::known({fallback->second});
+    }
+    return GuardedEventEffect{event, std::move(objects), certainty};
+  };
+
+  std::vector<ObjectID> candidates;
+  bool unknownSources = mode == NativeHistoryMode::Full;
+  for (const auto &function : module) for (const auto &block : function)
+    for (const auto &instruction : block) {
+      auto event = resourceEvent(instruction, plan.property);
+      if (!hasEvent(event, plan.property.sources)) continue;
+      auto effect = effectFor(instruction, event);
+      plan.hasRequired |= hasEvent(event, plan.property.required) && !effect.objects.empty();
+      unknownSources |= effect.objects.isUnknown();
+      candidates.insert(candidates.end(), effect.objects.objects().begin(),
+                         effect.objects.objects().end());
+      plan.effects.emplace(&instruction, std::move(effect));
+    }
+  if (!plan.hasRequired) return plan;
+  if (!unknownSources) plan.universe = ObjectSet::known(std::move(candidates));
+
+  for (const auto &function : module) for (const auto &block : function)
+    for (const auto &instruction : block) {
+      auto event = resourceEvent(instruction, plan.property);
+      if (event == Event::None || hasEvent(event, plan.property.sources)) continue;
+      if (event == Event::Escape && (called.count(&function) || function.hasAddressTaken()))
+        continue;
+      auto effect = effectFor(instruction, event);
+      if (!plan.universe.isUnknown() && !effect.objects.isUnknown()) {
+        std::vector<ObjectID> relevant;
+        const auto &objects = effect.objects.objects();
+        const auto &universe = plan.universe.objects();
+        std::set_intersection(objects.begin(), objects.end(), universe.begin(), universe.end(),
+                              std::back_inserter(relevant));
+        effect.objects = ObjectSet::known(std::move(relevant));
+      }
+      if (!effect.objects.empty()) plan.effects.emplace(&instruction, std::move(effect));
+    }
+  return plan;
+}
+
+void appendTemporalFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
+                         const std::map<const llvm::Function *, Layout> &layouts,
+                         FunctionID firstLayer, const ResourcePlan &plan) {
+  std::map<const llvm::Function *, std::vector<TemporalEffect>> effects;
+  std::map<const llvm::Instruction *, NativeID> provenance;
+  for (const auto &item : svfg) if (const auto *instruction = anchor(*item.second)) {
+    auto it = provenance.emplace(instruction, item.second->getId());
+    if (!it.second) it.first->second = std::min<NativeID>(it.first->second, item.second->getId());
+  }
+  for (const auto &entry : plan.effects) {
+    const auto *instruction = entry.first;
+    const auto &effect = entry.second;
+    const auto &layout = layouts.at(instruction->getFunction());
+    SiteID site = effect.events == Event::Dereference ? layout.before.at(instruction) :
+                                                       layout.after.at(instruction);
+    auto native = provenance.find(instruction);
+    effects[instruction->getFunction()].push_back({site, effect.objects, effect.events,
+        effect.certainty, native == provenance.end() ? NoNativeID : native->second});
   }
   std::map<const llvm::Function *, TemporalHistory> histories;
   for (const auto &item : layouts) {
     auto history = TemporalHistory::append(result.graph, firstLayer++,
-        item.second.function.name + ".temporal", item.second.function.control, effects[item.first]);
+        item.second.function.name + ".temporal", item.second.function.control, effects[item.first],
+        plan.property.exits);
     // A CFG sink such as unreachable/resume is not a normal return port.
     // Full layouts also have one explicit synthetic join of normal returns.
     for (auto exit = history.exits.begin(); exit != history.exits.end();) {
@@ -466,13 +514,25 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
                                                NativeHistoryMode mode) {
   SVFGConstructionInput input;
   std::map<const llvm::Function *, Layout> layouts;
+  const auto plan = planResources(svfg, module, mode);
+  if (!plan.hasRequired) {
+    SVFGHistoryResult result;
+    result.graph.addIssue("required native source events are absent for the selected property");
+    return result;
+  }
   FunctionID nextFunction = 1;
-  for (const auto &function : module) {
-    if (function.isDeclaration()) continue;
-    if (mode == NativeHistoryMode::Full)
-      layouts.emplace(&function, makeLayout(function, nextFunction++));
-    else
-      layouts.emplace(&function, makeResourceLayout(function, nextFunction++, mode));
+  {
+    detail::InstructionLabels labels(module, [&](const llvm::Instruction &instruction) {
+      return mode == NativeHistoryMode::Full ? !llvm::isa<llvm::PHINode>(instruction) :
+                                             plan.keeps(instruction);
+    });
+    for (const auto &function : module) {
+      if (function.isDeclaration()) continue;
+      if (mode == NativeHistoryMode::Full)
+        layouts.emplace(&function, makeLayout(function, nextFunction++, labels));
+      else
+        layouts.emplace(&function, makeResourceLayout(function, nextFunction++, plan, labels));
+    }
   }
   std::map<const llvm::Function *, llvm::DominatorTree> dominators;
   if (mode == NativeHistoryMode::Full)
@@ -480,8 +540,10 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
       dominators[entry.first].recalculate(*const_cast<llvm::Function *>(entry.first));
   if (mode != NativeHistoryMode::Full) {
     SVFGHistoryResult result;
-    appendTemporalFacts(result, svfg, module, layouts, 1, mode);
+    appendTemporalFacts(result, svfg, layouts, 1, plan);
     for (const auto &issue : callIssues(module)) result.graph.addIssue(issue);
+    if (!plan.universe.isUnknown())
+      result.graph.setResourceUniverse(plan.universe.objects());
     return result;
   }
   FunctionLayout globals;
@@ -584,7 +646,7 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
   input.functions.push_back(std::move(globals));
   for (const auto &item : layouts) input.functions.push_back(item.second.function);
   auto result = SVFGImporter::build(input);
-  appendTemporalFacts(result, svfg, module, layouts, nextFunction, mode);
+  appendTemporalFacts(result, svfg, layouts, nextFunction, plan);
   return result;
 }
 

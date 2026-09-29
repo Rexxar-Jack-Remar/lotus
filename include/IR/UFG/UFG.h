@@ -2,6 +2,7 @@
 #define LOTUS_IR_UFG_UFG_H
 
 #include "IR/UseTraceSSA/Query.h"
+#include "IR/UFG/ID.h"
 
 namespace lotus {
 namespace ufg {

@@ -4,6 +4,7 @@
 #include "IR/UseTraceSSA/SVFGImporter.h"
 #include "IR/UseTraceSSA/TemporalHistory.h"
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <numeric>
@@ -20,14 +21,83 @@ void edge(TraceFlowGraph &g, ID a, ID b, ObjectSet objects = ObjectSet::unknown(
   g.addEdge(e);
 }
 Query query(ID a, ID b) { Query q; q.sources = {a}; q.sinks = {b}; return q; }
+void checkWitness(const TraceFlowGraph &g, const Query &q, ObjectID object,
+                  FlowNodeID sink, const QueryResult &witness) {
+  ASSERT_TRUE(witness.found());
+  ASSERT_FALSE(witness.nodes.empty());
+  ASSERT_EQ(witness.edges.size() + 1, witness.nodes.size());
+  ASSERT_EQ(witness.automatonStates.size(), witness.nodes.size());
+  EXPECT_NE(std::find(q.sources.begin(), q.sources.end(), witness.nodes.front()), q.sources.end());
+  std::vector<CallSiteID> calls;
+  bool truncated = false;
+  for (std::size_t i = 0; i < witness.nodes.size(); ++i) {
+    auto node = witness.nodes[i];
+    EXPECT_EQ(std::find(q.traps.begin(), q.traps.end(), node), q.traps.end());
+    auto effective = g.effectiveEvent(node, object);
+    ID before = i ? witness.automatonStates[i - 1] : q.automaton.initial;
+    ID after = witness.automatonStates[i];
+    bool valid = effective.certainty == Certainty::May && before == after;
+    if (!hasEvent(effective.events, q.trapEvents))
+      valid |= after == (q.automaton.transition ?
+                         q.automaton.transition(before, effective.events) : before);
+    EXPECT_TRUE(valid);
+    if (!i) continue;
+    const auto &edge = g.edge(witness.edges[i - 1]);
+    EXPECT_EQ(edge.from, witness.nodes[i - 1]);
+    EXPECT_EQ(edge.to, node);
+    EXPECT_TRUE(edge.enabled);
+    EXPECT_TRUE(edge.objects.contains(object));
+    if (q.context == ContextMode::Insensitive) continue;
+    if (edge.kind == FlowKind::Call) {
+      if (q.contextLimit && calls.size() >= *q.contextLimit) {
+        if (!calls.empty()) calls.erase(calls.begin());
+        truncated = true;
+      }
+      calls.push_back(edge.callSite);
+    } else if (edge.kind == FlowKind::Return) {
+      if (calls.empty()) EXPECT_TRUE(q.context != ContextMode::Balanced || truncated);
+      else { EXPECT_EQ(calls.back(), edge.callSite); calls.pop_back(); }
+    }
+  }
+  if (witness.witnessComplete) {
+    EXPECT_EQ(witness.nodes.back(), sink);
+    EXPECT_NE(std::find(q.automaton.accepting.begin(), q.automaton.accepting.end(),
+                        witness.automatonStates.back()), q.automaton.accepting.end());
+    if (q.context == ContextMode::Balanced) EXPECT_TRUE(calls.empty());
+    if (q.requireNonEmpty) EXPECT_FALSE(witness.edges.empty());
+  }
+}
 ObjectBatchResult compare(const TraceFlowGraph &g, Query q,
                            std::vector<ObjectID> objects = {1, 2, 3, 4, UnknownResource}) {
   q.memoryObject.reset();
-  auto batch = QueryEngine(g).runObjects({q, ObjectUniverse(objects)});
+  auto batch = QueryEngine(g).runObjects({q, ObjectUniverse(objects), true});
   for (auto object : objects) {
     q.memoryObject = object;
     auto fixed = QueryEngine(g).run(q);
     EXPECT_EQ(batch.status(object), fixed.status) << "object=" << object;
+    auto allSinks = QueryEngine(g).runToSinks(q);
+    EXPECT_EQ(allSinks.status, fixed.status);
+    for (auto sink : q.sinks) {
+      if (batch.hasWitnesses()) {
+        auto accepted = batch.foundAt.find(sink);
+        bool found = accepted != batch.foundAt.end() &&
+                     accepted->second.test(batch.universe.index(object));
+        auto witness = batch.witness(sink, object);
+        EXPECT_EQ(witness.found(), found);
+        if (found) checkWitness(g, q, object, sink, witness);
+      }
+      Query single = q;
+      single.sinks = {sink};
+      auto expected = QueryEngine(g).run(single);
+      auto found = allSinks.foundAt.find(sink);
+      EXPECT_EQ(found != allSinks.foundAt.end(), expected.found());
+      if (found != allSinks.foundAt.end()) {
+        EXPECT_EQ(found->second.nodes, expected.nodes);
+        EXPECT_EQ(found->second.edges, expected.edges);
+        EXPECT_EQ(found->second.automatonStates, expected.automatonStates);
+        EXPECT_EQ(found->second.witnessComplete, expected.witnessComplete);
+      }
+    }
     if (fixed.found()) {
       EXPECT_FALSE(fixed.nodes.empty());
       for (auto eid : fixed.edges) EXPECT_TRUE(g.edge(eid).objects.contains(object));
@@ -51,6 +121,31 @@ TEST(UseTraceSSAObjects, SequentialAndJoin) {
     edge(g, a, c, ObjectSet::known({3}));
     r = compare(g, q); EXPECT_EQ(r.found.count(), overlap ? 3u : 2u);
   }
+}
+TEST(UseTraceSSAObjects, FragmentedDeltasExpandEachProductOnce) {
+  TraceFlowGraph g;
+  auto join = node(g), sink = node(g), thread = node(g);
+  edge(g, join, sink);
+  edge(g, join, thread, ObjectSet::unknown(), FlowKind::Thread);
+  Query q;
+  q.sinks = {sink};
+  q.context = ContextMode::Insensitive;
+  std::vector<ObjectID> objects;
+  for (ObjectID object = 1; object <= 32; ++object) {
+    auto source = node(g);
+    q.sources.push_back(source);
+    objects.push_back(object);
+    edge(g, source, join, ObjectSet::known({object}));
+  }
+  auto batch = QueryEngine(g).runObjects({q, ObjectUniverse(objects)});
+  EXPECT_EQ(batch.found.count(), objects.size());
+  EXPECT_EQ(batch.statistics.edgesExamined, objects.size() + 2);
+  EXPECT_EQ(batch.statistics.productEdges, objects.size() + 1);
+
+  q.sinks = {thread};
+  batch = QueryEngine(g).runObjects({q, ObjectUniverse(objects)});
+  EXPECT_EQ(batch.unknown.count(), objects.size());
+  EXPECT_TRUE(batch.found.none());
 }
 TEST(UseTraceSSAObjects, GuardedEventsAndCertainty) {
   TraceFlowGraph g; auto a = node(g), b = node(g);
@@ -76,6 +171,38 @@ TEST(UseTraceSSAObjects, GuardedEventsAndCertainty) {
   EXPECT_EQ(h.effectiveEvent(reset, 2).certainty, Certainty::May);
   EXPECT_EQ(compare(h, df).status(2), QueryStatus::Found);
   EXPECT_TRUE(h.complete());
+}
+TEST(UseTraceSSAObjects, SharedMasksAcrossWordBoundaries) {
+  for (unsigned count : {0, 1, 63, 64, 65, 257}) {
+    SCOPED_TRACE(count);
+    std::vector<ObjectID> objects(count), even, odd, reset, used;
+    std::iota(objects.begin(), objects.end(), 1);
+    for (auto object : objects) {
+      (object % 2 ? odd : even).push_back(object);
+      if (object % 3 == 0) reset.push_back(object);
+      if (object % 5 != 0) used.push_back(object);
+    }
+    TraceFlowGraph g;
+    auto root = node(g, Event::Release), left = node(g), right = node(g), join = node(g);
+    edge(g, root, left, ObjectSet::known(even), FlowKind::Call, 7);
+    edge(g, root, right, ObjectSet::known(odd), FlowKind::Call, 8);
+    edge(g, left, join, ObjectSet::unknown(), FlowKind::Return, 7);
+    edge(g, right, join, ObjectSet::unknown(), FlowKind::Return, 8);
+    edge(g, join, root);
+    g.annotate(left, Event::Allocate, ObjectSet::known(reset));
+    g.annotate(join, Event::Dereference, ObjectSet::known(used));
+    for (auto limit : {std::optional<std::size_t>{}, std::optional<std::size_t>{3}}) {
+      auto q = queries::useAfterFree(g);
+      q.context = ContextMode::Balanced;
+      q.contextLimit = limit;
+      auto batch = compare(g, q, objects);
+      EXPECT_TRUE(batch.complete);
+      EXPECT_TRUE(batch.unknown.none());
+      for (auto object : objects)
+        EXPECT_EQ(batch.status(object), object % 5 != 0 && object % 6 != 0 ?
+                                       QueryStatus::Found : QueryStatus::NotFound);
+    }
+  }
 }
 TEST(UseTraceSSAObjects, UnknownAndEmptyTraps) {
   for (auto objects : {ObjectSet::unknown(), ObjectSet::known({}), ObjectSet::known({1})}) {
@@ -105,6 +232,53 @@ TEST(UseTraceSSAObjects, ContextAndPositiveCycles) {
   auto r = compare(g,q); EXPECT_EQ(r.found.count(), 1u);
   q.requireNonEmpty = false; EXPECT_EQ(compare(g,q).found.count(), 5u);
 }
+TEST(UseTraceSSAObjects, AllSinkContextsAndWitnessLimits) {
+  TraceFlowGraph g;
+  auto source = node(g), inside = node(g), sink = node(g), wrong = node(g);
+  edge(g, source, inside, ObjectSet::known({1, 2}), FlowKind::Call, 7);
+  edge(g, inside, sink, ObjectSet::known({2}), FlowKind::Return, 7);
+  edge(g, inside, wrong, ObjectSet::known({1, 2}), FlowKind::Return, 8);
+  edge(g, inside, inside, ObjectSet::unknown(), FlowKind::Call, 7);
+  for (auto context : {ContextMode::Insensitive, ContextMode::Balanced, ContextMode::Realizable}) {
+    for (auto limit : {std::optional<std::size_t>{}, std::optional<std::size_t>{0},
+                       std::optional<std::size_t>{1}, std::optional<std::size_t>{3},
+                       std::optional<std::size_t>{6}}) {
+      Query q = query(source, sink);
+      q.sinks = {source, inside, sink, wrong, sink};
+      q.context = context;
+      q.contextLimit = limit;
+      for (bool nonempty : {false, true}) {
+        q.requireNonEmpty = nonempty;
+        for (auto maxWitness : {std::size_t(1), std::size_t(100)}) {
+          q.maxWitnessEdges = maxWitness;
+          compare(g, q, {1, 2});
+          auto all = QueryEngine(g).runToSinks(q);
+          EXPECT_TRUE(all.complete);
+          for (auto sink : q.sinks) {
+            Query single = q; single.sinks = {sink};
+            auto expected = QueryEngine(g).run(single);
+            auto found = all.foundAt.find(sink);
+            EXPECT_EQ(found != all.foundAt.end(), expected.found());
+            if (found != all.foundAt.end()) {
+              EXPECT_EQ(found->second.edges, expected.edges);
+              EXPECT_EQ(found->second.witnessComplete, expected.witnessComplete);
+            }
+          }
+        }
+      }
+      q.maxProductStates = 1;
+      auto partial = QueryEngine(g).runToSinks(q);
+      EXPECT_FALSE(partial.complete);
+      EXPECT_NE(partial.status, QueryStatus::NotFound);
+      q.requireNonEmpty = false;
+      partial = QueryEngine(g).runToSinks(q);
+      EXPECT_FALSE(partial.complete);
+      EXPECT_EQ(partial.status, QueryStatus::Found);
+      ASSERT_EQ(partial.foundAt.size(), 1u);
+      EXPECT_TRUE(partial.foundAt.count(source));
+    }
+  }
+}
 TEST(UseTraceSSAObjects, RandomDifferential) {
   std::mt19937 rng(919827);
   for (unsigned trial = 0; trial < 250; ++trial) {
@@ -131,6 +305,7 @@ TEST(UseTraceSSAObjects, RandomDifferential) {
     for (auto context : {ContextMode::Insensitive, ContextMode::Balanced, ContextMode::Realizable}) {
       auto q = query(0,6); q.sources.push_back(1); q.sinks.push_back(5);
       q.context = context; q.requireNonEmpty = rng()%2;
+      if (rng()%2) q.contextLimit = rng()%4;
       if (rng()%2) q.automaton = Automaton::doubleFree();
       if (rng()%3 == 0) q.trapEvents = Event::Allocate;
       if (rng()%9 == 0) g.addIssue("incomplete random fixture");
@@ -231,6 +406,49 @@ TEST(UseTraceSSAObjects, ModelsAndUnknownCandidate) {
   EXPECT_EQ(g.node(b).effects.size(),2u);
   EXPECT_EQ(g.node(b).events,Event::None);
 }
+TEST(UseTraceSSAObjects, DetectorRequiresTargetEventAtSink) {
+  TraceFlowGraph g;
+  auto release = node(g), firstUse = node(g), otherUse = node(g);
+  edge(g, release, firstUse);
+  edge(g, firstUse, otherUse);
+  g.annotate(release, Event::Release, ObjectSet::known({1}));
+  g.annotate(firstUse, Event::Dereference, ObjectSet::known({1}));
+  g.annotate(otherUse, Event::Dereference, ObjectSet::known({2}));
+  auto scan = DefectDetector(g).scan(DefectKind::UseAfterFree);
+  ASSERT_EQ(scan.findings.size(), 1u);
+  EXPECT_EQ(scan.findings.front().objects, std::vector<ObjectID>({1}));
+  EXPECT_EQ(scan.findings.front().result.nodes.back(), firstUse);
+}
+TEST(UseTraceSSAObjects, DetectorGroupsWitnessObjectsAndKeepsSinkOrder) {
+  TraceFlowGraph g;
+  auto release = node(g), secondObject = node(g), firstObject = node(g), later = node(g);
+  g.annotate(release, Event::Release, ObjectSet::known({1, 2}));
+  g.annotate(secondObject, Event::Dereference, ObjectSet::known({2}));
+  g.annotate(firstObject, Event::Dereference, ObjectSet::known({1}));
+  g.annotate(later, Event::Dereference, ObjectSet::known({1, 2}));
+  edge(g, release, secondObject);
+  edge(g, release, firstObject);
+  edge(g, firstObject, later);
+  for (auto limit : {std::optional<std::size_t>{}, std::optional<std::size_t>{3}}) {
+    DefectDetector detector(g, limit);
+    auto scan = detector.scan(DefectKind::UseAfterFree);
+    ASSERT_EQ(scan.findings.size(), 3u);
+    EXPECT_EQ(scan.findings[0].result.nodes.back(), secondObject);
+    EXPECT_EQ(scan.findings[1].result.nodes.back(), firstObject);
+    EXPECT_EQ(scan.findings[2].result.nodes.back(), later);
+    for (const auto &finding : scan.findings) {
+      auto q = queries::useAfterFree(g);
+      q.contextLimit = limit;
+      q.memoryObject = finding.witnessObject;
+      q.sinks = {finding.result.nodes.back()};
+      EXPECT_EQ(finding.result.edges, QueryEngine(g).run(q).edges);
+    }
+    auto first = detector.run(DefectKind::UseAfterFree);
+    EXPECT_EQ(first.result.nodes, scan.findings.front().result.nodes);
+    EXPECT_EQ(first.objects, scan.findings.front().objects);
+    EXPECT_EQ(first.witnessObject, scan.findings.front().witnessObject);
+  }
+}
 TEST(UseTraceSSAObjects, SerializationAndVerification) {
   TraceFlowGraph g; auto a=node(g);
   g.annotate(a,Event::Release,ObjectSet::unknown());
@@ -246,6 +464,21 @@ TEST(UseTraceSSAObjects, SerializationAndVerification) {
   EXPECT_THROW(g.annotate(a,Event::None,ObjectSet::unknown()),std::invalid_argument);
   FlowNode bad; bad.effects={{Event::Release,ObjectSet::unknown(),static_cast<Certainty>(9)}};
   g.addNode(bad); EXPECT_FALSE(g.verify());
+}
+TEST(UseTraceSSAObjects, PropertyUniversePreservesTopAndInvalidatesOnMutation) {
+  TraceFlowGraph g;
+  auto release = node(g), use = node(g);
+  g.annotate(release, Event::Release, ObjectSet::known({1}));
+  g.annotate(use, Event::Dereference, ObjectSet::unknown());
+  edge(g, release, use);
+  g.setResourceUniverse({1, 1});
+  EXPECT_EQ(g.resourceCandidates(), std::vector<ObjectID>({1}));
+  EXPECT_TRUE(g.node(use).effects.front().objects.isUnknown());
+  std::ostringstream json;
+  g.printJSON(json);
+  EXPECT_NE(json.str().find("\"resource_universe\":[\"1\"]"), std::string::npos);
+  g.annotate(release, Event::Release, ObjectSet::known({2}));
+  EXPECT_EQ(g.resourceCandidates(), std::vector<ObjectID>({1, 2, UnknownResource}));
 }
 TEST(UseTraceSSAObjects, WitnessProvenance) {
   Program p; auto b=p.addBlock("entry"), a=p.addOperation(b,"free"), c=p.addOperation(b,"use");

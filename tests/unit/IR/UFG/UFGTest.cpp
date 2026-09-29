@@ -1,6 +1,7 @@
 #include "IR/UFG/DefectDetector.h"
 #include "IR/UFG/Search.h"
 #include "IR/UseTraceSSA/SVFGBridge.h"
+#include "IR/UseTraceSSA/QueryContext.h"
 
 #include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
@@ -8,10 +9,51 @@
 #include <llvm/Support/SourceMgr.h>
 #include <algorithm>
 #include <random>
+#include <type_traits>
+#include <unordered_map>
 
 using namespace lotus::usetracessa;
 
 namespace {
+TEST(UFG, IdentifiersAndExpansionCountsExceed32Bits) {
+  static_assert(std::is_same<FlowNodeID, std::uint64_t>::value, "wide flow nodes");
+  static_assert(std::is_same<FlowEdgeID, std::uint64_t>::value, "wide flow edges");
+  static_assert(std::is_same<lotus::ufg::SearchID, std::uint64_t>::value, "wide search IDs");
+  constexpr std::uint64_t large = std::uint64_t(1) << 32;
+  EXPECT_EQ(lotus::ufg::detail::expandedNodeCount(65536, 65536), large);
+  EXPECT_EQ(lotus::ufg::detail::expandedNodeCount(0, 65536), 0u);
+  EXPECT_EQ(lotus::ufg::detail::expandedNodeCount(65536, 0), 0u);
+  EXPECT_THROW(lotus::ufg::detail::expandedNodeCount(
+                   std::numeric_limits<std::size_t>::max(), 2), std::length_error);
+
+  FlowNode node;
+  FlowEdge edge;
+  EXPECT_EQ(node.id, InvalidFlowID);
+  EXPECT_EQ(edge.from, InvalidFlowID);
+  node.id = large + 7;
+  edge.id = large + 9;
+  edge.from = node.id;
+  edge.to = node.id + 1;
+  QueryResult witness;
+  witness.nodes = {edge.from, edge.to};
+  witness.edges = {edge.id};
+  EXPECT_EQ(witness.nodes.front(), large + 7);
+  EXPECT_EQ(witness.nodes.back(), large + 8);
+  EXPECT_EQ(witness.edges.front(), large + 9);
+}
+
+TEST(UFG, ProductKeysKeepHighNodeBits) {
+  using detail::FlowStateKey;
+  using detail::FlowStateHash;
+  std::unordered_map<FlowStateKey, int, FlowStateHash> products;
+  const FlowStateKey low{7, 3}, high{(std::uint64_t(1) << 32) + 7, 3};
+  products.emplace(low, 1);
+  products.emplace(high, 2);
+  EXPECT_EQ(products.size(), 2u);
+  EXPECT_EQ(products.at(low), 1);
+  EXPECT_EQ(products.at(high), 2);
+}
+
 FlowNodeID addNode(TraceFlowGraph &graph) {
   return graph.addNode(FlowNode{});
 }

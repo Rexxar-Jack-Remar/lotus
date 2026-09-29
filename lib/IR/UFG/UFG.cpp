@@ -29,8 +29,7 @@ UFGGraph::UFGGraph(const TraceFlowGraph &source, std::vector<ObjectID> universe)
   }
   std::sort(Objects.begin(), Objects.end());
   Objects.erase(std::unique(Objects.begin(), Objects.end()), Objects.end());
-  if (!Objects.empty() && source.nodes().size() >= InvalidID / Objects.size())
-    throw std::length_error("UFG: expanded node identifier space exhausted");
+  detail::expandedNodeCount(source.nodes().size(), Objects.size());
   for (ObjectID object : Objects) {
     Lane.emplace(object, OriginalNodes.size());
     for (const FlowNode &original : source.nodes()) {

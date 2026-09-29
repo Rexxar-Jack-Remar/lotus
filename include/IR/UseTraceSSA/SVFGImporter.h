@@ -17,7 +17,7 @@ struct Port {
   ValueID value = InvalidID;
   SiteID site = InvalidID;
   VersionID version = InvalidID;
-  FlowNodeID node = InvalidID;
+  FlowNodeID node = InvalidFlowID;
   static Port definition(FunctionID f, ValueID v);
   static Port afterUse(FunctionID f, SiteID site, ValueID v);
   static Port flowNode(FlowNodeID node);

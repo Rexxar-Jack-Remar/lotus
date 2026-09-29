@@ -1,10 +1,10 @@
 #include "IR/UseTraceSSA/Query.h"
+#include "IR/UseTraceSSA/QueryContext.h"
 #include <algorithm>
 #include <deque>
 #include <map>
 #include <set>
 #include <stdexcept>
-#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -77,6 +77,19 @@ Automaton Automaton::fileLeak() {
   return resourceLeak(Event::Open, Event::Close);
 }
 QueryResult QueryEngine::run(const Query &q) const {
+  return runImpl(q, nullptr);
+}
+QueryScanResult QueryEngine::runToSinks(const Query &q) const {
+  QueryScanResult scan;
+  auto result = runImpl(q, &scan);
+  scan.status = result.status;
+  scan.productStates = result.productStates;
+  scan.edgesExamined = result.edgesExamined;
+  scan.summaryPairs = result.summaryPairs;
+  scan.message = std::move(result.message);
+  return scan;
+}
+QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
   QueryResult result;
   if (!q.automaton.states || q.automaton.initial >= q.automaton.states)
     throw std::invalid_argument("UseTraceSSA: invalid automaton initial state");
@@ -89,6 +102,7 @@ QueryResult QueryEngine::run(const Query &q) const {
   for (auto n : q.sinks) { G.node(n); sinks[n] = true; }
   for (auto n : q.sources) G.node(n);
   for (auto n : q.traps) { G.node(n); traps[n] = true; }
+  const auto sinkCount = std::count(sinks.begin(), sinks.end(), true);
   auto effects = [&](FlowNodeID id, ID state) {
     const auto &n = G.node(id);
     std::vector<ID> out;
@@ -111,13 +125,13 @@ QueryResult QueryEngine::run(const Query &q) const {
   std::vector<ProductNode> pn;
   std::vector<ProductEdge> pe;
   std::vector<std::vector<ID>> pout;
-  std::unordered_map<std::uint64_t, ID> products;
+  std::unordered_map<detail::FlowStateKey, ID, detail::FlowStateHash> products;
   std::vector<ID> roots;
   bool incomplete = !G.complete(), limited = false, hasContext = false;
   std::size_t work = 0;
   auto tick = [&] { bound(work++, q.maxWork); };
   auto product = [&](FlowNodeID node, ID state) -> ID {
-    auto k = key(node, state);
+    detail::FlowStateKey k{node, state};
     auto it = products.find(k);
     if (it != products.end()) return it->second;
     bound(pn.size(), q.maxProductStates);
@@ -150,30 +164,24 @@ QueryResult QueryEngine::run(const Query &q) const {
   result.productStates = pn.size();
 
   if (q.contextLimit && q.context != ContextMode::Insensitive) {
-    struct ContextState {
-      ID product;
-      std::vector<CallSiteID> calls;
-      bool truncated = false;
-      bool positive = false;
-    };
+    using detail::ContextState;
     struct ContextParent { ID previous = InvalidID, edge = InvalidID; };
-    std::map<std::tuple<ID, std::vector<CallSiteID>, bool, bool>, ID> known;
+    std::unordered_map<ContextState, ID, detail::ContextStateHash> known;
     std::vector<ContextState> states;
     std::vector<ContextParent> parents;
     std::deque<ID> queue;
     auto insert = [&](ContextState state, ID previous, ID edge) {
-      auto identity = std::make_tuple(state.product, state.calls,
-                                      state.truncated, state.positive);
-      auto found = known.find(identity);
+      auto found = known.find(state);
       if (found != known.end()) return;
       bound(states.size(), q.maxSummaryPairs);
       ID id = asID(states.size());
-      known.emplace(std::move(identity), id);
+      known.emplace(state, id);
       states.push_back(std::move(state));
       parents.push_back({previous, edge});
       queue.push_back(id);
     };
     ID accepted = InvalidID;
+    std::map<FlowNodeID, ID> acceptedSinks;
     try {
       for (ID root : roots) insert({root, {}, false, false}, InvalidID, InvalidID);
       while (!queue.empty()) {
@@ -183,8 +191,10 @@ QueryResult QueryEngine::run(const Query &q) const {
         if (sinks[productNode.node] && accepts[productNode.state] &&
             (!q.requireNonEmpty || current.positive) &&
             (q.context != ContextMode::Balanced || current.calls.empty())) {
-          accepted = id;
-          break;
+          if (accepted == InvalidID) accepted = id;
+          if (!scan) break;
+          acceptedSinks.emplace(productNode.node, id);
+          if (acceptedSinks.size() == static_cast<std::size_t>(sinkCount)) break;
         }
         for (ID edgeID : pout[current.product]) {
           tick();
@@ -212,6 +222,7 @@ QueryResult QueryEngine::run(const Query &q) const {
       }
     } catch (const Budget &) { limited = true; }
     result.summaryPairs = states.size();
+    if (scan) scan->complete = !limited && !incomplete;
     if (accepted == InvalidID) {
       result.status = limited || incomplete ? QueryStatus::Unknown : QueryStatus::NotFound;
       result.message = limited ? "bounded-context query budget exhausted" :
@@ -221,26 +232,34 @@ QueryResult QueryEngine::run(const Query &q) const {
     }
     result.status = QueryStatus::Found;
     result.message = "witness in the bounded-context abstraction";
-    std::vector<ID> path;
-    for (ID id = accepted; parents[id].previous != InvalidID;
-         id = parents[id].previous)
-      path.push_back(parents[id].edge);
-    std::reverse(path.begin(), path.end());
-    ID root = states[accepted].product;
-    if (!path.empty()) root = pe[path.front()].from;
-    result.nodes.push_back(pn[root].node);
-    result.automatonStates.push_back(pn[root].state);
-    for (ID edgeID : path) {
-      if (q.maxWitnessEdges && result.edges.size() >= q.maxWitnessEdges) {
-        result.witnessComplete = false;
-        result.message += "; witness rendering truncated";
-        break;
+    auto witness = [&](ID endpoint) {
+      QueryResult evidence = result;
+      std::vector<ID> path;
+      for (ID id = endpoint; parents[id].previous != InvalidID;
+           id = parents[id].previous)
+        path.push_back(parents[id].edge);
+      std::reverse(path.begin(), path.end());
+      ID root = states[endpoint].product;
+      if (!path.empty()) root = pe[path.front()].from;
+      evidence.nodes.push_back(pn[root].node);
+      evidence.automatonStates.push_back(pn[root].state);
+      for (ID edgeID : path) {
+        if (q.maxWitnessEdges && evidence.edges.size() >= q.maxWitnessEdges) {
+          evidence.witnessComplete = false;
+          evidence.message += "; witness rendering truncated";
+          break;
+        }
+        const ProductEdge &edge = pe[edgeID];
+        evidence.edges.push_back(edge.original);
+        evidence.nodes.push_back(pn[edge.to].node);
+        evidence.automatonStates.push_back(pn[edge.to].state);
       }
-      const ProductEdge &edge = pe[edgeID];
-      result.edges.push_back(edge.original);
-      result.nodes.push_back(pn[edge.to].node);
-      result.automatonStates.push_back(pn[edge.to].state);
-    }
+      return evidence;
+    };
+    if (scan) {
+      for (const auto &sink : acceptedSinks)
+        scan->foundAt.emplace(sink.first, witness(sink.second));
+    } else result = witness(accepted);
     return result;
   }
 
@@ -348,11 +367,15 @@ QueryResult QueryEngine::run(const Query &q) const {
     if (!visited[state]) { visited[state] = true; queue.push_back(state); }
   }
   ID accepted = InvalidID;
+  std::map<FlowNodeID, ID> acceptedSinks;
   while (!queue.empty()) {
     ID s = queue.front(); queue.pop_front();
     ID p = s / 4; unsigned phase = (s % 4) / 2; bool positive = s % 2;
     if (sinks[pn[p].node] && accepts[pn[p].state] && (!q.requireNonEmpty || positive)) {
-      accepted = s; break;
+      if (accepted == InvalidID) accepted = s;
+      if (!scan) break;
+      acceptedSinks.emplace(pn[p].node, s);
+      if (acceptedSinks.size() == static_cast<std::size_t>(sinkCount)) break;
     }
     auto push = [&](Step step, unsigned nextPhase) {
       ID t = encode(step.to, nextPhase, positive || step.positive);
@@ -378,6 +401,7 @@ QueryResult QueryEngine::run(const Query &q) const {
       }
     }
   }
+  if (scan) scan->complete = !limited && !incomplete;
   if (accepted == InvalidID) {
     result.status = limited || incomplete ? QueryStatus::Unknown : QueryStatus::NotFound;
     result.message = limited ? "query budget exhausted; absence is not established" :
@@ -387,44 +411,52 @@ QueryResult QueryEngine::run(const Query &q) const {
   }
   result.status = QueryStatus::Found;
   result.message = "witness in the supplied graph abstraction; feasibility not proven";
-  std::vector<Step> path;
-  ID state = accepted;
-  while (parents[state].previous != InvalidID) {
-    path.push_back(parents[state].step); state = parents[state].previous;
-  }
-  std::reverse(path.begin(), path.end());
-  result.nodes.push_back(pn[state / 4].node);
-  result.automatonStates.push_back(pn[state / 4].state);
-  auto append = [&](ID edge) {
-    if (q.maxWitnessEdges && result.edges.size() >= q.maxWitnessEdges) throw Budget{};
-    result.edges.push_back(pe[edge].original);
-    result.nodes.push_back(pn[pe[edge].to].node);
-    result.automatonStates.push_back(pn[pe[edge].to].state);
-  };
-  try {
-    for (auto step : path) {
-      std::vector<std::pair<bool, ID>> stack;
-      stack.push_back({step.recipe != InvalidID,
-                       step.recipe != InvalidID ? step.recipe : step.edge});
-      while (!stack.empty()) {
-        auto item = stack.back(); stack.pop_back();
-        if (!item.first) { append(item.second); continue; }
-        const auto &r = recipes[item.second];
-        switch (r.kind) {
-        case RecipeKind::Epsilon: break;
-        case RecipeKind::Edge: append(r.left); break;
-        case RecipeKind::Concat:
-          stack.push_back({true, r.right}); stack.push_back({true, r.left}); break;
-        case RecipeKind::Match:
-          stack.push_back({false, r.right}); stack.push_back({true, r.middle});
-          stack.push_back({false, r.left}); break;
+  auto witness = [&](ID endpoint) {
+    QueryResult evidence = result;
+    std::vector<Step> path;
+    ID state = endpoint;
+    while (parents[state].previous != InvalidID) {
+      path.push_back(parents[state].step); state = parents[state].previous;
+    }
+    std::reverse(path.begin(), path.end());
+    evidence.nodes.push_back(pn[state / 4].node);
+    evidence.automatonStates.push_back(pn[state / 4].state);
+    auto append = [&](ID edge) {
+      if (q.maxWitnessEdges && evidence.edges.size() >= q.maxWitnessEdges) throw Budget{};
+      evidence.edges.push_back(pe[edge].original);
+      evidence.nodes.push_back(pn[pe[edge].to].node);
+      evidence.automatonStates.push_back(pn[pe[edge].to].state);
+    };
+    try {
+      for (auto step : path) {
+        std::vector<std::pair<bool, ID>> stack;
+        stack.push_back({step.recipe != InvalidID,
+                         step.recipe != InvalidID ? step.recipe : step.edge});
+        while (!stack.empty()) {
+          auto item = stack.back(); stack.pop_back();
+          if (!item.first) { append(item.second); continue; }
+          const auto &r = recipes[item.second];
+          switch (r.kind) {
+          case RecipeKind::Epsilon: break;
+          case RecipeKind::Edge: append(r.left); break;
+          case RecipeKind::Concat:
+            stack.push_back({true, r.right}); stack.push_back({true, r.left}); break;
+          case RecipeKind::Match:
+            stack.push_back({false, r.right}); stack.push_back({true, r.middle});
+            stack.push_back({false, r.left}); break;
+          }
         }
       }
+    } catch (const Budget &) {
+      evidence.witnessComplete = false;
+      evidence.message += "; witness rendering truncated (existence is established)";
     }
-  } catch (const Budget &) {
-    result.witnessComplete = false;
-    result.message += "; witness rendering truncated (existence is established)";
-  }
+    return evidence;
+  };
+  if (scan) {
+    for (const auto &sink : acceptedSinks)
+      scan->foundAt.emplace(sink.first, witness(sink.second));
+  } else result = witness(accepted);
   return result;
 }
 std::vector<QueryResult> QueryEngine::runBatch(const std::vector<Query> &queries) const {
@@ -464,7 +496,7 @@ std::vector<FlowNodeID> QueryEngine::slice(const std::vector<FlowNodeID> &seeds,
     }
   }
   std::vector<FlowNodeID> result;
-  for (ID i = 0; i < visited.size(); ++i) if (visited[i]) result.push_back(i);
+  for (FlowNodeID i = 0; i < visited.size(); ++i) if (visited[i]) result.push_back(i);
   return result;
 }
 } // namespace usetracessa

@@ -13,6 +13,9 @@ nodes and eligible edges into a disconnected lane. Guarded node effects become
 ordinary events in that lane, with the same certainty as the fixed-object
 UseTraceSSA projection. Known-empty guards create no lane edge; unknown guards
 apply to every lane. The `UnknownResource` sentinel gets its own lane.
+Flow-node IDs, flow-edge IDs, witness IDs, and UFG search/proof IDs are 64-bit.
+Expansion size checks use checked 64-bit arithmetic. This removes the 32-bit
+identifier ceiling while preserving eager materialization and its memory cost.
 
 `UFGGraph::runObject` accepts a UseTraceSSA `Query` with original node IDs and
 runs `lotus::ufg::SearchEngine` on one materialized lane. Its tabulation keys
@@ -32,6 +35,9 @@ facts. It does not compute or report object-mask operations.
 contexts from the first call; omitting the option retains unbounded Dyck
 summaries. Bounded search keeps recent call sites and merges older contexts,
 so recursion can add candidates.
+Detector and CLI searches leave resource limits to the experiment runner;
+memory exhaustion and timeouts are not converted to an analysis result.
+Callers using `SearchEngine` directly can still supply explicit `Query` limits.
 
 ```sh
 cmake --build build --target lotus-ir-ufg ufg_test

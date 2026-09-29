@@ -14,7 +14,8 @@ FlowNodeID TemporalHistory::entry(const TraceFlowGraph &g) const {
 }
 TemporalHistory TemporalHistory::append(TraceFlowGraph &g, FunctionID id,
                                         std::string name, const Program &cfg,
-                                        const std::vector<TemporalEffect> &effects) {
+                                        const std::vector<TemporalEffect> &effects,
+                                        bool annotateExits) {
   TemporalHistory result;
   result.id = id;
   for (const auto &effect : effects)
@@ -54,7 +55,7 @@ TemporalHistory TemporalHistory::append(TraceFlowGraph &g, FunctionID id,
     if (effect.native != NoNativeID) g.setNative(n, effect.native);
   }
   for (const auto &exit : result.exits)
-    if (g.layer(id).history.use(exit.second, result.execution))
+    if (annotateExits && g.layer(id).history.use(exit.second, result.execution))
       g.annotate(g.after(id, exit.second, result.execution), Event::Exit);
   return result;
 }

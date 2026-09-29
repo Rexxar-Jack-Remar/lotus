@@ -322,7 +322,7 @@ def main():
         if not directory.is_dir():
             parser.error(f"benchmark directory not found: {directory}")
         benchmarks = sorted(path for path in directory.iterdir()
-                            if path.is_file() and not path.name.startswith("."))
+                            if path.is_file() and path.suffix in (".bc", ".ll"))
     if not benchmarks or any(not path.is_file() for path in benchmarks):
         parser.error("no valid benchmark bitcode files were selected")
 

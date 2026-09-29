@@ -44,7 +44,7 @@ lotus/
 
 ```bash
 mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug   # Debug for assertions
+cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 make test
 ```

@@ -249,7 +249,7 @@ void realizableSegments() {
   q.context=ContextMode::Balanced; CHECK(QueryEngine(g).run(q).status==QueryStatus::NotFound);
 }
 void nestedCalls() {
-  TraceFlowGraph g; std::vector<ID> v; const unsigned depth=35;
+  TraceFlowGraph g; std::vector<FlowNodeID> v; const unsigned depth=35;
   for(unsigned i=0;i<2*depth+1;++i) v.push_back(node(g,std::to_string(i)));
   for(unsigned i=0;i<depth;++i) edge(g,v[i],v[i+1],FlowKind::Call,i+1);
   for(unsigned i=0;i<depth;++i) edge(g,v[depth+i],v[depth+i+1],FlowKind::Return,depth-i);
@@ -359,8 +359,9 @@ void noMemsetKill() {
 void slices() {
   TraceFlowGraph g;auto a=node(g,"a"),b=node(g,"b"),c=node(g,"c"),d=node(g,"d");
   edge(g,a,b);edge(g,b,c);edge(g,d,c);QueryEngine e(g);
-  CHECK(e.slice({a})==std::vector<ID>({a,b,c}));CHECK(e.slice({c},true)==std::vector<ID>({a,b,c,d}));
-  CHECK(e.slice({a},false,{b})==std::vector<ID>({a}));
+  CHECK(e.slice({a})==std::vector<FlowNodeID>({a,b,c}));
+  CHECK(e.slice({c},true)==std::vector<FlowNodeID>({a,b,c,d}));
+  CHECK(e.slice({a},false,{b})==std::vector<FlowNodeID>({a}));
   auto results=e.runBatch({query(a,c),query(c,a)});CHECK(results[0].found());
   CHECK(results[1].status==QueryStatus::NotFound);
 }

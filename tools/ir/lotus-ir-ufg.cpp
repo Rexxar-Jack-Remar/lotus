@@ -175,6 +175,7 @@ int main(int argc, char **argv) {
       request.sources = {source->second};
       request.sinks = {sink->second};
       request.contextLimit = contextLimit;
+      request.maxProductStates = request.maxSummaryPairs = request.maxWork = 0;
       if (Object.getNumOccurrences() &&
           !std::binary_search(expanded.objects().begin(), expanded.objects().end(), Object))
         throw std::invalid_argument("requested object is absent from the UFG universe");

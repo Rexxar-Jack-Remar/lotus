@@ -51,6 +51,7 @@ public:
   DefectScan scan(DefectKind kind) const;
 
 private:
+  DefectScan scanImpl(DefectKind kind, bool firstOnly) const;
   const TraceFlowGraph &Graph;
   std::optional<std::size_t> ContextLimit;
 };

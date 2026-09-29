@@ -7,7 +7,7 @@ namespace lotus {
 namespace usetracessa {
 
 struct ObjectPort {
-  FlowNodeID node = InvalidID;
+  FlowNodeID node = InvalidFlowID;
   ObjectSet objects;
   Certainty certainty = Certainty::May;
 };

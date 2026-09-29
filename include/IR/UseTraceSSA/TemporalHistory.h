@@ -28,9 +28,11 @@ struct TemporalHistory {
   // OLD build cost multiplied temporal structure by object multiplicity.
   // Here construction visits sites once. Object costs are metadata storage
   // and query-time contains()/mask intersections, never temporal nodes.
+  // Exit ports always exist; annotateExits controls only their Exit event.
   static TemporalHistory append(TraceFlowGraph &graph, FunctionID id,
                                 std::string name, const Program &control,
-                                const std::vector<TemporalEffect> &effects);
+                                const std::vector<TemporalEffect> &effects,
+                                bool annotateExits = true);
   /// Splice normal temporal ports with the ordinary typed call/return edges.
   /// Each target gets one call and one return per exit, regardless of objects.
   static void connectCall(TraceFlowGraph &graph, const TemporalHistory &caller,

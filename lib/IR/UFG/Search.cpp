@@ -1,4 +1,5 @@
 #include "IR/UFG/Search.h"
+#include "IR/UseTraceSSA/QueryContext.h"
 
 #include <algorithm>
 #include <deque>
@@ -11,9 +12,12 @@
 namespace lotus {
 namespace ufg {
 using namespace usetracessa;
+using ID = SearchID;
+using StateID = usetracessa::ID;
+constexpr ID InvalidID = std::numeric_limits<ID>::max();
 namespace {
 struct Budget {};
-struct Product { FlowNodeID node; ID state; };
+struct Product { FlowNodeID node; StateID state; };
 struct ProductEdge { ID from, to; FlowEdgeID edge; };
 enum class ProofKind { Empty, Edge, Concat, Match };
 struct Fact {
@@ -36,21 +40,16 @@ struct FactKey {
 };
 struct FactHash {
   std::size_t operator()(FactKey fact) const {
-    std::uint64_t pair = (std::uint64_t(fact.from) << 32) | fact.to;
-    return std::hash<std::uint64_t>{}(pair ^
-        (fact.positive ? 0x9e3779b97f4a7c15ULL : 0));
+    return llvm::hash_combine(fact.from, fact.to, fact.positive);
   }
 };
 
 ID checked(std::size_t size) {
-  if (size >= InvalidID) throw Budget{};
+  if (size >= InvalidID) throw std::length_error("UFG: search identifier space exhausted");
   return static_cast<ID>(size);
 }
 void bound(std::size_t size, std::size_t limit) {
   if (limit && size >= limit) throw Budget{};
-}
-std::uint64_t key(ID node, ID state) {
-  return (std::uint64_t(node) << 32) | state;
 }
 } // namespace
 
@@ -78,7 +77,7 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
   if (!query.automaton.states || query.automaton.initial >= query.automaton.states)
     throw std::invalid_argument("UFG: invalid automaton initial state");
   std::vector<bool> accepts(query.automaton.states);
-  for (ID state : query.automaton.accepting) {
+  for (StateID state : query.automaton.accepting) {
     if (state >= accepts.size()) throw std::invalid_argument("UFG: invalid accepting state");
     accepts[state] = true;
   }
@@ -90,12 +89,12 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
   bool incomplete = !graph.complete(), limited = false;
   std::size_t work = 0;
   auto tick = [&] { bound(work++, query.maxWork); };
-  auto advance = [&](FlowNodeID node, ID state) {
-    std::vector<ID> successors;
+  auto advance = [&](FlowNodeID node, StateID state) {
+    std::vector<StateID> successors;
     if (traps.count(node)) return successors;
     const auto &effect = graph.node(node);
     if (!hasEvent(effect.events, query.trapEvents)) {
-      ID next = query.automaton.transition ?
+      StateID next = query.automaton.transition ?
           query.automaton.transition(state, effect.events) : state;
       if (next >= query.automaton.states)
         throw std::invalid_argument("UFG: automaton transition out of range");
@@ -110,22 +109,24 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
   std::vector<Product> products;
   std::vector<ProductEdge> edges;
   std::vector<std::vector<ID>> outgoing;
-  std::unordered_map<std::uint64_t, ID> productIDs;
+  std::unordered_map<usetracessa::detail::FlowStateKey, ID,
+                     usetracessa::detail::FlowStateHash> productIDs;
   std::vector<ID> roots;
   bool hasContext = false;
-  auto product = [&](FlowNodeID node, ID state) {
-    auto found = productIDs.find(key(node, state));
+  auto product = [&](FlowNodeID node, StateID state) {
+    usetracessa::detail::FlowStateKey key{node, state};
+    auto found = productIDs.find(key);
     if (found != productIDs.end()) return found->second;
     bound(products.size(), query.maxProductStates);
     ID id = checked(products.size());
-    productIDs.emplace(key(node, state), id);
+    productIDs.emplace(key, id);
     products.push_back({node, state});
     outgoing.emplace_back();
     return id;
   };
   try {
     for (auto source : query.sources)
-      for (ID state : advance(source, query.automaton.initial))
+      for (StateID state : advance(source, query.automaton.initial))
         roots.push_back(product(source, state));
     for (std::size_t i = 0; i < products.size(); ++i) {
       Product current = products[i];
@@ -139,7 +140,7 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
           incomplete = true;
           continue;
         }
-        for (ID state : advance(edge.to, current.state)) {
+        for (StateID state : advance(edge.to, current.state)) {
           ID target = product(edge.to, state);
           ID id = checked(edges.size());
           edges.push_back({checked(i), target, eid});
@@ -314,8 +315,9 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
 
   // Realizable paths have unmatched returns before unmatched calls. The final
   // bit records a nonempty path even when a product node is revisited.
-  if (products.size() >= InvalidID / 4) limited = true;
-  std::vector<bool> seen(limited && products.size() >= InvalidID / 4 ? 0 : products.size() * 4);
+  if (products.size() > std::numeric_limits<std::size_t>::max() / 4)
+    throw std::length_error("UFG: quotient state space overflow");
+  std::vector<bool> seen(products.size() * 4);
   std::vector<Parent> parent(seen.size());
   std::deque<ID> queue;
   auto encode = [&](ID productID, unsigned phase, bool positive) {

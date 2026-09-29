@@ -1,8 +1,8 @@
 #include "IR/ICFG/ICFGBuilder.h"
 #include "IR/SVFG/SVFGBuilder.h"
 #include "IR/UseTraceSSA/DefectDetector.h"
-#include "IR/UseTraceSSA/SVFGBridge.h"
 #include "IR/UseTraceSSA/Query.h"
+#include "IR/UseTraceSSA/SVFGBridge.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -120,6 +120,12 @@ int main(int argc, char **argv) {
     return 1;
   }
   const auto parsed = Clock::now();
+  auto millis = [](Clock::time_point from, Clock::time_point to) {
+    return std::chrono::duration<double, std::milli>(to - from).count();
+  };
+  if (Timing)
+    std::cerr << std::fixed << std::setprecision(3)
+              << "timing_ms parse=" << millis(start, parsed) << '\n';
   try {
     ICFG icfg;
     ICFGBuilder icfgBuilder(&icfg);
@@ -131,6 +137,7 @@ int main(int argc, char **argv) {
     SVFGBuilder builder(config);
     std::unique_ptr<SVFG> svfg(builder.build(&icfg));
     const auto builtSVFG = Clock::now();
+    if (Timing) std::cerr << "timing_ms svfg=" << millis(parsed, builtSVFG) << '\n';
     if (!DumpSVFG.empty()) svfg->dump(DumpSVFG);
     NativeHistoryMode mode = Check == "double-free" ? NativeHistoryMode::DoubleFree :
                              Check == "use-after-free" ? NativeHistoryMode::UseAfterFree :
@@ -139,6 +146,8 @@ int main(int argc, char **argv) {
                                                           NativeHistoryMode::Full;
     auto result = buildUseTraceSSAFromLotusSVFG(*svfg, *module, mode);
     const auto builtHistory = Clock::now();
+    if (Timing)
+      std::cerr << "timing_ms usetracessa=" << millis(builtSVFG, builtHistory) << '\n';
     std::optional<DefectScan> checkReport;
     std::map<std::string, std::vector<std::size_t>> findingGroups;
     std::map<std::string, std::set<ObjectID>> findingObjects;
@@ -239,9 +248,6 @@ int main(int argc, char **argv) {
       }
     }
     if (Timing) {
-      auto millis = [](Clock::time_point from, Clock::time_point to) {
-        return std::chrono::duration<double, std::milli>(to - from).count();
-      };
       std::cerr << std::fixed << std::setprecision(3)
                 << "timing_ms parse=" << millis(start, parsed)
                 << " svfg=" << millis(parsed, builtSVFG)

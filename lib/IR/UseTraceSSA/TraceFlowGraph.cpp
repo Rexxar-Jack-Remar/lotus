@@ -8,9 +8,9 @@
 namespace lotus {
 namespace usetracessa {
 namespace {
-ID checkedID(std::size_t n) {
-  if (n >= InvalidID) throw std::length_error("UseTraceSSA: graph too large");
-  return static_cast<ID>(n);
+FlowNodeID checkedID(std::size_t n) {
+  if (n >= InvalidFlowID) throw std::length_error("UseTraceSSA: flow graph too large");
+  return static_cast<FlowNodeID>(n);
 }
 std::string quoted(const std::string &s) {
   std::ostringstream out;
@@ -80,6 +80,7 @@ bool ObjectSet::intersects(const ObjectSet &other) const {
 FlowNodeID TraceFlowGraph::addNode(FlowNode node) {
   node.id = checkedID(Nodes.size());
   Nodes.push_back(std::move(node));
+  ResourceUniverse.reset();
   Out.emplace_back(); In.emplace_back(); ++Revision;
   return Nodes.back().id;
 }
@@ -91,6 +92,7 @@ FlowEdgeID TraceFlowGraph::addEdge(FlowEdge edge) {
     throw std::invalid_argument("UseTraceSSA: call/return edge needs a call-site ID");
   edge.id = checkedID(Edges.size());
   Edges.push_back(std::move(edge));
+  ResourceUniverse.reset();
   Out[Edges.back().from].push_back(Edges.back().id);
   In[Edges.back().to].push_back(Edges.back().id);
   ++Revision;
@@ -150,12 +152,14 @@ void TraceFlowGraph::annotate(FlowNodeID id, Event e, Certainty c) {
   if (n.events != Event::None && n.certainty != c)
     throw std::invalid_argument("UseTraceSSA: split events with different certainties into nodes");
   n.events = n.events | e; n.certainty = c; ++Revision;
+  ResourceUniverse.reset();
 }
 void TraceFlowGraph::annotate(FlowNodeID id, Event events, ObjectSet objects, Certainty c) {
   if (events == Event::None) throw std::invalid_argument("UseTraceSSA: empty guarded effect");
   if (c != Certainty::Must && c != Certainty::May)
     throw std::invalid_argument("UseTraceSSA: invalid effect certainty");
   Nodes.at(id).effects.push_back({events, std::move(objects), c});
+  ResourceUniverse.reset();
   ++Revision;
 }
 EffectiveEvent TraceFlowGraph::effectiveEvent(FlowNodeID id, ObjectID object) const {
@@ -169,6 +173,7 @@ EffectiveEvent TraceFlowGraph::effectiveEvent(FlowNodeID id, ObjectID object) co
   return result;
 }
 std::vector<ObjectID> TraceFlowGraph::resourceCandidates() const {
+  if (ResourceUniverse) return *ResourceUniverse;
   std::vector<ObjectID> result;
   for (const auto &n : Nodes) for (const auto &effect : n.effects) {
     if (effect.objects.isUnknown()) result.push_back(UnknownResource);
@@ -181,6 +186,12 @@ std::vector<ObjectID> TraceFlowGraph::resourceCandidates() const {
   std::sort(result.begin(), result.end());
   result.erase(std::unique(result.begin(), result.end()), result.end());
   return result;
+}
+void TraceFlowGraph::setResourceUniverse(std::vector<ObjectID> objects) {
+  std::sort(objects.begin(), objects.end());
+  objects.erase(std::unique(objects.begin(), objects.end()), objects.end());
+  ResourceUniverse = std::move(objects);
+  ++Revision;
 }
 FlowStatistics TraceFlowGraph::statistics() const {
   FlowStatistics s;
@@ -207,7 +218,9 @@ void TraceFlowGraph::setNative(FlowNodeID id, NativeID native) {
     throw std::invalid_argument("UseTraceSSA: conflicting native node provenance");
   n.native = native; ++Revision;
 }
-void TraceFlowGraph::disableEdge(FlowEdgeID id) { Edges.at(id).enabled = false; ++Revision; }
+void TraceFlowGraph::disableEdge(FlowEdgeID id) {
+  Edges.at(id).enabled = false; ResourceUniverse.reset(); ++Revision;
+}
 void TraceFlowGraph::addIssue(std::string issue) { Issues.push_back(std::move(issue)); ++Revision; }
 std::vector<FlowNodeID> TraceFlowGraph::select(Event events) const {
   std::vector<FlowNodeID> result;
@@ -284,7 +297,15 @@ void TraceFlowGraph::printJSON(std::ostream &out) const {
   out << "{\"schema\":\"lotus-usetracessa-2\",\"complete\":" << (complete() ? "true" : "false")
       << ",\"issues\":[";
   for (std::size_t i = 0; i < Issues.size(); ++i) out << (i ? "," : "") << quoted(Issues[i]);
-  out << "],\"nodes\":[";
+  out << "],\"resource_universe\":";
+  if (!ResourceUniverse) out << "null";
+  else {
+    out << '[';
+    for (std::size_t i = 0; i < ResourceUniverse->size(); ++i)
+      out << (i ? "," : "") << quoted(std::to_string((*ResourceUniverse)[i]));
+    out << ']';
+  }
+  out << ",\"nodes\":[";
   for (const auto &n : Nodes) {
     out << (n.id ? "," : "") << "{\"id\":" << n.id << ",\"label\":" << quoted(n.label)
         << ",\"function\":" << n.function << ",\"version\":" << n.version

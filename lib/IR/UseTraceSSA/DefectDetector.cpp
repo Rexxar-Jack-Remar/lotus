@@ -30,7 +30,7 @@ DefectReport DefectDetector::run(DefectKind kind, std::vector<FlowNodeID> roots,
                                  std::vector<FlowNodeID> uses) const {
   if (kind == DefectKind::DoubleFree || kind == DefectKind::UseAfterFree ||
       kind == DefectKind::MemoryLeak || kind == DefectKind::FileLeak) {
-    auto scanResult = scan(kind);
+    auto scanResult = scanImpl(kind, true);
     if (!scanResult.findings.empty()) return std::move(scanResult.findings.front());
     QueryResult result; result.status = scanResult.status; result.message = scanResult.message;
     return makeReport(Graph, kind, std::move(result));
@@ -48,6 +48,10 @@ DefectReport DefectDetector::run(DefectKind kind, std::vector<FlowNodeID> roots,
 }
 
 DefectScan DefectDetector::scan(DefectKind kind) const {
+  return scanImpl(kind, false);
+}
+
+DefectScan DefectDetector::scanImpl(DefectKind kind, bool firstOnly) const {
   if (kind != DefectKind::DoubleFree && kind != DefectKind::UseAfterFree &&
       kind != DefectKind::MemoryLeak && kind != DefectKind::FileLeak)
     throw std::invalid_argument("UseTraceSSA: scan supports resource rules only");
@@ -64,25 +68,64 @@ DefectScan DefectDetector::scan(DefectKind kind) const {
     scan.message = "required defect facts were not supplied";
     return scan;
   }
-  // One symbolic traversal discovers every object and sink. Only requested
-  // concrete evidence uses the fixed-object oracle; no resource-specific BFS.
-  auto batch = QueryEngine(Graph).runObjects({q, candidates(Graph)});
+  // Reuse symbolic path provenance when available. Unbounded Dyck queries
+  // share witness tabulation across sinks choosing the same object.
+  auto batch = QueryEngine(Graph).runObjects({q, candidates(Graph), true});
   scan.statistics = batch.statistics;
   scan.exhaustive = batch.complete;
+  const Event target = kind == DefectKind::DoubleFree ? Event::Release :
+                       kind == DefectKind::UseAfterFree ? Event::Dereference : Event::Exit;
+  std::map<ObjectID, std::vector<FlowNodeID>> witnessSinks;
+  std::map<FlowNodeID, std::vector<ObjectID>> objectsAtSink;
   for (const auto &sink : batch.foundAt) {
-    ObjectID object = batch.universe.objects().at(sink.second.find_first());
-    q.sinks = {sink.first}; q.memoryObject = object;
-    auto witness = QueryEngine(Graph).run(q);
-    if (!witness.found()) {
-      scan.exhaustive = false;
+    // An accepting state may reach another object's sink after the event that
+    // made it accepting. Report only objects with the target event here.
+    std::vector<ObjectID> atSink;
+    for (auto bit : sink.second.set_bits()) {
+      ObjectID object = batch.universe.objects()[bit];
+      if (hasEvent(Graph.effectiveEvent(sink.first, object).events, target))
+        atSink.push_back(object);
+    }
+    if (atSink.empty()) continue;
+    ObjectID object = atSink.front();
+    if (firstOnly || batch.hasWitnesses()) {
+      QueryResult witness;
+      if (batch.hasWitnesses()) witness = batch.witness(sink.first, object);
+      else {
+        q.sinks = {sink.first}; q.memoryObject = object;
+        witness = QueryEngine(Graph).run(q);
+      }
+      if (!witness.found()) {
+        scan.exhaustive = false;
+        continue;
+      }
+      auto report = makeReport(Graph, kind, std::move(witness));
+      report.witnessObject = object;
+      report.objects = std::move(atSink);
+      scan.findings.push_back(std::move(report));
+      if (firstOnly) break;
       continue;
     }
-    auto report = makeReport(Graph, kind, std::move(witness));
-    report.witnessObject = object;
-    for (auto bit : sink.second.set_bits())
-      report.objects.push_back(batch.universe.objects()[bit]);
-    scan.findings.push_back(std::move(report));
+    witnessSinks[object].push_back(sink.first);
+    objectsAtSink.emplace(sink.first, std::move(atSink));
   }
+  std::map<FlowNodeID, DefectReport> reports;
+  for (const auto &group : witnessSinks) {
+    q.sinks = group.second; q.memoryObject = group.first;
+    auto witnesses = QueryEngine(Graph).runToSinks(q);
+    for (auto sink : group.second) {
+      auto found = witnesses.foundAt.find(sink);
+      if (found == witnesses.foundAt.end()) {
+        scan.exhaustive = false;
+        continue;
+      }
+      auto report = makeReport(Graph, kind, std::move(found->second));
+      report.witnessObject = group.first;
+      report.objects = std::move(objectsAtSink.at(sink));
+      reports.emplace(sink, std::move(report));
+    }
+  }
+  for (auto &report : reports) scan.findings.push_back(std::move(report.second));
   scan.status = !scan.findings.empty() ? QueryStatus::Found :
                 scan.exhaustive ? QueryStatus::NotFound : QueryStatus::Unknown;
   scan.message = batch.message;
