@@ -1,3 +1,0 @@
-#include "NPAInterproceduralClientStateAndConstantPropagationTest.inc"
-#include "NPAInterproceduralClientIntervalAndBackwardTest.inc"
-#include "NPAInterproceduralClientPathTransferTest.inc"

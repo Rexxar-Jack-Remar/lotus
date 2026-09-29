@@ -10,5 +10,5 @@ if(LOTUS_BUILD_TESTS)
     target_compile_definitions(CanaryDynamicDyck PRIVATE
         LOTUS_PRIMARY_COMPONENT_TEST_HOOKS=1)
     target_include_directories(CanaryDynamicDyck PRIVATE
-        ${PROJECT_SOURCE_DIR}/tests/unit/CFL/PrimaryComponent)
+        ${PROJECT_SOURCE_DIR}/tests/unit/CFL/DynamicDyck/PrimaryComponent)
 endif()

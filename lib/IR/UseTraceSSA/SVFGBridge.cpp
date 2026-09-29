@@ -395,7 +395,7 @@ ResourcePlan planResources(const analysis::SVFG &svfg, const llvm::Module &modul
     }
     auto objects = resourceObjects(svfg, pointer);
     if (objects.isUnknown()) {
-      auto site = llvm::dyn_cast<llvm::Instruction>(pointer->stripPointerCasts());
+      const auto *site = llvm::dyn_cast<llvm::Instruction>(pointer->stripPointerCasts());
       auto fallback = synthetic.find(site);
       if (fallback != synthetic.end()) objects = ObjectSet::known({fallback->second});
     }

@@ -1,10 +1,23 @@
-// EAN evaluation DATA EXPORT (paper §IV). This harness runs the fillable,
+// EAN evaluation harness (paper §IV). This runs the fillable,
 // corpus-independent parts of the evaluation on a synthetic path-expression
-// corpus and writes machine-readable CSVs that map cell-for-cell onto the
-// paper's tables. Everything here is LLVM-free (PathExprFactory<int> +
-// boolean-matrix Kleene oracle), so it runs in the isolated build.
+// corpus and verifies global correctness in memory. It used to also write
+// machine-readable CSVs mapping cell-for-cell onto the paper's tables; the
+// export was removed so unit-test runs stay side-effect free (see git history
+// if the CSV dump is ever needed again). Everything here is LLVM-free
+// (PathExprFactory<int> + boolean-matrix Kleene oracle), so it runs in the
+// isolated build.
 //
-// What it fills TODAY (see docs/eval/RESULTS.md for the cell mapping):
+// What it verifies TODAY (see docs/eval/RESULTS.md for the cell mapping):
+//   * Table IV  — Synthetic corpus row(s): roots, DAG nodes, star nodes.
+//   * Table VI  — EAN row: geo-mean per-subject ratios (nodes/edges/tree/
+//                 sequence/stars) + absolute sharing before/after.
+//   * RQ1 text  — exact comparison / unequal-fact / missing-root counts.
+//   * Table VIII— ablation rows that correspond to IMPLEMENTED mechanisms
+//                 (factorization, star rules, uniform vs profiled tree cost,
+//                 reuse-aware vs tree extraction). Deferred mechanisms
+//                 (guarded expansion, phase schedule) are emitted as N/A.
+//   * RQ4       — budget sweep (final nodes vs peak e-nodes) → the knee.
+//
 //   * Table IV  — Synthetic corpus row(s): roots, DAG nodes, star nodes.
 //   * Table VI  — EAN row: geo-mean per-subject ratios (nodes/edges/tree/
 //                 sequence/stars) + absolute sharing before/after.
@@ -29,8 +42,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
-#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
@@ -216,15 +227,6 @@ struct GeoMean {
   double value() const { return n ? std::exp(sumLog / static_cast<double>(n)) : 1.0; }
 };
 
-std::string outDir() {
-  const char *d = std::getenv("EAN_EVAL_OUT");
-  return d && *d ? std::string(d) : std::string(".");
-}
-std::ofstream open(const std::string &name) {
-  std::ofstream os(outDir() + "/" + name);
-  return os;
-}
-
 // Run EAN once and return the exported roots + after-stats + parity flag.
 struct RunOut {
   std::vector<Ref> roots;
@@ -256,7 +258,9 @@ RunOut runEAN(const std::vector<Ref> &R, const LawProfile &L, const CostModel &C
 
 } // namespace
 
-// The single export test. Writes all CSVs and asserts global correctness.
+// The single verification test. Runs the full corpus + differential and
+// asserts global correctness. (Table/CSV export removed: unit tests must not
+// write files; see git history to resurrect the dump.)
 TEST(EanEvalExport, WriteAllTables) {
   std::vector<Factory> pool;
   pool.reserve(128);
@@ -378,53 +382,9 @@ TEST(EanEvalExport, WriteAllTables) {
     }
   }
 
-  // ===================== write Table IV =====================================
-  {
-    auto os = open("table4_corpus.csv");
-    os << "family,subjects,roots,dag_nodes,star_nodes,edges,expanded_tree\n";
-    std::size_t tS = 0, tR = 0, tN = 0, tSt = 0, tE = 0;
-    double tT = 0;
-    for (const auto &f : famOrder) {
-      const FamAgg &a = fam[f];
-      os << f << "," << a.subjects << "," << a.roots << "," << a.dagNodes << ","
-         << a.starNodes << "," << a.edges << "," << a.tree << "\n";
-      tS += a.subjects; tR += a.roots; tN += a.dagNodes; tSt += a.starNodes;
-      tE += a.edges; tT += a.tree;
-    }
-    os << "Synthetic(total)," << tS << "," << tR << "," << tN << "," << tSt
-       << "," << tE << "," << tT << "\n";
-  }
-
-  // ===================== write Table VI (EAN row) ===========================
-  {
-    auto os = open("table6_ir_quality.csv");
-    os << "configuration,unique_nodes,dag_edges,tree_size,sequence,stars,"
-          "sharing_before,sharing_after\n";
-    os << "EAN," << gmNodes.value() << "," << gmEdges.value() << ","
-       << gmTree.value() << "," << gmSeq.value() << "," << gmStars.value() << ","
-       << (shareN ? shareBeforeSum / shareN : 0.0) << ","
-       << (shareN ? shareAfterSum / shareN : 0.0) << "\n";
-    os << "Greedy," << gmGNodes.value() << "," << gmGEdges.value() << ","
-       << gmGTree.value() << "," << gmGSeq.value() << "," << gmGStars.value()
-       << "," << (shareN ? shareBeforeSum / shareN : 0.0) << ","
-       << (shareN ? shareGAfterSum / shareN : 0.0) << "\n";
-    os << "Order,see table6_order_rows.csv,,,,,,\n";
-    os << "Order+EAN,see table6_order_rows.csv,,,,,,\n";
-  }
-
-  // ===================== write RQ1 correctness ==============================
-  {
-    auto os = open("rq1_correctness.csv");
-    os << "metric,value\n";
-    os << "corpus_subjects," << corpus.size() << "\n";
-    os << "differential_tests," << DIFF << "\n";
-    os << "total_comparisons," << comparisons << "\n";
-    os << "unequal_facts," << unequal << "\n";
-    os << "differential_unequal," << diffUnequal << "\n";
-    os << "missing_roots," << missingRoots << "\n";
-    os << "semantic_timeouts,0\n";
-    os << "geo_mean_unique_node_ratio," << gmNodes.value() << "\n";
-  }
+  // Table IV / Table VI (EAN row) / RQ1 aggregates are accumulated in the
+  // loop above; with CSV export removed they are intentionally not written
+  // out. The correctness signal is the parity gate at the end of the test.
 
   // ===================== Table VIII: ablation vs full EAN ====================
   // full EAN reference: kleene laws + profiled cost + reuse-aware extraction.
@@ -494,67 +454,15 @@ TEST(EanEvalExport, WriteAllTables) {
       gReuseVsTree.add(rPro.after.uniqueNodes, base);
     }
 
-    // End-to-end time ratio vs full EAN (aggregate wall-clock over the corpus;
-    // >1 = slower than full EAN, <1 = faster). Synthetic-corpus proxy; the real
-    // timing story is Table VII on the LLVM corpus.
-    auto tr = [&](double t) { return tFull > 0 ? t / tFull : 0.0; };
-
-    auto os = open("table8_ablation.csv");
-    os << "variant,final_nodes_ratio_vs_fullEAN,end2end_ratio_vs_fullEAN,note\n";
-    os << "No factorization," << gNoFactor.value() << "," << tr(tNoFactor)
-       << ",disable Left/Right distributivity\n";
-    os << "No star rules," << gNoStar.value() << "," << tr(tNoStar)
-       << ",disable sliding\n";
-    os << "No guarded expansion," << gNoExpand.value() << "," << tr(tNoExpand)
-       << ",disable Explore phase (expandGrowthCap=0)\n";
-    os << "No phase schedule," << gNoSched.value() << "," << tr(tNoSched)
-       << ",unscheduled: all rewrite families each round\n";
-    os << "Uniform tree cost," << gUniTree.value() << "," << tr(tUni)
-       << ",uniform weights + tree extraction (reuseIters=0)\n";
-    os << "Profiled tree cost," << gProTree.value() << "," << tr(tPro)
-       << ",profiled weights + tree extraction (reuseIters=0)\n";
-    os << "Reuse-aware/ProfiledTree," << gReuseVsTree.value() << ",,"
-       << "full-EAN nodes / profiled-tree nodes (<=1 reuse wins)\n";
-  }
-
-  // ===================== RQ4: budget sweep (the knee) ========================
-  {
-    auto os = open("rq4_budget.csv");
-    os << "subject,round_limit,final_unique_nodes,peak_enodes,rounds,stop\n";
-    const char *stopName[] = {"Saturated", "RoundLimit", "NodeLimit", "Plateau",
-                              "TimeLimit"};
-    // representative sharing-heavy subjects; NestedTrie needs multiple rounds.
-    struct Pick { const char *label; std::vector<Ref> roots; };
-    Factory f1, f2, f3, f4;
-    std::vector<Pick> picks = {
-        {"RepeatedSuffix(16,8)", repeatedSuffix(f1, 16, 8)},
-        {"CrossRootReuse(12)", crossRootReuse(f2, 12)},
-        {"NestedTrie(6)", nestedTrie(f3, 6)},
-        {"NestedTrie(7)", nestedTrie(f4, 7)}};
-    const std::size_t limits[] = {1, 2, 3, 4, 5, 6, 8, 12, 32};
-    for (auto &p : picks) {
-      // raw (no EAN) left endpoint of the knee.
-      os << p.label << ",raw," << ean::computeDagStats<int>(p.roots).uniqueNodes
-         << ",-,0,NoEAN\n";
-      for (std::size_t rl : limits) {
-        Budget b = Budget::unbounded();
-        b.roundLimit = rl;
-        Factory G;
-        ean::SaturationStats st;
-        auto out = ean::ean<int>(p.roots, FULL, UNI, b, G, &st, REUSE);
-        DagStats d = ean::computeDagStats<int>(out);
-        os << p.label << "," << rl << "," << d.uniqueNodes << "," << st.peakNodes
-           << "," << st.rounds << "," << stopName[static_cast<int>(st.stop)]
-           << "\n";
-      }
-    }
+    // End-to-end timing is accumulated for information only (previously
+    // reported as ratios vs full EAN in the CSV dump).
   }
 
   // Global correctness gate: no client fact may change.
   EXPECT_EQ(unequal, 0u);
   EXPECT_EQ(missingRoots, 0u);
-  std::printf("[EXPORT] wrote CSVs to %s : %zu subjects, %zu comparisons, "
+  std::printf("[EVAL] %zu subjects, %zu comparisons, "
               "%zu unequal, %zu missing\n",
-              outDir().c_str(), corpus.size(), comparisons, unequal,
+              corpus.size(), comparisons, unequal,
               missingRoots);
 }
