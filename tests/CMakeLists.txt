@@ -1,6 +1,6 @@
 # TODO: Following the code of clam to add the tests in tests/clam
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.18)
 find_package(LLVM REQUIRED CONFIG)
 # GTest should already be found or downloaded by FindGTest.cmake in parent CMakeLists.txt
 # Try find_package, but if targets already exist (from add_subdirectory), that's fine too
@@ -31,8 +31,11 @@ add_custom_target(run_all_tests
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
-# Custom target to run only unit tests
-add_custom_target(run_unit_tests 
+# Custom target to run only unit tests.
+# Depends on lotus_unit_tests so the test binaries are (re)built first when
+# driving `cmake --build <dir> --target run_unit_tests`.
+add_custom_target(run_unit_tests
+    DEPENDS lotus_unit_tests
     COMMAND ${CMAKE_CTEST_COMMAND} -L unit --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )

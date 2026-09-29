@@ -59,6 +59,8 @@ function(add_lotus_test_suite test_name)
     endif()
 
     add_executable(${test_name} ${LOTUS_SUITE_SOURCES})
+    set_property(GLOBAL APPEND PROPERTY
+        LOTUS_UNIT_TEST_EXECUTABLES "${test_name}")
     set_target_properties(${test_name} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
         CXX_STANDARD 17
@@ -105,13 +107,23 @@ function(add_lotus_test_suite test_name)
     set(labels lotus ${test_kind} ${subsystem} ${LOTUS_SUITE_LABELS})
     list(REMOVE_DUPLICATES labels)
     string(REPLACE ";" "\\;" labels_property "${labels}")
+    # DISCOVERY_MODE PRE_TEST defers enumeration until ctest time instead of
+    # running the test binary after every build. It requires CMake 3.18,
+    # which is the project minimum. An explicit
+    # CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE set by the user is respected.
+    set(_lotus_gtest_discovery_args)
+    if(NOT DEFINED CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE)
+        list(APPEND _lotus_gtest_discovery_args DISCOVERY_MODE PRE_TEST)
+    endif()
     gtest_discover_tests(${test_name}
         TEST_PREFIX "${test_name}."
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         DISCOVERY_TIMEOUT ${LOTUS_TEST_DISCOVERY_TIMEOUT}
+        ${_lotus_gtest_discovery_args}
         PROPERTIES
             TIMEOUT ${test_timeout}
             LABELS "${labels_property}")
+    unset(_lotus_gtest_discovery_args)
 endfunction()
 
 function(add_lotus_targeted_test test_name source_file)

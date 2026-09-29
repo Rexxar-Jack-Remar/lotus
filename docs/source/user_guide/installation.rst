@@ -8,7 +8,7 @@ Prerequisites
 
 * LLVM 14.0.0
 * Z3 4.11
-* CMake 3.10+
+* CMake 3.18+
 * C++17 compatible compiler
 * Boost 1.65+ (optional — only needed when CLAM, SeaHorn, Cclyzer++, or FPsolve are enabled;
   auto-downloaded if not found)

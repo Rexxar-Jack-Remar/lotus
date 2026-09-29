@@ -11,7 +11,7 @@ Prerequisites
 
 - LLVM 14.0.0 development libraries
 - Z3 4.11 with headers
-- CMake 3.16+
+- CMake 3.18+
 - C++17 compatible compiler (GCC 7+, Clang 5+)
 - Git for version control
 

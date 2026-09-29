@@ -36,9 +36,14 @@ When adding tests, mirror the source tree where practical:
 
 ```bash
 cmake -S . -B build
-cmake --build build --target <test_target>
+cmake --build build
+cmake --build build --target lotus_unit_tests
 ctest --test-dir build --output-on-failure
 ```
+
+Test executables are part of the default build; `lotus_unit_tests` builds
+all of them at once and `run_unit_tests` builds them before running
+`ctest -L unit`.
 
 Examples:
 

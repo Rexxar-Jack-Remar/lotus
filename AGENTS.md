@@ -5,7 +5,7 @@
 Lotus is a **program analysis, verification, and optimization framework** built on LLVM. It provides alias analysis, intermediate representations, dataflow analysis, abstract interpretation, bug checkers, etc.
 
 - **Language**: C++17
-- **Dependencies**: LLVM 14.x, Z3, CMake 3.16+
+- **Dependencies**: LLVM 14.x, Z3, CMake 3.18+
 - **Docs**: https://zju-pl.github.io/lotus
 
 ## Repository Layout
