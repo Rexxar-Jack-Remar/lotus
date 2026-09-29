@@ -10,6 +10,7 @@ namespace ufg {
 /// graph node IDs, so a caller can group reports across object lanes.
 struct LaneSearchResult {
   usetracessa::QueryStatus status = usetracessa::QueryStatus::NotFound;
+  usetracessa::SearchCompletion completion;
   std::map<FlowNodeID, QueryResult> foundAt;
   std::size_t productStates = 0;
   std::size_t productEdges = 0;

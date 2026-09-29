@@ -250,6 +250,24 @@ TEST(UFG, BudgetsAndIncompleteModelsDoNotProveAbsence) {
   auto negative = queries::doubleFree(shared);
   EXPECT_EQ(incomplete.runObject(negative, 1).status, QueryStatus::Unknown);
 }
+TEST(UFG, DetectorPreservesExplicitBudgetReason) {
+  TraceFlowGraph shared;
+  auto release = addNode(shared), middle = addNode(shared), sink = addNode(shared);
+  shared.annotate(release, Event::Release, ObjectSet::known({1}));
+  shared.annotate(sink, Event::Dereference, ObjectSet::known({1}));
+  addEdge(shared, release, middle); addEdge(shared, middle, sink);
+  lotus::ufg::UFGGraph expanded(shared);
+  SearchLimits limits; limits.maxProductStates = 1;
+  auto result = lotus::ufg::DefectDetector(expanded, 3, limits).scan(DefectKind::UseAfterFree);
+  EXPECT_FALSE(result.completion.searchComplete);
+  EXPECT_TRUE(result.completion.modelComplete);
+  EXPECT_EQ(result.completion.stopReason, SearchStopReason::ProductStates);
+  EXPECT_EQ(result.completion.budgetLimit, 1u);
+  EXPECT_EQ(result.status, QueryStatus::Unknown);
+  auto unlimited = lotus::ufg::DefectDetector(expanded).scan(DefectKind::UseAfterFree);
+  EXPECT_TRUE(unlimited.completion.searchComplete);
+  EXPECT_EQ(unlimited.status, QueryStatus::Found);
+}
 
 TEST(UFG, RandomContextDifferential) {
   std::mt19937 random(1234567);

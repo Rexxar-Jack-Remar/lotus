@@ -27,6 +27,7 @@ struct DefectReport {
 
 struct DefectScan {
   QueryStatus status = QueryStatus::NotFound;
+  SearchCompletion completion;
   std::vector<DefectReport> findings;
   ObjectBatchStatistics statistics;
   bool exhaustive = true;
@@ -40,8 +41,9 @@ struct DefectScan {
 class DefectDetector {
 public:
   explicit DefectDetector(const TraceFlowGraph &graph,
-                          std::optional<std::size_t> contextLimit = std::nullopt)
-      : Graph(graph), ContextLimit(contextLimit) {}
+                          std::optional<std::size_t> contextLimit = DEFAULT_CONTEXT_LIMIT,
+                          SearchLimits limits = {}, ContextMode context = ContextMode::Realizable)
+      : Graph(graph), ContextLimit(contextLimit), Limits(limits), Context(context) {}
   DefectReport run(DefectKind kind,
                    std::vector<FlowNodeID> roots = {},
                    std::vector<FlowNodeID> uses = {}) const;
@@ -54,6 +56,8 @@ private:
   DefectScan scanImpl(DefectKind kind, bool firstOnly) const;
   const TraceFlowGraph &Graph;
   std::optional<std::size_t> ContextLimit;
+  SearchLimits Limits;
+  ContextMode Context;
 };
 
 } // namespace usetracessa

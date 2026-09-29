@@ -2,6 +2,7 @@
 #define LOTUS_IR_USETRACESSA_QUERY_H
 
 #include "IR/UseTraceSSA/TraceFlowGraph.h"
+#include "IR/UseTraceSSA/SearchBudget.h"
 #include <llvm/ADT/BitVector.h>
 #include <memory>
 
@@ -40,9 +41,10 @@ struct Query {
   /// Must events block; May events retain the no-effect alternative.
   Event trapEvents = Event::None;
   ContextMode context = ContextMode::Realizable;
-  /// Unset uses unbounded Dyck summaries. A supplied k retains call strings
-  /// using Saber's limit semantics: k=0 merges context from the first call.
-  std::optional<std::size_t> contextLimit;
+  /// Defaults to depth 3. Unset uses unbounded Dyck summaries. A supplied k
+  /// retains call strings using Saber's limit semantics: k=0 merges context
+  /// from the first call.
+  std::optional<std::size_t> contextLimit = DEFAULT_CONTEXT_LIMIT;
   Automaton automaton;
   bool requireNonEmpty = false;
   /// Threads have no sequential call-stack interpretation. Ignoring a reached
@@ -52,14 +54,21 @@ struct Query {
   /// globally along a taint path: different accesses can address different objects.
   std::optional<ObjectID> memoryObject;
   std::function<bool(const FlowEdge &)> edgeFilter;
-  std::size_t maxProductStates = 100000;
-  std::size_t maxSummaryPairs = 500000;
-  std::size_t maxWork = 5000000;
+  /// Resource limits are opt-in; zero means unlimited.
+  std::size_t maxProductStates = 0;
+  std::size_t maxSummaryPairs = 0;
+  /// Rendering limit only: truncating evidence does not interrupt the search.
   std::size_t maxWitnessEdges = 1000000;
 };
 
+inline void SearchLimits::apply(Query &query) const {
+  query.maxProductStates = maxProductStates;
+  query.maxSummaryPairs = maxSummaryPairs;
+}
+
 struct QueryResult {
   QueryStatus status = QueryStatus::NotFound;
+  SearchCompletion completion;
   std::vector<FlowNodeID> nodes;
   std::vector<FlowEdgeID> edges;
   std::vector<ID> automatonStates;
@@ -74,6 +83,7 @@ struct QueryResult {
 
 struct QueryScanResult {
   QueryStatus status = QueryStatus::NotFound;
+  SearchCompletion completion;
   std::map<FlowNodeID, QueryResult> foundAt;
   /// False when modeling or budgets prevent exhaustive sink enumeration.
   bool complete = true;
@@ -114,6 +124,7 @@ struct ObjectBatchStatistics {
 };
 struct ObjectWitnessData;
 struct ObjectBatchResult {
+  SearchCompletion completion;
   ObjectUniverse universe;
   ObjectMask found, notFound, unknown;
   /// Accepted masks per sink allow one shared scan with lazy witnesses.

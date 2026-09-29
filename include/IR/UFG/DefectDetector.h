@@ -16,8 +16,11 @@ using usetracessa::DefectScan;
 class DefectDetector {
 public:
   explicit DefectDetector(const UFGGraph &graph,
-                          std::optional<std::size_t> contextLimit = std::nullopt)
-      : Graph(graph), ContextLimit(contextLimit) {}
+                          std::optional<std::size_t> contextLimit =
+                              usetracessa::DEFAULT_CONTEXT_LIMIT,
+                          usetracessa::SearchLimits limits = {},
+                          usetracessa::ContextMode context = usetracessa::ContextMode::Realizable)
+      : Graph(graph), ContextLimit(contextLimit), Limits(limits), Context(context) {}
   DefectReport run(DefectKind kind, std::vector<FlowNodeID> roots = {},
                    std::vector<FlowNodeID> uses = {}) const;
   DefectScan scan(DefectKind kind) const;
@@ -25,6 +28,8 @@ public:
 private:
   const UFGGraph &Graph;
   std::optional<std::size_t> ContextLimit;
+  usetracessa::SearchLimits Limits;
+  usetracessa::ContextMode Context;
 };
 
 } // namespace ufg

@@ -62,9 +62,14 @@ UseTraceSSA, UFG, and the checks supported by Saber. It records graph size,
 phase timings, peak process RSS, result status, and findings in JSON. Use
 `--max-workers 1` when comparing timing and memory; that is the default.
 The script passes the same `--context-limit` to all three tools (default 3).
-In every tool, k=0 immediately merges older call context; use the script's
-`--unbounded-context` flag with only UseTraceSSA/UFG to omit the limit. Records
-retain the system-baseline versus representation-comparison distinction.
+`--context-depth` is an alias. In every tool, k=0 immediately merges older call
+context; it does not disable all call/return matching. With only UseTraceSSA/UFG,
+use `--context=insensitive` to disable matching. `--context=sensitive` is the
+default; the independent `--context-limit=N|unlimited` sets its call-string
+depth (`--unbounded-context` aliases `--context-limit=unlimited`). The depth
+setting is unused with insensitive context. Both IR tools also default to
+depth 3 when invoked directly. Records retain the
+system-baseline versus representation-comparison distinction.
 The `mode` column describes SMT configuration: UseTraceSSA, UFG, and Saber UAF
 all use `nosmt`. Saber UAF remains an object/ICFG reachability candidate,
 recorded separately in `analysis_scope`. Memory-leak and file-leak now run in
@@ -72,6 +77,29 @@ all three tools; the IR implementations are exit-path candidates with limited
 ownership-escape modeling, also recorded in `analysis_scope`.
 IR findings group objects by sink, while Saber emits bug reports; the JSON
 records each tool's `finding_unit` and the IR object counts separately.
+
+Both IR tools and the evaluation script accept `--max-product-states=N` and
+`--max-summary-pairs=N`. Both default to `unlimited`;
+numeric 0 is a compatibility alias. Each resource budget is independent of
+context settings and the other budgets. These are per-query budgets (one object
+batch in UseTraceSSA, one lane in UFG), so identical numbers do not impose
+equivalent work across engines. For timing comparisons, use the runner's
+`--timeout` and `--mem-limit-gb` with internal budgets unlimited.
+
+```bash
+python3 scripts/evaluate_usetracessa.py --tools usetracessa,ufg \
+  --benchmarks-dir benchmarks/real-world/SPEC2006 --context-depth 3 \
+  --max-product-states 200000 --max-summary-pairs unlimited \
+  --results /tmp/spec-budget-eval.json
+```
+
+IR output distinguishes `search_complete` from `model_complete`. An exhausted
+budget reports its `stop_reason`, `budget_limit`, and `budget_observed`, keeps
+any findings already found, and returns exit code 2. The runner records this
+as `INCOMPLETE`, independently of `TIMEOUT`/`OOM`; incomplete modeling alone
+does not mean the search was interrupted. JSON also records `search_limits`.
+Optional `--saber-max-forward-items` and `--saber-solver-timeout-ms` override
+Saber-specific budgets; omitting them preserves Saber's defaults.
 
 ## Typical usage
 

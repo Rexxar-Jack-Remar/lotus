@@ -305,8 +305,7 @@ void calleeTrap() {
 void limits() {
   TraceFlowGraph g; auto a=node(g,"a"),b=node(g,"b"),c=node(g,"c"); edge(g,a,b);edge(g,b,c);
   auto q=query(a,c); q.maxProductStates=1; CHECK(QueryEngine(g).run(q).status==QueryStatus::Unknown);
-  q.maxProductStates=100; q.maxWork=1; CHECK(QueryEngine(g).run(q).status==QueryStatus::Unknown);
-  q.maxWork=100; q.maxWitnessEdges=1; auto r=QueryEngine(g).run(q);
+  q.maxProductStates=100; q.maxWitnessEdges=1; auto r=QueryEngine(g).run(q);
   CHECK(r.found()); CHECK(!r.witnessComplete);
   TraceFlowGraph h; a=node(h,"call");b=node(h,"callee");c=node(h,"return");
   edge(h,a,b,FlowKind::Call,1);edge(h,b,c,FlowKind::Return,1);

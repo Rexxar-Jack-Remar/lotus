@@ -3,6 +3,7 @@
 #include "IR/UseTraceSSA/DefectDetector.h"
 #include "IR/UseTraceSSA/Query.h"
 #include "IR/UseTraceSSA/SVFGBridge.h"
+#include "IR/UseTraceSSA/TraceQueryOptions.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -42,9 +43,7 @@ llvm::cl::opt<bool> Timing("timing",
                             llvm::cl::desc("Print analysis phase timings to stderr"));
 llvm::cl::opt<bool> Quiet("quiet",
                            llvm::cl::desc("Suppress issue and witness details"));
-llvm::cl::opt<unsigned> ContextLimit(
-    "context-limit", llvm::cl::desc("Call-string k (0: immediate merging; omit for unbounded)"),
-    llvm::cl::init(0));
+cli::QueryOptionsParser QueryOptionFlags;
 llvm::cl::opt<unsigned> Source("source-node",
                                 llvm::cl::desc("SVFG source node ID for a flow query"),
                                 llvm::cl::init(std::numeric_limits<unsigned>::max()));
@@ -78,9 +77,13 @@ std::string findingSite(const FlowNode &node) {
 int main(int argc, char **argv) {
   llvm::InitLLVM init(argc, argv);
   llvm::cl::ParseCommandLineOptions(argc, argv, "Lotus SVFG use histories\n");
-  const std::optional<std::size_t> contextLimit =
-      ContextLimit.getNumOccurrences() ?
-          std::optional<std::size_t>(ContextLimit.getValue()) : std::nullopt;
+  cli::QueryOptions options;
+  std::string optionError;
+  if (!QueryOptionFlags.resolve(options, optionError)) {
+    llvm::errs() << "lotus-ir-usetracessa: " << optionError << '\n';
+    return 1;
+  }
+  SearchCompletion completion;
   bool query = Source != std::numeric_limits<unsigned>::max() ||
                Sink != std::numeric_limits<unsigned>::max();
   if ((Source == std::numeric_limits<unsigned>::max()) !=
@@ -157,7 +160,9 @@ int main(int argc, char **argv) {
                         Check == "use-after-free" ? DefectKind::UseAfterFree :
                         Check == "memory-leak" ? DefectKind::MemoryLeak :
                                                  DefectKind::FileLeak;
-      checkReport = DefectDetector(result.graph, contextLimit).scan(kind);
+      checkReport = DefectDetector(result.graph, options.depth, options.limits, options.mode)
+                        .scan(kind);
+      completion.merge(checkReport->completion);
       for (std::size_t index = 0; index < checkReport->findings.size(); ++index) {
         const auto &witness = checkReport->findings[index].result.nodes;
         if (witness.empty()) continue;
@@ -176,8 +181,9 @@ int main(int argc, char **argv) {
       Query request;
       request.sources = {source->second};
       request.sinks = {sink->second};
-      request.contextLimit = contextLimit;
+      options.apply(request);
       nodeQuery = QueryEngine(result.graph).run(request);
+      completion.merge(nodeQuery->completion);
     }
     const auto analyzed = Clock::now();
     if (Format == "json") result.graph.printJSON(std::cout);
@@ -186,8 +192,8 @@ int main(int argc, char **argv) {
       const auto stats = result.graph.statistics();
       std::cout << "svfg_nodes=" << svfg->getNumNodes()
                 << " svfg_edges=" << svfg->getStat().numEdges
-                << " context_limit=" << (contextLimit ?
-                    std::to_string(*contextLimit) : "unbounded")
+                << " context_limit=" << options.depthName()
+                << " context_mode=" << options.contextName()
                 << " history_nodes=" << stats.historyNodes
                 << " history_psi=" << stats.historyPsiNodes
                 << " history_phi=" << stats.historyPhiNodes
@@ -204,7 +210,9 @@ int main(int argc, char **argv) {
         std::cout << "check=" << Check << " result=" << statusName(scan.status)
                   << " findings=" << scan.findings.size()
                   << " finding_sites=" << findingGroups.size()
-                  << " exhaustive=" << (scan.exhaustive ? "yes" : "no") << '\n';
+                  << " exhaustive=" << (scan.exhaustive ? "yes" : "no");
+        cli::printCompletion(std::cout, scan.completion);
+        std::cout << '\n';
         const auto &qs = scan.statistics;
         std::cout << "batch_products=" << qs.productStates
                   << " product_edges=" << qs.productEdges
@@ -239,7 +247,9 @@ int main(int argc, char **argv) {
                   << " witness_edges=" << answer.edges.size()
                   << " product_states=" << answer.productStates
                   << " edges_examined=" << answer.edgesExamined
-                  << " summary_pairs=" << answer.summaryPairs << '\n';
+                  << " summary_pairs=" << answer.summaryPairs;
+        cli::printCompletion(std::cout, answer.completion);
+        std::cout << '\n';
         if (!Quiet && !answer.message.empty())
           std::cout << "message: " << answer.message << '\n';
         if (!Quiet)
@@ -255,9 +265,10 @@ int main(int argc, char **argv) {
                 << " check=" << millis(builtHistory, analyzed)
                 << " total=" << millis(start, analyzed) << '\n';
     }
+    cli::explainIncomplete(std::cerr, completion);
   } catch (const std::exception &error) {
     llvm::errs() << "lotus-ir-usetracessa: " << error.what() << '\n';
     return 1;
   }
-  return 0;
+  return completion.searchComplete ? 0 : 2;
 }

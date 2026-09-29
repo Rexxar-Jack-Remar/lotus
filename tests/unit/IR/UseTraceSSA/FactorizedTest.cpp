@@ -122,6 +122,72 @@ TEST(UseTraceSSAObjects, SequentialAndJoin) {
     r = compare(g, q); EXPECT_EQ(r.found.count(), overlap ? 3u : 2u);
   }
 }
+TEST(UseTraceSSAObjects, DefaultBudgetsAreUnlimitedAndContextDepthIsThree) {
+  Query q;
+  ASSERT_TRUE(q.contextLimit);
+  EXPECT_EQ(*q.contextLimit, 3u);
+  EXPECT_EQ(q.maxProductStates, 0u);
+  EXPECT_EQ(q.maxSummaryPairs, 0u);
+  TraceFlowGraph g;
+  auto first = node(g), last = first;
+  for (unsigned i = 0; i < 100000; ++i) {
+    auto next = node(g); edge(g, last, next); last = next;
+  }
+  q.sources = {first}; q.sinks = {last};
+  auto result = QueryEngine(g).runObjects({q, ObjectUniverse({1})});
+  EXPECT_EQ(result.status(1), QueryStatus::Found);
+  EXPECT_GT(result.statistics.productStates, 100000u);
+  EXPECT_TRUE(result.completion.searchComplete);
+}
+
+TEST(UseTraceSSAObjects, BudgetAndModelCompletenessAreIndependent) {
+  TraceFlowGraph g;
+  auto a = node(g), b = node(g), c = node(g);
+  edge(g, a, b); edge(g, b, c);
+  for (auto reason : {SearchStopReason::ProductStates, SearchStopReason::SummaryPairs}) {
+    auto q = query(a, c);
+    if (reason == SearchStopReason::ProductStates) q.maxProductStates = 1;
+    if (reason == SearchStopReason::SummaryPairs) q.maxSummaryPairs = 1;
+    auto check = [&](const SearchCompletion &completion) {
+      EXPECT_FALSE(completion.searchComplete);
+      EXPECT_TRUE(completion.modelComplete);
+      EXPECT_EQ(completion.stopReason, reason);
+      EXPECT_EQ(completion.budgetLimit, 1u);
+      EXPECT_EQ(completion.budgetObserved, 1u);
+    };
+    check(QueryEngine(g).run(q).completion);
+    check(QueryEngine(g).runToSinks(q).completion);
+    check(QueryEngine(g).runObjects({q, ObjectUniverse({1})}).completion);
+  }
+  auto q = query(a, c);
+  q.sinks.push_back(a); q.maxProductStates = 1;
+  auto partial = QueryEngine(g).runObjects({q, ObjectUniverse({1}), true});
+  EXPECT_EQ(partial.status(1), QueryStatus::Found);
+  EXPECT_FALSE(partial.completion.searchComplete);
+  EXPECT_TRUE(partial.witness(a, 1).found());
+  EXPECT_FALSE(partial.witness(a, 1).completion.searchComplete);
+  g.addIssue("missing external model");
+  q.maxProductStates = 0;
+  auto incompleteModel = QueryEngine(g).runObjects({q, ObjectUniverse({1})});
+  EXPECT_TRUE(incompleteModel.completion.searchComplete);
+  EXPECT_FALSE(incompleteModel.completion.modelComplete);
+  EXPECT_FALSE(incompleteModel.complete);
+  q.maxProductStates = 1;
+  auto both = QueryEngine(g).runObjects({q, ObjectUniverse({1})});
+  EXPECT_FALSE(both.completion.searchComplete);
+  EXPECT_FALSE(both.completion.modelComplete);
+}
+
+TEST(UseTraceSSAObjects, InsensitiveModeIsDistinctFromLegacyZeroDepth) {
+  TraceFlowGraph g;
+  auto a = node(g), b = node(g), c = node(g);
+  edge(g, a, b, ObjectSet::unknown(), FlowKind::Call, 7);
+  edge(g, b, c, ObjectSet::unknown(), FlowKind::Return, 8);
+  auto q = query(a, c); q.contextLimit = 0;
+  EXPECT_FALSE(QueryEngine(g).run(q).found());
+  q.context = ContextMode::Insensitive;
+  EXPECT_TRUE(QueryEngine(g).run(q).found());
+}
 TEST(UseTraceSSAObjects, FragmentedDeltasExpandEachProductOnce) {
   TraceFlowGraph g;
   auto join = node(g), sink = node(g), thread = node(g);

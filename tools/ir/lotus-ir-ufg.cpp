@@ -2,6 +2,7 @@
 #include "IR/SVFG/SVFGBuilder.h"
 #include "IR/UFG/DefectDetector.h"
 #include "IR/UseTraceSSA/SVFGBridge.h"
+#include "IR/UseTraceSSA/TraceQueryOptions.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -42,9 +43,7 @@ llvm::cl::opt<bool> Timing("timing",
                             llvm::cl::desc("Print analysis phase timings to stderr"));
 llvm::cl::opt<bool> Quiet("quiet",
                            llvm::cl::desc("Suppress issue and witness details"));
-llvm::cl::opt<unsigned> ContextLimit(
-    "context-limit", llvm::cl::desc("Call-string k (0: immediate merging; omit for unbounded)"),
-    llvm::cl::init(0));
+cli::QueryOptionsParser QueryOptionFlags;
 llvm::cl::opt<unsigned> Source("source-node",
                                 llvm::cl::desc("SVFG source node ID for a flow query"),
                                 llvm::cl::init(std::numeric_limits<unsigned>::max()));
@@ -82,9 +81,13 @@ std::string findingSite(const FlowNode &node) {
 int main(int argc, char **argv) {
   llvm::InitLLVM init(argc, argv);
   llvm::cl::ParseCommandLineOptions(argc, argv, "Lotus object-expanded use-flow graph\n");
-  const std::optional<std::size_t> contextLimit =
-      ContextLimit.getNumOccurrences() ?
-          std::optional<std::size_t>(ContextLimit.getValue()) : std::nullopt;
+  cli::QueryOptions options;
+  std::string optionError;
+  if (!QueryOptionFlags.resolve(options, optionError)) {
+    llvm::errs() << "lotus-ir-ufg: " << optionError << '\n';
+    return 1;
+  }
+  SearchCompletion completion;
   bool query = Source != std::numeric_limits<unsigned>::max() ||
                Sink != std::numeric_limits<unsigned>::max();
   if ((Source == std::numeric_limits<unsigned>::max()) !=
@@ -155,7 +158,9 @@ int main(int argc, char **argv) {
                         Check == "use-after-free" ? DefectKind::UseAfterFree :
                         Check == "memory-leak" ? DefectKind::MemoryLeak :
                                                  DefectKind::FileLeak;
-      checkReport = lotus::ufg::DefectDetector(expanded, contextLimit).scan(kind);
+      checkReport = lotus::ufg::DefectDetector(expanded, options.depth, options.limits, options.mode)
+                        .scan(kind);
+      completion.merge(checkReport->completion);
       for (std::size_t index = 0; index < checkReport->findings.size(); ++index) {
         const auto &witness = checkReport->findings[index].result.nodes;
         if (witness.empty()) continue;
@@ -174,14 +179,14 @@ int main(int argc, char **argv) {
       Query request;
       request.sources = {source->second};
       request.sinks = {sink->second};
-      request.contextLimit = contextLimit;
-      request.maxProductStates = request.maxSummaryPairs = request.maxWork = 0;
+      options.apply(request);
       if (Object.getNumOccurrences() &&
           !std::binary_search(expanded.objects().begin(), expanded.objects().end(), Object))
         throw std::invalid_argument("requested object is absent from the UFG universe");
       for (auto object : expanded.objects()) {
         if (Object.getNumOccurrences() && object != Object) continue;
         auto answer = expanded.runObject(request, object);
+        completion.merge(answer.completion);
         if (!nodeQuery || answer.found() ||
             (answer.status == QueryStatus::Unknown &&
              nodeQuery->status == QueryStatus::NotFound)) {
@@ -193,6 +198,8 @@ int main(int argc, char **argv) {
       if (!nodeQuery) {
         nodeQuery.emplace();
         nodeQuery->status = QueryStatus::Unknown;
+        nodeQuery->completion.modelComplete = false;
+        completion.modelComplete = false;
         nodeQuery->message = "no object lanes were constructed";
       }
     }
@@ -204,8 +211,8 @@ int main(int argc, char **argv) {
       const auto ufgStats = expanded.statistics();
       std::cout << "svfg_nodes=" << svfg->getNumNodes()
                 << " svfg_edges=" << svfg->getStat().numEdges
-                << " context_limit=" << (contextLimit ?
-                    std::to_string(*contextLimit) : "unbounded")
+                << " context_limit=" << options.depthName()
+                << " context_mode=" << options.contextName()
                 << " history_nodes=" << stats.historyNodes
                 << " history_psi=" << stats.historyPsiNodes
                 << " history_phi=" << stats.historyPhiNodes
@@ -225,7 +232,9 @@ int main(int argc, char **argv) {
         std::cout << "check=" << Check << " result=" << statusName(scan.status)
                   << " findings=" << scan.findings.size()
                   << " finding_sites=" << findingGroups.size()
-                  << " exhaustive=" << (scan.exhaustive ? "yes" : "no") << '\n';
+                  << " exhaustive=" << (scan.exhaustive ? "yes" : "no");
+        cli::printCompletion(std::cout, scan.completion);
+        std::cout << '\n';
         const auto &qs = scan.statistics;
         std::cout << "lane_product_states=" << qs.productStates
                   << " lane_product_edges=" << qs.productEdges
@@ -258,7 +267,9 @@ int main(int argc, char **argv) {
                   << " witness_edges=" << answer.edges.size()
                   << " product_states=" << answer.productStates
                   << " edges_examined=" << answer.edgesExamined
-                  << " summary_pairs=" << answer.summaryPairs << '\n';
+                  << " summary_pairs=" << answer.summaryPairs;
+        cli::printCompletion(std::cout, completion);
+        std::cout << '\n';
         if (!Quiet && !answer.message.empty())
           std::cout << "message: " << answer.message << '\n';
         if (!Quiet)
@@ -279,9 +290,10 @@ int main(int argc, char **argv) {
                 << " check=" << millis(builtHistory, analyzed)
                 << " total=" << millis(start, analyzed) << '\n';
     }
+    cli::explainIncomplete(std::cerr, completion);
   } catch (const std::exception &error) {
     llvm::errs() << "lotus-ir-ufg: " << error.what() << '\n';
     return 1;
   }
-  return 0;
+  return completion.searchComplete ? 0 : 2;
 }

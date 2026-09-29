@@ -11,13 +11,16 @@
 namespace lotus {
 namespace usetracessa {
 namespace {
-struct Budget {};
+using Budget = detail::SearchBudgetExceeded;
+struct WitnessBudget {};
 std::uint64_t key(ID a, ID b) { return (std::uint64_t(a) << 32) | b; }
 ID asID(std::size_t n) {
   if (n >= InvalidID) throw std::length_error("UseTraceSSA query identifier overflow");
   return static_cast<ID>(n);
 }
-void bound(std::size_t n, std::size_t max) { if (max && n >= max) throw Budget{}; }
+void bound(std::size_t n, std::size_t max, SearchStopReason reason) {
+  detail::checkSearchBudget(n, max, reason);
+}
 struct ProductNode { FlowNodeID node; ID state; };
 struct ProductEdge { ID from, to; FlowEdgeID original; };
 enum class RecipeKind { Epsilon, Edge, Concat, Match };
@@ -83,6 +86,7 @@ QueryScanResult QueryEngine::runToSinks(const Query &q) const {
   QueryScanResult scan;
   auto result = runImpl(q, &scan);
   scan.status = result.status;
+  scan.completion = result.completion;
   scan.productStates = result.productStates;
   scan.edgesExamined = result.edgesExamined;
   scan.summaryPairs = result.summaryPairs;
@@ -128,13 +132,11 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
   std::unordered_map<detail::FlowStateKey, ID, detail::FlowStateHash> products;
   std::vector<ID> roots;
   bool incomplete = !G.complete(), limited = false, hasContext = false;
-  std::size_t work = 0;
-  auto tick = [&] { bound(work++, q.maxWork); };
   auto product = [&](FlowNodeID node, ID state) -> ID {
     detail::FlowStateKey k{node, state};
     auto it = products.find(k);
     if (it != products.end()) return it->second;
-    bound(pn.size(), q.maxProductStates);
+    bound(pn.size(), q.maxProductStates, SearchStopReason::ProductStates);
     ID id = asID(pn.size());
     products.emplace(k, id); pn.push_back({node, state}); pout.emplace_back();
     return id;
@@ -148,7 +150,6 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
       ProductNode n = pn[i];
       for (auto eid : G.outgoing(n.node)) {
         ++result.edgesExamined;
-        tick();
         const auto &e = G.edge(eid);
         if (!e.enabled || e.objects.empty() || (q.edgeFilter && !q.edgeFilter(e))) continue;
         if (q.memoryObject && !e.objects.contains(*q.memoryObject)) continue;
@@ -160,7 +161,10 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
         }
       }
     }
-  } catch (const Budget &) { limited = true; }
+  } catch (const Budget &budget) {
+    limited = true;
+    result.completion.stop(budget.reason, budget.limit, budget.observed);
+  }
   result.productStates = pn.size();
 
   if (q.contextLimit && q.context != ContextMode::Insensitive) {
@@ -173,7 +177,7 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
     auto insert = [&](ContextState state, ID previous, ID edge) {
       auto found = known.find(state);
       if (found != known.end()) return;
-      bound(states.size(), q.maxSummaryPairs);
+      bound(states.size(), q.maxSummaryPairs, SearchStopReason::SummaryPairs);
       ID id = asID(states.size());
       known.emplace(state, id);
       states.push_back(std::move(state));
@@ -197,7 +201,6 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
           if (acceptedSinks.size() == static_cast<std::size_t>(sinkCount)) break;
         }
         for (ID edgeID : pout[current.product]) {
-          tick();
           const ProductEdge &step = pe[edgeID];
           const FlowEdge &edge = G.edge(step.original);
           ContextState next = current;
@@ -220,9 +223,13 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
           insert(std::move(next), id, edgeID);
         }
       }
-    } catch (const Budget &) { limited = true; }
+    } catch (const Budget &budget) {
+      limited = true;
+      result.completion.stop(budget.reason, budget.limit, budget.observed);
+    }
     result.summaryPairs = states.size();
-    if (scan) scan->complete = !limited && !incomplete;
+    result.completion.modelComplete = !incomplete;
+    if (scan) scan->complete = result.completion.complete();
     if (accepted == InvalidID) {
       result.status = limited || incomplete ? QueryStatus::Unknown : QueryStatus::NotFound;
       result.message = limited ? "bounded-context query budget exhausted" :
@@ -277,7 +284,7 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
       auto previous = relation.find(k);
       if (previous != relation.end() &&
           (recipes[previous->second].positive || !r.positive)) return;
-      bound(recipes.size(), q.maxSummaryPairs);
+      bound(recipes.size(), q.maxSummaryPairs, SearchStopReason::SummaryPairs);
       if (previous == relation.end()) ++result.summaryPairs;
       ID id = asID(recipes.size());
       relation[k] = id; recipes.push_back(r);
@@ -310,14 +317,14 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
         std::size_t num_preds = rin[r.from].size();
         for (std::size_t i = 0; i < num_preds; ++i) {
           auto l = rin[r.from][i];
-          tick(); Recipe a = recipes[l];
+          Recipe a = recipes[l];
           insert({a.from, r.to, RecipeKind::Concat, l, rid, InvalidID,
                   a.positive || r.positive});
         }
         std::size_t num_succs = rout[r.to].size();
         for (std::size_t i = 0; i < num_succs; ++i) {
           auto h = rout[r.to][i];
-          tick(); Recipe b = recipes[h];
+          Recipe b = recipes[h];
           insert({r.from, b.to, RecipeKind::Concat, rid, h, InvalidID,
                   r.positive || b.positive});
         }
@@ -338,7 +345,6 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
             while (r_end < rOut.size() && callSiteOf(rOut[r_end]) == siteR) ++r_end;
             for (std::size_t cx = c_idx; cx < c_end; ++cx) {
               for (std::size_t rx = r_idx; rx < r_end; ++rx) {
-                tick();
                 insert({pe[cIn[cx]].from, pe[rOut[rx]].to, RecipeKind::Match,
                         cIn[cx], rOut[rx], rid, true});
               }
@@ -348,7 +354,10 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
           }
         }
       }
-    } catch (const Budget &) { limited = true; }
+    } catch (const Budget &budget) {
+      limited = true;
+      result.completion.stop(budget.reason, budget.limit, budget.observed);
+    }
   }
 
   // Find a path in the quotient. Realizable segments have unmatched returns
@@ -401,7 +410,8 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
       }
     }
   }
-  if (scan) scan->complete = !limited && !incomplete;
+  result.completion.modelComplete = !incomplete;
+  if (scan) scan->complete = result.completion.complete();
   if (accepted == InvalidID) {
     result.status = limited || incomplete ? QueryStatus::Unknown : QueryStatus::NotFound;
     result.message = limited ? "query budget exhausted; absence is not established" :
@@ -422,7 +432,7 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
     evidence.nodes.push_back(pn[state / 4].node);
     evidence.automatonStates.push_back(pn[state / 4].state);
     auto append = [&](ID edge) {
-      if (q.maxWitnessEdges && evidence.edges.size() >= q.maxWitnessEdges) throw Budget{};
+      if (q.maxWitnessEdges && evidence.edges.size() >= q.maxWitnessEdges) throw WitnessBudget{};
       evidence.edges.push_back(pe[edge].original);
       evidence.nodes.push_back(pn[pe[edge].to].node);
       evidence.automatonStates.push_back(pn[pe[edge].to].state);
@@ -447,7 +457,7 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
           }
         }
       }
-    } catch (const Budget &) {
+    } catch (const WitnessBudget &) {
       evidence.witnessComplete = false;
       evidence.message += "; witness rendering truncated (existence is established)";
     }

@@ -16,7 +16,8 @@ using ID = SearchID;
 using StateID = usetracessa::ID;
 constexpr ID InvalidID = std::numeric_limits<ID>::max();
 namespace {
-struct Budget {};
+using Budget = usetracessa::detail::SearchBudgetExceeded;
+struct WitnessBudget {};
 struct Product { FlowNodeID node; StateID state; };
 struct ProductEdge { ID from, to; FlowEdgeID edge; };
 enum class ProofKind { Empty, Edge, Concat, Match };
@@ -48,8 +49,8 @@ ID checked(std::size_t size) {
   if (size >= InvalidID) throw std::length_error("UFG: search identifier space exhausted");
   return static_cast<ID>(size);
 }
-void bound(std::size_t size, std::size_t limit) {
-  if (limit && size >= limit) throw Budget{};
+void bound(std::size_t size, std::size_t limit, SearchStopReason reason) {
+  usetracessa::detail::checkSearchBudget(size, limit, reason);
 }
 } // namespace
 
@@ -87,8 +88,6 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
 
   LaneSearchResult result;
   bool incomplete = !graph.complete(), limited = false;
-  std::size_t work = 0;
-  auto tick = [&] { bound(work++, query.maxWork); };
   auto advance = [&](FlowNodeID node, StateID state) {
     std::vector<StateID> successors;
     if (traps.count(node)) return successors;
@@ -117,7 +116,7 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
     usetracessa::detail::FlowStateKey key{node, state};
     auto found = productIDs.find(key);
     if (found != productIDs.end()) return found->second;
-    bound(products.size(), query.maxProductStates);
+    bound(products.size(), query.maxProductStates, SearchStopReason::ProductStates);
     ID id = checked(products.size());
     productIDs.emplace(key, id);
     products.push_back({node, state});
@@ -132,7 +131,6 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
       Product current = products[i];
       for (auto eid : graph.outgoing(current.node)) {
         ++result.edgesExamined;
-        tick();
         const FlowEdge &edge = graph.edge(eid);
         if (!edge.enabled || edge.objects.empty() ||
             (query.edgeFilter && !query.edgeFilter(edge))) continue;
@@ -149,7 +147,10 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
         }
       }
     }
-  } catch (const Budget &) { limited = true; }
+  } catch (const Budget &budget) {
+    limited = true;
+    result.completion.stop(budget.reason, budget.limit, budget.observed);
+  }
   result.productStates = products.size();
   result.productEdges = edges.size();
 
@@ -169,7 +170,7 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
       auto identity = std::make_tuple(state.product, state.calls,
                                       state.truncated, state.positive);
       if (known.count(identity)) return;
-      bound(states.size(), query.maxSummaryPairs);
+      bound(states.size(), query.maxSummaryPairs, SearchStopReason::SummaryPairs);
       ID id = checked(states.size());
       known.emplace(std::move(identity), id);
       states.push_back(std::move(state));
@@ -188,7 +189,6 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
             (query.context != ContextMode::Balanced || current.calls.empty()))
           accepted.emplace(expanded ? Graph.originalNode(point.node) : point.node, id);
         for (ID edgeID : outgoing[current.product]) {
-          tick();
           const ProductEdge &step = edges[edgeID];
           const FlowEdge &edge = graph.edge(step.edge);
           ContextState next = current;
@@ -211,9 +211,13 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
           insert(std::move(next), id, edgeID);
         }
       }
-    } catch (const Budget &) { limited = true; }
+    } catch (const Budget &budget) {
+      limited = true;
+      result.completion.stop(budget.reason, budget.limit, budget.observed);
+    }
     result.summaryPairs = states.size();
-    result.exhaustive = !limited && !incomplete;
+    result.completion.modelComplete = !incomplete;
+    result.exhaustive = result.completion.complete();
     result.status = !accepted.empty() ? QueryStatus::Found :
                     result.exhaustive ? QueryStatus::NotFound : QueryStatus::Unknown;
     result.message = limited ? "bounded-context tabulation budget exhausted" :
@@ -221,6 +225,7 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
                                   "bounded-context lane tabulation complete";
     for (const auto &hit : accepted) {
       QueryResult witness;
+      witness.completion = result.completion;
       witness.status = QueryStatus::Found;
       witness.productStates = result.productStates;
       witness.edgesExamined = result.edgesExamined;
@@ -263,7 +268,7 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
     auto insert = [&](Fact fact) {
       FactKey identity{fact.from, fact.to, fact.positive};
       if (known.count(identity)) return;
-      bound(facts.size(), query.maxSummaryPairs);
+      bound(facts.size(), query.maxSummaryPairs, SearchStopReason::SummaryPairs);
       ID id = checked(facts.size());
       known.emplace(identity, id);
       facts.push_back(fact);
@@ -286,7 +291,6 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
         Fact fact = facts[id];
         const std::size_t predecessors = factsIn[fact.from].size();
         for (std::size_t i = 0; i < predecessors; ++i) {
-          tick();
           ID left = factsIn[fact.from][i];
           Fact previous = facts[left];
           insert({previous.from, fact.to, previous.positive || fact.positive,
@@ -294,7 +298,6 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
         }
         const std::size_t successors = factsOut[fact.to].size();
         for (std::size_t i = 0; i < successors; ++i) {
-          tick();
           ID right = factsOut[fact.to][i];
           Fact next = facts[right];
           insert({fact.from, next.to, fact.positive || next.positive,
@@ -302,14 +305,16 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
         }
         for (ID call : callsIn[fact.from])
           for (ID ret : returnsOut[fact.to]) {
-            tick();
             if (graph.edge(edges[call].edge).callSite !=
                 graph.edge(edges[ret].edge).callSite) continue;
             insert({edges[call].from, edges[ret].to, true,
                     ProofKind::Match, call, id, ret});
           }
       }
-    } catch (const Budget &) { limited = true; }
+    } catch (const Budget &budget) {
+      limited = true;
+      result.completion.stop(budget.reason, budget.limit, budget.observed);
+    }
   }
   result.summaryPairs = facts.size();
 
@@ -332,43 +337,41 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
   std::map<FlowNodeID, ID> accepted;
   if (!seen.empty()) {
     for (ID root : roots) enqueue(encode(root, 0, false), InvalidID, false, InvalidID);
-    try {
-      while (!queue.empty()) {
-        ID current = queue.front(); queue.pop_front();
-        ID point = current / 4;
-        unsigned phase = (current % 4) / 2;
-        bool positive = current % 2;
-        Product p = products[point];
-        if (sinks.count(p.node) && accepts[p.state] && (!query.requireNonEmpty || positive))
-          accepted.emplace(expanded ? Graph.originalNode(p.node) : p.node, current);
-        auto push = [&](ID target, unsigned nextPhase, bool nonempty,
-                        bool byFact, ID item) {
-          tick();
-          enqueue(encode(target, nextPhase, positive || nonempty),
-                  current, byFact, item);
-        };
-        if (contextual) {
-          for (ID id : factsOut[point]) {
-            const Fact &fact = facts[id];
-            push(fact.to, phase, fact.positive, true, id);
-          }
-        }
-        for (ID id : outgoing[point]) {
-          const ProductEdge &edge = edges[id];
-          FlowKind kind = graph.edge(edge.edge).kind;
-          if (!contextual || (kind != FlowKind::Call && kind != FlowKind::Return))
-            push(edge.to, phase, true, false, id);
-          else if (query.context == ContextMode::Realizable) {
-            if (kind == FlowKind::Call) push(edge.to, 1, true, false, id);
-            else if (kind == FlowKind::Return && phase == 0)
-              push(edge.to, 0, true, false, id);
-          }
+    while (!queue.empty()) {
+      ID current = queue.front(); queue.pop_front();
+      ID point = current / 4;
+      unsigned phase = (current % 4) / 2;
+      bool positive = current % 2;
+      Product p = products[point];
+      if (sinks.count(p.node) && accepts[p.state] && (!query.requireNonEmpty || positive))
+        accepted.emplace(expanded ? Graph.originalNode(p.node) : p.node, current);
+      auto push = [&](ID target, unsigned nextPhase, bool nonempty,
+                      bool byFact, ID item) {
+        enqueue(encode(target, nextPhase, positive || nonempty),
+                current, byFact, item);
+      };
+      if (contextual) {
+        for (ID id : factsOut[point]) {
+          const Fact &fact = facts[id];
+          push(fact.to, phase, fact.positive, true, id);
         }
       }
-    } catch (const Budget &) { limited = true; }
+      for (ID id : outgoing[point]) {
+        const ProductEdge &edge = edges[id];
+        FlowKind kind = graph.edge(edge.edge).kind;
+        if (!contextual || (kind != FlowKind::Call && kind != FlowKind::Return))
+          push(edge.to, phase, true, false, id);
+        else if (query.context == ContextMode::Realizable) {
+          if (kind == FlowKind::Call) push(edge.to, 1, true, false, id);
+          else if (kind == FlowKind::Return && phase == 0)
+            push(edge.to, 0, true, false, id);
+        }
+      }
+    }
   }
 
-  result.exhaustive = !limited && !incomplete;
+  result.completion.modelComplete = !incomplete;
+  result.exhaustive = result.completion.complete();
   result.status = !accepted.empty() ? QueryStatus::Found :
                   result.exhaustive ? QueryStatus::NotFound : QueryStatus::Unknown;
   result.message = limited ? "UFG tabulation budget exhausted" :
@@ -377,6 +380,7 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
 
   for (const auto &hit : accepted) {
     QueryResult witness;
+    witness.completion = result.completion;
     witness.status = QueryStatus::Found;
     witness.productStates = result.productStates;
     witness.edgesExamined = result.edgesExamined;
@@ -394,7 +398,7 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
     witness.automatonStates.push_back(root.state);
     auto append = [&](ID id) {
       if (query.maxWitnessEdges && witness.edges.size() >= query.maxWitnessEdges)
-        throw Budget{};
+        throw WitnessBudget{};
       const ProductEdge &edge = edges[id];
       witness.edges.push_back(edge.edge);
       witness.nodes.push_back(products[edge.to].node);
@@ -423,7 +427,7 @@ LaneSearchResult SearchEngine::tabulate(Query query, const TraceFlowGraph &graph
           }
         }
       }
-    } catch (const Budget &) {
+    } catch (const WitnessBudget &) {
       witness.witnessComplete = false;
       witness.message += "; witness rendering truncated";
     }
@@ -436,6 +440,7 @@ QueryResult SearchEngine::run(Query query, ObjectID object) const {
   auto result = scan(std::move(query), object);
   if (!result.foundAt.empty()) return std::move(result.foundAt.begin()->second);
   QueryResult answer;
+  answer.completion = result.completion;
   answer.status = result.status;
   answer.productStates = result.productStates;
   answer.edgesExamined = result.edgesExamined;
@@ -448,6 +453,7 @@ QueryResult SearchEngine::runGeneric(Query query) const {
   auto result = scanGeneric(std::move(query));
   if (!result.foundAt.empty()) return std::move(result.foundAt.begin()->second);
   QueryResult answer;
+  answer.completion = result.completion;
   answer.status = result.status;
   answer.productStates = result.productStates;
   answer.edgesExamined = result.edgesExamined;

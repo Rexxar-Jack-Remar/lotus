@@ -73,10 +73,22 @@ context-insensitive, or call-free queries. When `batch.hasWitnesses()` is true,
 `batch.witness(sink, object)` follows a shared proof chain without another search.
 Proofs are shared across objects; only acceptance records carry object masks.
 
-Queries also accept `contextLimit`: leaving it unset uses unbounded Dyck
-summaries. A supplied k uses Saber's call-string limit semantics, including
-k=0 for immediate context merging. The CLI exposes this as
-`--context-limit=k`; omit the option for unbounded matching.
+Queries default to `contextLimit=3`. Resetting the optional limit uses unbounded
+Dyck summaries. The CLI selects call/return matching with `--context=sensitive`
+(default) or `--context=insensitive`. Independently, `--context-limit=N|unlimited`
+(alias `--context-depth`) sets the depth used by context-sensitive search.
+`--unbounded-context` is an alias for `--context-limit=unlimited`. Legacy depth 0
+immediately merges older call context but still matches the latest call site;
+use `--context=insensitive` to disable call/return matching.
+
+Search budgets default to unlimited. `--max-product-states` and `--max-summary-pairs`
+(also bounds context states) accept a nonnegative integer or
+`unlimited`; numeric 0 is an alias for unlimited. They apply to each query,
+including a symbolic object batch. Results expose `completion.searchComplete`
+separately from `completion.modelComplete`, plus the first `stopReason`,
+`budgetLimit`, and `budgetObserved`. Budget exhaustion preserves existing
+findings and makes unfinished negatives Unknown. The CLI prints these fields,
+warns even with `--quiet`, and exits with code 2 for incomplete searches.
 
 `DefectDetector` supplies double-free, use-after-free, memory-leak, file-leak,
 taint and unchecked-use rules. Its resource scan searches all objects and sinks

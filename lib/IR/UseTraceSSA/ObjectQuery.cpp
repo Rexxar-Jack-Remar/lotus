@@ -35,7 +35,7 @@ QueryStatus ObjectBatchResult::status(ObjectID object) const {
          unknown.test(bit) ? QueryStatus::Unknown : QueryStatus::NotFound;
 }
 namespace {
-struct Budget {};
+using Budget = detail::SearchBudgetExceeded;
 // Query facts share immutable labels. TOP, BOTTOM, and unchanged masks need no
 // new dense allocation; joins replace their handle instead of mutating aliases.
 using Mask = std::shared_ptr<const ObjectMask>;
@@ -64,6 +64,7 @@ struct ObjectWitnessData {
 
 QueryResult ObjectBatchResult::witness(FlowNodeID sink, ObjectID object) const {
   QueryResult result;
+  result.completion = completion;
   result.status = QueryStatus::Unknown;
   result.message = "object witness provenance was not retained";
   if (!Witnesses) return result;
@@ -155,9 +156,7 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
   };
   Mask foundObjects = emptyMask;
   std::map<FlowNodeID, Mask> foundAt;
-  auto bound = [](std::size_t n, std::size_t max) { if (max && n >= max) throw Budget{}; };
-  std::size_t work = 0;
-  auto tick = [&] { bound(work++, q.maxWork); };
+  auto bound = detail::checkSearchBudget;
   std::vector<bool> accepts(q.automaton.states), sinks(G.nodes().size()), traps(G.nodes().size());
   for (auto state : q.automaton.accepting) {
     if (state >= accepts.size()) throw std::invalid_argument("UseTraceSSA: accepting state");
@@ -240,7 +239,7 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
     detail::FlowStateKey k{node, state};
     auto it = products.find(k);
     if (it != products.end()) return it->second;
-    bound(pn.size(), q.maxProductStates);
+    bound(pn.size(), q.maxProductStates, SearchStopReason::ProductStates);
     if (pn.size() >= InvalidID / 4) throw std::length_error("UseTraceSSA: product too large");
     ID id = pn.size();
     products.emplace(k, id); pn.push_back({node, state});
@@ -269,7 +268,7 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
         expanded[delta.id] = true;
         ProductNode n = pn[delta.id];
         for (auto eid : G.outgoing(n.node)) {
-          tick(); ++stats.edgesExamined;
+          ++stats.edgesExamined;
           const auto &e = G.edge(eid);
           if (!e.enabled || e.objects.empty() || (q.edgeFilter && !q.edgeFilter(e))) continue;
           if (!edgeMaskReady[eid]) {
@@ -291,7 +290,6 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
       if (omittedThreads[delta.id] != emptyMask)
         unite(incomplete, intersect(delta.objects, omittedThreads[delta.id]));
       for (std::size_t i = 0; i < transitions[delta.id].size(); ++i) {
-        tick();
         const auto &transition = transitions[delta.id][i];
         auto arriving = intersect(delta.objects, transition.objects);
         if (arriving == emptyMask) continue;
@@ -311,7 +309,10 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
         reach(pe[id].to, arriving);
       }
     }
-  } catch (const Budget &) { limited = true; }
+  } catch (const Budget &budget) {
+    limited = true;
+    result.completion.stop(budget.reason, budget.limit, budget.observed);
+  }
   stats.productStates = pn.size(); stats.productEdges = pe.size();
   const bool context = hasContext && q.context != ContextMode::Insensitive;
   if (request.retainWitnesses && (q.contextLimit || !context)) {
@@ -344,7 +345,8 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
     result.found = *foundObjects;
     result.unknown = *unknown;
     result.notFound = *difference(difference(allMask, foundObjects), unknown);
-    result.complete = !limited && incomplete == emptyMask;
+    result.completion.modelComplete = G.complete() && incomplete == emptyMask;
+    result.complete = result.completion.complete();
     for (const auto &sink : foundAt) result.foundAt.emplace(sink.first, *sink.second);
     stats.foundObjects = result.found.count();
     stats.notFoundObjects = result.notFound.count();
@@ -363,8 +365,9 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
       auto found = known.find(state);
       ID id;
       if (found == known.end()) {
-        bound(states.size(), q.maxSummaryPairs);
-        if (states.size() >= InvalidID) throw Budget{};
+        bound(states.size(), q.maxSummaryPairs, SearchStopReason::SummaryPairs);
+        if (states.size() >= InvalidID)
+          throw std::length_error("UseTraceSSA: context state identifier overflow");
         id = states.size();
         known.emplace(state, id);
         states.push_back(std::move(state));
@@ -391,7 +394,6 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
           accept(point.node, delta);
         }
         for (ID edgeID : pout[current.product]) {
-          tick();
           const ProductEdge &step = pe[edgeID];
           auto permitted = intersect(delta.objects, productMask(step));
           if (permitted == emptyMask) continue;
@@ -416,7 +418,10 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
           push(std::move(next), permitted, delta.proof, step.original);
         }
       }
-    } catch (const Budget &) { limited = true; }
+    } catch (const Budget &budget) {
+      limited = true;
+      result.completion.stop(budget.reason, budget.limit, budget.observed);
+    }
     stats.summaryPairs = states.size();
     exportResult();
     result.message = limited ? "bounded-context query budget exhausted" :
@@ -440,7 +445,7 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
       auto k = key(from, to);
       auto it = relation.find(k);
       if (it == relation.end()) {
-        bound(summaries.size(), q.maxSummaryPairs);
+        bound(summaries.size(), q.maxSummaryPairs, SearchStopReason::SummaryPairs);
         ID id = summaries.size();
         it = relation.emplace(k, id).first;
         summaries.push_back({from, to, emptyMask, emptyMask});
@@ -471,7 +476,6 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
         ID from = summaries[d.id].from, to = summaries[d.id].to;
         std::size_t preds = rin[from].size(), succs = rout[to].size();
         for (std::size_t i = 0; i < preds; ++i) {
-          tick();
           ID predecessor = rin[from][i], source = summaries[predecessor].from;
           auto reachable = intersect(summaries[predecessor].reachable, d.objects);
           if (d.positive) {
@@ -483,7 +487,6 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
           }
         }
         for (std::size_t i = 0; i < succs; ++i) {
-          tick();
           ID successor = rout[to][i], target = summaries[successor].to;
           auto reachable = intersect(d.objects, summaries[successor].reachable);
           if (d.positive) {
@@ -499,14 +502,16 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
           auto matches = returnsBySite[to].find(site);
           if (matches == returnsBySite[to].end()) continue;
           for (auto r : matches->second) {
-            tick();
             insert(pe[c].from, pe[r].to,
                    intersect(intersect(productMask(pe[c]), d.objects), productMask(pe[r])),
                    true);
           }
         }
       }
-    } catch (const Budget &) { limited = true; }
+    } catch (const Budget &budget) {
+      limited = true;
+      result.completion.stop(budget.reason, budget.limit, budget.observed);
+    }
   }
   stats.summaryPairs = summaries.size();
 

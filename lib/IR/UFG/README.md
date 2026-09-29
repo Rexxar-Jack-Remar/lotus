@@ -31,13 +31,22 @@ sinks and separate heap/file events. They share the source graph's limited
 ownership-escape model.
 The lane search reports product states, product edges, and call/return summary
 facts. It does not compute or report object-mask operations.
-`--context-limit=k` selects bounded call-string search. As in Saber, k=0 merges
-contexts from the first call; omitting the option retains unbounded Dyck
-summaries. Bounded search keeps recent call sites and merges older contexts,
-so recursion can add candidates.
-Detector and CLI searches leave resource limits to the experiment runner;
-memory exhaustion and timeouts are not converted to an analysis result.
-Callers using `SearchEngine` directly can still supply explicit `Query` limits.
+The default is bounded call-string search with depth 3. `--context-limit=k`
+(alias `--context-depth=k`) changes the depth. Legacy depth 0 immediately
+merges older contexts while still matching the latest call site. Use
+`--context=insensitive` to disable matching; `--context=sensitive` is the default.
+The independent `--context-limit=unlimited` (alias `--unbounded-context`)
+selects unbounded Dyck summaries for context-sensitive search.
+Bounded search keeps recent call sites and merges older contexts, so recursion
+can add candidates.
+
+Search budgets default to unlimited. Optional `--max-product-states` and
+`--max-summary-pairs` accept N or `unlimited` (0 is an alias).
+Limits apply to each lane query; they do not limit eager graph construction.
+Budget exhaustion preserves existing findings, reports `search_complete=false`
+with the first stop reason and counter, and makes the CLI exit with code 2.
+`model_complete` independently describes model coverage. Memory exhaustion and
+external timeouts remain process failures.
 
 ```sh
 cmake --build build --target lotus-ir-ufg ufg_test

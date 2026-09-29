@@ -45,19 +45,20 @@ DefectScan DefectDetector::scan(DefectKind kind) const {
                 kind == DefectKind::MemoryLeak ? queries::memoryLeak(source) :
                                                  queries::fileLeak(source);
   query.contextLimit = ContextLimit;
-  // The experiment runner supplies time/memory limits. Do not turn resource
-  // exhaustion into a partial result through the generic Query defaults.
-  query.maxProductStates = query.maxSummaryPairs = query.maxWork = 0;
+  query.context = Context;
+  Limits.apply(query);
   const Event required = kind == DefectKind::FileLeak ? Event::Open :
       kind == DefectKind::MemoryLeak ? Event::Allocate : Event::Release;
   if (source.select(required).empty() || query.sinks.empty()) {
     scan.status = QueryStatus::Unknown;
     scan.exhaustive = false;
+    scan.completion.modelComplete = false;
     scan.message = "required defect facts were not supplied";
     return scan;
   }
   scan.statistics.candidateObjects = Graph.objects().size();
   scan.exhaustive = source.complete();
+  scan.completion.modelComplete = source.complete();
   std::map<FlowNodeID, std::size_t> findings;
   for (ObjectID object : Graph.objects()) {
     Query laneQuery = query;
@@ -69,6 +70,7 @@ DefectScan DefectDetector::scan(DefectKind kind) const {
           return !hasEvent(Graph.graph().node(Graph.node(object, sink)).events, target);
         }), laneQuery.sinks.end());
     auto lane = SearchEngine(Graph).scan(std::move(laneQuery), object);
+    scan.completion.merge(lane.completion);
     scan.statistics.productStates += lane.productStates;
     scan.statistics.productEdges += lane.productEdges;
     scan.statistics.edgesExamined += lane.edgesExamined;
@@ -105,10 +107,12 @@ DefectReport DefectDetector::run(DefectKind kind, std::vector<FlowNodeID> roots,
     Query query = kind == DefectKind::Taint ? queries::taint(Graph.source()) :
         queries::uncheckedUse(std::move(roots), std::move(uses));
     query.contextLimit = ContextLimit;
-    query.maxProductStates = query.maxSummaryPairs = query.maxWork = 0;
+    query.context = Context;
+    Limits.apply(query);
     QueryResult result;
     if (query.sources.empty() || query.sinks.empty()) {
       result.status = QueryStatus::Unknown;
+      result.completion.modelComplete = false;
       result.message = "required defect facts were not supplied";
     } else {
       result = SearchEngine(Graph).runGeneric(std::move(query));
@@ -116,10 +120,14 @@ DefectReport DefectDetector::run(DefectKind kind, std::vector<FlowNodeID> roots,
     return makeGenericReport(Graph.source(), kind, std::move(result));
   }
   auto result = scan(kind);
-  if (!result.findings.empty()) return std::move(result.findings.front());
+  if (!result.findings.empty()) {
+    result.findings.front().result.completion = result.completion;
+    return std::move(result.findings.front());
+  }
   DefectReport report;
   report.kind = kind;
   report.result.status = result.status;
+  report.result.completion = result.completion;
   report.result.message = std::move(result.message);
   return report;
 }

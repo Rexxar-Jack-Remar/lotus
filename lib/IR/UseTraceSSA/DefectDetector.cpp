@@ -31,17 +31,24 @@ DefectReport DefectDetector::run(DefectKind kind, std::vector<FlowNodeID> roots,
   if (kind == DefectKind::DoubleFree || kind == DefectKind::UseAfterFree ||
       kind == DefectKind::MemoryLeak || kind == DefectKind::FileLeak) {
     auto scanResult = scanImpl(kind, true);
-    if (!scanResult.findings.empty()) return std::move(scanResult.findings.front());
+    if (!scanResult.findings.empty()) {
+      scanResult.findings.front().result.completion = scanResult.completion;
+      return std::move(scanResult.findings.front());
+    }
     QueryResult result; result.status = scanResult.status; result.message = scanResult.message;
+    result.completion = scanResult.completion;
     return makeReport(Graph, kind, std::move(result));
   }
   Query q;
   if (kind == DefectKind::Taint) q = queries::taint(Graph);
   else q = queries::uncheckedUse(std::move(roots), std::move(uses));
   q.contextLimit = ContextLimit;
+  q.context = Context;
+  Limits.apply(q);
   QueryResult result;
   if (q.sources.empty() || q.sinks.empty()) {
     result.status = QueryStatus::Unknown;
+    result.completion.modelComplete = false;
     result.message = "required defect facts were not supplied";
   } else result = QueryEngine(Graph).run(q);
   return makeReport(Graph, kind, std::move(result));
@@ -61,10 +68,13 @@ DefectScan DefectDetector::scanImpl(DefectKind kind, bool firstOnly) const {
             kind == DefectKind::MemoryLeak ? queries::memoryLeak(Graph) :
                                              queries::fileLeak(Graph);
   q.contextLimit = ContextLimit;
+  q.context = Context;
+  Limits.apply(q);
   const Event required = kind == DefectKind::FileLeak ? Event::Open :
       kind == DefectKind::MemoryLeak ? Event::Allocate : Event::Release;
   if (Graph.select(required).empty() || q.sinks.empty()) {
     scan.status = QueryStatus::Unknown; scan.exhaustive = false;
+    scan.completion.modelComplete = false;
     scan.message = "required defect facts were not supplied";
     return scan;
   }
@@ -72,6 +82,7 @@ DefectScan DefectDetector::scanImpl(DefectKind kind, bool firstOnly) const {
   // share witness tabulation across sinks choosing the same object.
   auto batch = QueryEngine(Graph).runObjects({q, candidates(Graph), true});
   scan.statistics = batch.statistics;
+  scan.completion = batch.completion;
   scan.exhaustive = batch.complete;
   const Event target = kind == DefectKind::DoubleFree ? Event::Release :
                        kind == DefectKind::UseAfterFree ? Event::Dereference : Event::Exit;
@@ -95,8 +106,10 @@ DefectScan DefectDetector::scanImpl(DefectKind kind, bool firstOnly) const {
         q.sinks = {sink.first}; q.memoryObject = object;
         witness = QueryEngine(Graph).run(q);
       }
+      scan.completion.merge(witness.completion);
       if (!witness.found()) {
         scan.exhaustive = false;
+        scan.completion.stop(SearchStopReason::WitnessUnavailable);
         continue;
       }
       auto report = makeReport(Graph, kind, std::move(witness));
@@ -113,10 +126,12 @@ DefectScan DefectDetector::scanImpl(DefectKind kind, bool firstOnly) const {
   for (const auto &group : witnessSinks) {
     q.sinks = group.second; q.memoryObject = group.first;
     auto witnesses = QueryEngine(Graph).runToSinks(q);
+    scan.completion.merge(witnesses.completion);
     for (auto sink : group.second) {
       auto found = witnesses.foundAt.find(sink);
       if (found == witnesses.foundAt.end()) {
         scan.exhaustive = false;
+        scan.completion.stop(SearchStopReason::WitnessUnavailable);
         continue;
       }
       auto report = makeReport(Graph, kind, std::move(found->second));
@@ -126,6 +141,7 @@ DefectScan DefectDetector::scanImpl(DefectKind kind, bool firstOnly) const {
     }
   }
   for (auto &report : reports) scan.findings.push_back(std::move(report.second));
+  scan.exhaustive = scan.completion.complete();
   scan.status = !scan.findings.empty() ? QueryStatus::Found :
                 scan.exhaustive ? QueryStatus::NotFound : QueryStatus::Unknown;
   scan.message = batch.message;

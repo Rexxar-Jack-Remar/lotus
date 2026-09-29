@@ -34,6 +34,20 @@ SHARED_CHECKS = ("double-free", "use-after-free", "memory-leak", "file-leak")
 SABER_CHECKS = ("double-free", "use-after-free", "memory-leak", "file-leak")
 SABER_SMT_MODES = (("smt", ()), ("nosmt", ("--saber.no-smt",)))
 KEY_VALUE = re.compile(r"([a-z][a-z0-9_]*)=([^\s]+)")
+IR_BUDGETS = ("max-product-states", "max-summary-pairs")
+
+
+def budget_value(text):
+    if text == "unlimited":
+        return 0
+    if not re.fullmatch(r"[0-9]+", text) or int(text) > 2**64 - 1:
+        raise argparse.ArgumentTypeError("expected a nonnegative integer or unlimited")
+    return int(text)
+
+
+def context_limit_value(text):
+    # Unlike resource budgets, context depth 0 retains its legacy meaning.
+    return None if text == "unlimited" else budget_value(text)
 
 
 def key_values(line):
@@ -141,6 +155,9 @@ def parse_ir_output(stdout, stderr):
         if line.startswith(("svfg_nodes=", "batch_products=",
                             "lane_product_states=")):
             for key, value in key_values(line).items():
+                if key == "context_mode":
+                    parsed[key] = value
+                    continue
                 try:
                     parsed[key] = int(value)
                 except ValueError:
@@ -153,6 +170,14 @@ def parse_ir_output(stdout, stderr):
                     parsed[key] = int(fields[key])
             if "exhaustive" in fields:
                 parsed["exhaustive"] = fields["exhaustive"] == "yes"
+            for key in ("search_complete", "model_complete"):
+                if key in fields:
+                    parsed[key] = fields[key] in ("true", "yes")
+            if "stop_reason" in fields:
+                parsed["stop_reason"] = fields["stop_reason"]
+            for key in ("budget_limit", "budget_observed"):
+                if key in fields:
+                    parsed[key] = int(fields[key])
     for line in stderr.splitlines():
         if not line.startswith("timing_ms "):
             continue
@@ -184,16 +209,21 @@ def parse_saber_output(stdout, stderr):
 
 
 def build_cmd(tool, bug_type, smt_flags, bc_path, binaries,
-              context_limit):
+              context_limit, budgets=None, context_mode="sensitive", saber_budgets=None):
     if tool in ("usetracessa", "ufg"):
         cmd = [str(binaries[tool]), str(bc_path), "--quiet", "--timing",
-               f"--check={bug_type}"]
-        if context_limit is not None:
-            cmd.append(f"--context-limit={context_limit}")
+               f"--check={bug_type}", f"--context={context_mode}",
+               f"--context-limit={context_limit if context_limit is not None else 'unlimited'}"]
+        for flag in IR_BUDGETS:
+            limit = (budgets or {}).get(flag, 0)
+            cmd.append(f"--{flag}={limit if limit else 'unlimited'}")
         return cmd
+    if context_mode != "sensitive" or context_limit is None:
+        raise ValueError("Saber requires context-sensitive search with a numeric context limit")
     return [str(binaries["saber"]), "--engine=saber",
             f"--checks={bug_type}", "--analysis-stats",
             f"--saber.context-limit={context_limit}",
+            *(f"--saber.{key}={value}" for key, value in (saber_budgets or {}).items()),
             *smt_flags, str(bc_path)]
 
 
@@ -215,16 +245,19 @@ def make_tasks(benchmarks, tools):
 
 
 def execute_task(index, task, timeout_s, mem_limit_gb, binaries,
-                 context_limit):
+                 context_limit, budgets=None, context_mode="sensitive", saber_budgets=None):
     tool, bug_type, smt_label, smt_flags, bc_path = task
     cmd = build_cmd(tool, bug_type, smt_flags, bc_path, binaries,
-                    context_limit)
+                    context_limit, budgets, context_mode, saber_budgets)
     execution = run_cmd_with_limits(cmd, timeout_s, mem_limit_gb)
     parsed = (parse_saber_output(execution["stdout"], execution["stderr"])
               if tool == "saber" else
               parse_ir_output(execution["stdout"], execution["stderr"]))
     status = execution["status"]
-    if status == "SUCCESS":
+    if (tool != "saber" and status in ("SUCCESS", "ERROR(rc=2)") and
+            parsed.get("search_complete") is False):
+        status = "INCOMPLETE"
+    if status in ("SUCCESS", "INCOMPLETE"):
         required = ("findings",) if tool == "saber" else (
             "check_result", "findings", "finding_sites", "total_ms",
         )
@@ -239,7 +272,8 @@ def execute_task(index, task, timeout_s, mem_limit_gb, binaries,
                            else "exit-candidate-limited-escape-model"
                            if tool != "saber" and bug_type in ("memory-leak", "file-leak")
                            else "tool-default"),
-        "context_semantics": (f"call-string-k={context_limit}"
+        "context_semantics": ("insensitive" if context_mode == "insensitive" else
+                              f"call-string-k={context_limit}"
                               if context_limit is not None
                               else "unbounded-realizable"),
         "comparison_group": ("system-baseline" if tool == "saber"
@@ -247,6 +281,9 @@ def execute_task(index, task, timeout_s, mem_limit_gb, binaries,
         "finding_unit": ("bug-report" if tool == "saber"
                          else "sink-with-object-set"),
         "context_limit": context_limit,
+        "context_mode": context_mode,
+        "search_limits": ({key: (budgets or {}).get(key, 0) for key in IR_BUDGETS}
+                          if tool != "saber" else saber_budgets or {}),
         "command": cmd, "status": status,
         "wall_time_s": execution["wall_time_s"],
         "max_rss_mb": execution["max_rss_mb"],
@@ -272,7 +309,8 @@ def save_results(path, records):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate UseTraceSSA, object-expanded UFG, and Saber")
+        description="Evaluate UseTraceSSA, object-expanded UFG, and Saber",
+        allow_abbrev=False)
     parser.add_argument("--tools", default="usetracessa,ufg,saber",
                         help="Comma-separated tools (default: all three)")
     parser.add_argument("--max-workers", type=int, default=1,
@@ -282,12 +320,23 @@ def main():
     parser.add_argument("--mem-limit-gb", type=float, default=6.0,
                         help="Sampled direct-process RSS limit in GiB (default: 6)")
     context_options = parser.add_mutually_exclusive_group()
-    context_options.add_argument("--context-limit", type=int, default=3,
-                                 help="Call-string k for all tools (default: 3; "
-                                      "zero immediately merges contexts)")
+    context_options.add_argument("--context-limit", "--context-depth",
+                                 type=context_limit_value, default=3,
+                                 help="Call-string depth: N or unlimited (default: 3; "
+                                      "0 immediately merges contexts; used with sensitive context)")
     context_options.add_argument("--unbounded-context", action="store_true",
-                                 help="Omit the call-string limit; requires "
+                                 help="Alias for --context-limit=unlimited; requires "
                                       "--tools without Saber")
+    parser.add_argument("--context", choices=("sensitive", "insensitive"),
+                        default="sensitive", help="Call/return matching (default: sensitive); "
+                        "independent of resource budgets")
+    for flag in IR_BUDGETS:
+        parser.add_argument(f"--{flag}", type=budget_value, default=0,
+                            help="UseTraceSSA/UFG per-query budget: N or unlimited (default)")
+    parser.add_argument("--saber-max-forward-items", type=budget_value, default=None,
+                        help="Override Saber forward-item limit (0/unlimited disables it)")
+    parser.add_argument("--saber-solver-timeout-ms", type=budget_value, default=None,
+                        help="Override Saber per-solver timeout (0/unlimited disables it)")
     parser.add_argument("--benchmarks-dir", type=Path,
                         default=ROOT / "benchmarks/real-world/SPEC2017",
                         help="Directory containing LLVM bitcode files")
@@ -304,12 +353,21 @@ def main():
         parser.error("--tools must list distinct names from usetracessa,ufg,saber")
     if args.max_workers < 1 or args.timeout <= 0 or args.mem_limit_gb <= 0:
         parser.error("workers, timeout, and memory limit must be positive")
-    if args.context_limit < 0:
-        parser.error("--context-limit must be nonnegative")
-    if "saber" in tools and args.unbounded_context:
-        parser.error("Saber has no unbounded context mode; select only "
-                     "UseTraceSSA/UFG with --unbounded-context")
+    context_mode = args.context
     context_limit = None if args.unbounded_context else args.context_limit
+    if "saber" in tools:
+        if context_mode != "sensitive" or context_limit is None:
+            parser.error("Saber requires --context=sensitive and a numeric --context-limit")
+        if context_limit > 2**32 - 1:
+            parser.error("--context-limit exceeds Saber's unsigned option range")
+    budgets = {flag: getattr(args, flag.replace('-', '_')) for flag in IR_BUDGETS}
+    saber_budgets = {}
+    for flag in ("max-forward-items", "solver-timeout-ms"):
+        value = getattr(args, 'saber_' + flag.replace('-', '_'))
+        if value is not None:
+            if value > 2**32 - 1:
+                parser.error(f"--saber-{flag} exceeds Saber's unsigned option range")
+            saber_budgets[flag] = value
     binaries = {tool: getattr(args, f"{tool}_bin").resolve() for tool in tools}
     for tool, binary in binaries.items():
         if not binary.is_file():
@@ -331,7 +389,9 @@ def main():
     print(f"Benchmarks: {len(benchmarks)}  Tools: {','.join(tools)}")
     print(f"Tasks: {len(tasks)}  Workers: {args.max_workers}")
     print(f"Timeout: {args.timeout:g}s  RSS limit: {args.mem_limit_gb:g} GiB")
-    print(f"Call-string k: {context_limit if context_limit is not None else 'unbounded'}")
+    print(f"Context: {context_mode}; context limit: "
+          f"{context_limit if context_limit is not None else 'unlimited'}")
+    print("IR search budgets: " + ", ".join(f"{k}={v or 'unlimited'}" for k, v in budgets.items()))
     if "saber" in tools:
         print("Saber remains a distinct system baseline; common k aligns only "
               "the call-string bound, not other analysis semantics.")
@@ -343,7 +403,7 @@ def main():
         futures = {
             executor.submit(execute_task, index, task, args.timeout,
                             args.mem_limit_gb, binaries,
-                            context_limit): index
+                            context_limit, budgets, context_mode, saber_budgets): index
             for index, task in enumerate(tasks)
         }
         for future in concurrent.futures.as_completed(futures):
