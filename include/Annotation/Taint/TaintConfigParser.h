@@ -66,6 +66,7 @@ public:
   std::unordered_set<std::string> sources;
   std::unordered_set<std::string> sinks;
   std::unordered_set<std::string> ignored;
+  std::unordered_set<std::string> sanitizers;
 
   // Detailed specifications for each function
   std::unordered_map<std::string, FunctionTaintConfig> function_specs;
@@ -86,6 +87,9 @@ public:
 // Parser for taint config files
 class TaintConfigParser {
 public:
+  // Independent model ownership; never mutates the global manager.
+  static std::unique_ptr<TaintConfig>
+  parse_default(const std::string &install_prefix = "");
   static std::unique_ptr<TaintConfig> parse_file(const std::string &filename);
   static std::unique_ptr<TaintConfig>
   parse_file_quiet(const std::string &filename);

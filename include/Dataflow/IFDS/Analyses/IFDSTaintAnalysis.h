@@ -125,6 +125,7 @@ private:
   std::unordered_set<std::string> m_sink_functions;
   std::unordered_set<std::string> m_sanitizer_functions;
   Config m_config;
+  std::shared_ptr<const TaintConfig> m_taint_config;
 
   // Track control flow for implicit taint
   mutable std::unordered_set<const llvm::BasicBlock *> m_tainted_branches;
@@ -132,6 +133,12 @@ private:
 public:
   TaintAnalysis();
   explicit TaintAnalysis(const Config &config);
+  TaintAnalysis(const Config &config, const TaintConfig &model);
+
+  const llvm::Value *sparse_fact_value(const TaintFact &fact) const override;
+  bool is_identity_flow(const llvm::Instruction *inst,
+                        const llvm::Instruction *succ,
+                        const TaintFact &fact) const override;
 
   // Configuration
   void set_config(const Config &config) { m_config = config; }
@@ -207,13 +214,22 @@ public:
                     const llvm::Instruction *second) const;
 
 private:
-  bool kills_fact(const llvm::CallBase *call, const TaintFact &fact) const;
+  const TaintConfig *taint_model() const;
+  bool
+  matches_model_function(const llvm::Instruction *inst,
+                         const std::unordered_set<std::string> &names) const;
+  static bool matches_callee_name(const llvm::Function *callee,
+                                  llvm::StringRef configured_name);
+  bool kills_fact(const llvm::CallBase *call, const TaintFact &fact,
+                  const llvm::Function *callee) const;
   bool taint_may_alias(const llvm::Value *v1, const llvm::Value *v2) const;
 
   // Internal helpers that need access to alias analysis utilities
   void handle_source_function_specs(const llvm::CallBase *call,
+                                    const llvm::Function *callee,
                                     FactSet &result) const;
   void handle_pipe_specifications(const llvm::CallBase *call,
+                                  const llvm::Function *callee,
                                   const TaintFact &fact, FactSet &result) const;
 };
 

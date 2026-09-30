@@ -57,7 +57,7 @@ ConstAnalysis::FactSet ConstAnalysis::normal_flow(const llvm::Instruction *stmt,
     }
 
     // Check aliases if we have alias analysis
-    if (!already_initialized && m_alias_analysis) {
+    if (!already_initialized && has_alias_analysis_configured()) {
       for (const auto *loc : initialized_locations) {
         if (may_alias_or_equal(loc, pointer_op)) {
           already_initialized = true;

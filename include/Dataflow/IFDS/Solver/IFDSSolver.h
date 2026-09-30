@@ -70,6 +70,17 @@ public:
 
   void solve(const llvm::Module &module);
 
+  void set_analysis_session(std::shared_ptr<AnalysisSession> session) {
+    m_problem.set_analysis_session(std::move(session));
+  }
+  void set_icfg(std::shared_ptr<dataflow::controlflow::InterCFG> icfg) {
+    m_graph_context.set_icfg(std::move(icfg));
+  }
+  void set_callee_provider(CalleeProvider provider) {
+    m_graph_context.set_callee_provider(std::move(provider));
+  }
+  size_t get_sparse_transfers() const { return m_sparse_transfers; }
+
   // Solver configuration (return sites, unbalanced returns, etc.)
   void set_solver_config(IFDSIDESolverConfig config) {
     m_config = std::move(config);
@@ -138,6 +149,7 @@ private:
   // Bounded solver state (0 = unbounded)
   size_t m_max_steps = 0;
   size_t m_steps_performed = 0;
+  size_t m_sparse_transfers = 0;
   bool m_bound_reached = false;
 
   // Simple sequential data structures (no thread-safety needed)

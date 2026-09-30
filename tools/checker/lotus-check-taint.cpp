@@ -17,6 +17,10 @@
 #include <sstream>
 #include <string>
 
+#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
+#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Core/IFDSFramework.h>
+#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LLVMContext.h>
@@ -30,10 +34,6 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
-#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
-#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Core/IFDSFramework.h>
-#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 
 // #include <iostream>
 // #include <thread>
@@ -79,6 +79,10 @@ static cl::opt<std::string> SourceFunctions(
 static cl::opt<std::string> SinkFunctions(
     "taint.sinks", cl::desc("Comma-separated list of sink functions"),
     cl::init(""), cl::sub(lotus::checker::tooling::taintSubCommand()));
+
+static cl::opt<bool> SparseTaint(
+    "taint.sparse", cl::desc("Skip certified identity taint transfers"),
+    cl::init(false), cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<bool>
     MicroBench("taint.micro-bench",
@@ -467,8 +471,12 @@ int runTaintCheckerTool(const char *argv0) {
   // Set up alias analysis wrapper
   lotus::AAConfig aaConfig =
       getAliasAnalysisConfig(AliasAnalysisType.getValue());
-  auto aliasWrapper =
-      std::make_unique<lotus::AliasAnalysisWrapper>(*M, aaConfig);
+  ifds::AnalysisSession::Options sessionOptions;
+  sessionOptions.alias_config = aaConfig;
+  if (!M->getFunction("main") || M->getFunction("main")->empty())
+    sessionOptions.entry_points.clear();
+  auto session = std::make_shared<ifds::AnalysisSession>(*M, sessionOptions);
+  auto aliasWrapper = session->alias_analysis();
 
   if (lotus::checker::tooling::logAtLeast(
           lotus::checker::tooling::LogLevel::Debug)) {
@@ -497,8 +505,7 @@ int runTaintCheckerTool(const char *argv0) {
         taintAnalysis.add_sink_function(sink);
       }
 
-      // Set up alias analysis
-      taintAnalysis.set_alias_analysis(aliasWrapper.get());
+      taintAnalysis.set_analysis_session(session);
 
       if (lotus::checker::tooling::logAtLeast(
               lotus::checker::tooling::LogLevel::Debug)) {
@@ -510,6 +517,7 @@ int runTaintCheckerTool(const char *argv0) {
         outs() << "Using sequential IFDS solver\n";
 
       ifds::IFDSSolver<ifds::TaintAnalysis> solver(taintAnalysis);
+      solver.get_solver_config().set_sparse_execution(SparseTaint);
 
       // Enable progress bar when running in verbose mode
       if (lotus::checker::tooling::logAtLeast(

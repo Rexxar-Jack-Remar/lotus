@@ -7,6 +7,7 @@
 #pragma once
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Dataflow/IFDS/Core/AnalysisSession.h"
 #include "Dataflow/IFDS/Support/EdgeFunctionUtils.h"
 #include "Utils/Parallel/ThreadSafe.h"
 
@@ -245,12 +246,35 @@ public:
   virtual void set_alias_analysis(lotus::AliasAnalysisWrapper *aa);
   bool has_alias_analysis_configured() const;
 
+  virtual void set_analysis_session(std::shared_ptr<AnalysisSession> session) {
+    m_session = std::move(session);
+  }
+  std::shared_ptr<AnalysisSession> analysis_session() const {
+    return m_session;
+  }
+  lotus::AliasAnalysisWrapper *alias_analysis() const {
+    return m_alias_analysis
+               ? m_alias_analysis
+               : (m_session ? m_session->alias_analysis().get() : nullptr);
+  }
+
+  // A non-null value enables the sparse CFG hint for this fact. Skipping still
+  // requires an identity certificate. Both methods must be side-effect free.
+  virtual const llvm::Value *sparse_fact_value(const Fact &) const {
+    return nullptr;
+  }
+  virtual bool is_identity_flow(const llvm::Instruction *,
+                                const llvm::Instruction *, const Fact &) const {
+    return false;
+  }
+
   // Helper methods for common operations
   virtual bool is_source(const llvm::Instruction *inst) const;
   virtual bool is_sink(const llvm::Instruction *inst) const;
 
 protected:
   lotus::AliasAnalysisWrapper *m_alias_analysis = nullptr;
+  std::shared_ptr<AnalysisSession> m_session;
 
   // Alias analysis helper using AliasAnalysisWrapper
   bool may_alias(const llvm::Value *v1, const llvm::Value *v2) const;
@@ -274,8 +298,8 @@ public:
 
 protected:
   bool has_alias_analysis() const {
-    return this->m_alias_analysis != nullptr &&
-           this->m_alias_analysis->isInitialized();
+    auto *aa = this->alias_analysis();
+    return aa && aa->isInitialized();
   }
 
   // IFDS/IDE default alias-aware modeling is intentionally pairwise only.
@@ -299,6 +323,12 @@ public:
   using EdgeFunction = edge::EdgeFunction<Value>;
   using FactSet = typename IFDSProblem<Fact>::FactSet;
   using IDEInitialSeeds = ifds::IDEInitialSeeds<Fact, Value>;
+
+  // Certifies that the normal edge for (fact, fact) is identity as well.
+  virtual bool is_identity_edge(const llvm::Instruction *,
+                                const llvm::Instruction *, const Fact &) const {
+    return false;
+  }
 
   // Edge functions for IDE
   virtual EdgeFunction normal_edge_function(const llvm::Instruction *stmt,
@@ -368,8 +398,8 @@ template <typename Fact, typename Value>
 class DefaultAliasAwareIDEProblem : public IDEProblem<Fact, Value> {
 protected:
   bool has_alias_analysis() const {
-    return this->m_alias_analysis != nullptr &&
-           this->m_alias_analysis->isInitialized();
+    auto *aa = this->alias_analysis();
+    return aa && aa->isInitialized();
   }
 
   // IFDS/IDE default alias-aware modeling is intentionally pairwise only.
@@ -492,7 +522,7 @@ IFDSProblem<Fact>::set_alias_analysis(lotus::AliasAnalysisWrapper *aa) {
 
 template <typename Fact>
 inline bool IFDSProblem<Fact>::has_alias_analysis_configured() const {
-  return m_alias_analysis != nullptr;
+  return m_alias_analysis != nullptr || m_session != nullptr;
 }
 
 template <typename Fact>
@@ -508,22 +538,24 @@ inline bool IFDSProblem<Fact>::is_sink(const llvm::Instruction *) const {
 template <typename Fact>
 inline bool IFDSProblem<Fact>::may_alias(const llvm::Value *v1,
                                          const llvm::Value *v2) const {
-  if (!m_alias_analysis || !v1 || !v2)
+  if (!v1 || !v2)
     return false;
-  return m_alias_analysis->mayAlias(v1, v2);
+  auto *aa = alias_analysis();
+  return aa && aa->mayAlias(v1, v2);
 }
 
 template <typename Fact>
 inline typename IFDSProblem<Fact>::InitialSeeds
 IFDSProblem<Fact>::initial_seeds(const llvm::Module &module) {
   InitialSeeds seeds;
-  const llvm::Function *main_func = module.getFunction("main");
-  if (!main_func || main_func->empty()) {
-    return seeds;
+  std::vector<std::string> names = m_session ? m_session->options().entry_points
+                                             : std::vector<std::string>{"main"};
+  for (const auto &name : names) {
+    const llvm::Function *function = module.getFunction(name);
+    if (function && !function->empty())
+      seeds.add_seed(&function->getEntryBlock().front(),
+                     initial_facts(function));
   }
-
-  const llvm::Instruction *entry = &main_func->getEntryBlock().front();
-  seeds.add_seed(entry, initial_facts(main_func));
   return seeds;
 }
 

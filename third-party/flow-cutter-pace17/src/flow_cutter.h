@@ -5,11 +5,11 @@
 #include "array_id_func.h"
 #include "id_func.h"
 #include "min_max.h"
-#include <vector>
 #include <algorithm>
-#include <sstream>
-#include <random>
 #include <memory>
+#include <random>
+#include <sstream>
+#include <vector>
 
 #include "flow_cutter_config.h"
 

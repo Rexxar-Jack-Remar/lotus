@@ -246,6 +246,47 @@ targets. Reset a list with ``-DLOTUS_PCH_TARGETS=`` or
 ``-DLOTUS_UNITY_TARGETS=`` to disable it. Reconfigure into a new build directory
 when switching CMake generators.
 
+Reducing link time
+~~~~~~~~~~~~~~~~~~
+
+Measure link steps separately from compilation before changing the linker.
+Ninja records start/end times and outputs in ``.ninja_log``; executable outputs
+under ``bin/tests/`` identify the test link steps. Sum-of-job durations are not
+the same as the elapsed time of a parallel build.
+
+Focused test selections reduce both the libraries linked into each executable
+and the number of unrelated executables rebuilt after editing a dependency.
+The default configuration keeps one executable per subsystem to avoid repeatedly
+linking its shared dependency set. Shared test helpers compile once, and
+LLVMPasses is linked only by suites that need it.
+
+If LLVM itself does not need to be debugged, a Release LLVM 14 installation can
+reduce the debug information embedded from static LLVM archives. Lotus can still
+be built in Debug mode. Keep LLVM's RTTI configuration compatible with Lotus.
+
+An alternative linker is another opt-in experiment. With LLD installed, Clang
+on Linux can use:
+
+.. code-block:: bash
+
+   cmake -S . -B build-focused \
+     '-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld'
+
+On macOS, select the Mach-O linker executable explicitly:
+
+.. code-block:: bash
+
+   cmake -S . -B build-focused \
+     '-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=/path/to/ld64.lld'
+
+Retain any existing linker flags when adding these options and verify the
+resulting executables. See `LLD documentation <https://lld.llvm.org/>`_ and
+`the Mach-O port <https://lld.llvm.org/MachO/index.html>`_. Linking against a
+shared LLVM library may reduce repeated static linking, but requires an LLVM
+installation providing that library and corresponding changes to Lotus's
+component-library links; simply appending ``LLVM`` to the current static link
+list does not implement that change.
+
 Z3 Installation
 ---------------
 

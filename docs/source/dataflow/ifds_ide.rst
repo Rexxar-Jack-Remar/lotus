@@ -15,7 +15,7 @@ over an **exploded super-graph** whose nodes are pairs
 ``(program point, data-flow fact)``.
 
 * **Location**: ``lib/Dataflow/IFDS``
-* **Solvers**: ``IFDSSolver``, ``ParallelIFDSSolver``, ``IDESolver``
+* **Solvers**: ``IFDSSolver``, ``IDESolver``
 
 IFDS: Set-Valued Problems
 =========================
@@ -100,11 +100,84 @@ At a high level, an IFDS/IDE analysis is instantiated and solved as:
 
 .. code-block:: cpp
 
-   // Pseudo-code sketch
-   using Analysis = ifds::TaintAnalysis; // or IDEConstantPropagation, IDETypeState, ...
-   Analysis problem;
-   IFDSSolver<Analysis> solver(problem);
-   solver.solve();
+   auto model = TaintConfigParser::parse_file("config/taint.spec");
+   ifds::AnalysisSession::Options options;
+   options.entry_points = {"main"};
+   options.call_graph = lotus::CallGraphAnalysisType::OTF;
+   auto session = std::make_shared<ifds::AnalysisSession>(module, options,
+                                                        model.get());
+   ifds::TaintAnalysis problem({}, *model);
+   ifds::IFDSSolver<ifds::TaintAnalysis> solver(problem);
+   solver.set_analysis_session(session);
+   solver.get_solver_config().set_sparse_execution();
+   solver.solve(module);
+
+Analysis Sessions and Graph Providers
+====================================
+
+``AnalysisSession`` lazily shares alias analysis, a debug-info type hierarchy,
+and an instruction graph between IFDS/IDE problems. Its taint model is an
+immutable copy of the supplied configuration. IFDS taint and extended IDE taint
+consume that model; creating either client does not change global configuration.
+``SANITIZER function_name`` records a sanitizer in a taint specification.
+
+The session supports ``NORESOLVE``, ``CHA``, ``RTA``, ``VTA`` and ``OTF`` graph
+construction. OTF also includes indirect targets discovered by the selected
+alias backend. Indirect target sets have unknown completeness and retain an
+unknown target for bypass and summary modeling. A custom ``CalleeProvider`` can
+certify a complete target set using ``CalleeTargets::complete``. Null entries
+always represent unknown targets.
+
+Use ``solver.set_icfg(shared_icfg)`` or ``solver.set_callee_provider(provider)``
+to inject graph services directly. Explicit providers override session graph
+selection. Path-aware solvers expose the same interfaces. Custom ICFGs supply
+their own return sites; the default graph retains normal and exceptional
+``invoke`` continuations.
+
+Session entry points control the default seeds; explicit client seed overrides
+remain authoritative. ``model_global_initializers`` and
+``model_external_callbacks`` enable existing Lotus runtime models. These options
+rewrite the module during session construction, so construct the session before
+other analyses or retaining instruction pointers. Both are disabled by default.
+
+The module and LLVM context must outlive the session, graphs and solvers.
+Sessions are not thread-safe. After IR mutation, call ``session->invalidate()``
+and solve again; earlier results are stale. Cache invalidation preserves ownership
+of already retained service snapshots. An explicitly supplied problem alias
+analysis takes precedence over the session service for that problem's queries.
+
+Sparse Execution
+================
+
+``set_sparse_execution(true)`` enables conservative fact-specific sparsification
+inside basic blocks. A client supplies ``sparse_fact_value(fact)`` and a
+side-effect-free ``is_identity_flow(inst, succ, fact)`` certificate. The
+certificate asserts the entire flow is exactly ``{fact}`` with no other effects.
+IDE additionally requires ``is_identity_edge(inst, succ, fact)`` to certify the
+edge function is identity. Default certificates disable skipping.
+
+The implementation preserves calls, block entries, terminators, branches and
+custom CFG boundaries. IFDS scalar taint and extended IDE taint provide supported
+certificates; unsupported facts and clients use dense propagation. Memory taint
+in the IFDS client remains dense. Per-instruction facts, IDE values and immediate
+ESG transitions remain available at skipped instructions.
+
+``get_steps_performed()`` counts processed worklist jobs;
+``get_sparse_transfers()`` counts certified transfers handled without a job.
+Step bounds therefore count work differently in dense and sparse mode; bounded
+runs may produce different partial results. Sparsification retains result tables
+and does not promise a general memory reduction.
+
+.. code-block:: bash
+
+   build/bin/lotus-dfa-ifds input.ll --analysis=taint \
+     --taint-config=config/taint.spec --call-graph=otf --sparse --statistics --stdout
+   python3 scripts/benchmark_ifds_sparse.py --instructions=10000 --repeats=5
+
+The benchmark compares serialized findings and reports median solve time,
+processed jobs, sparse transfers and process peak RSS on Linux/macOS. It uses
+an identity-heavy synthetic fixture; dense/sparse unit tests additionally compare
+facts and values at every instruction and preserve summaries and ESG edges.
 
 Command-Line Tool: lotus-check --engine=taint
 =============================================
@@ -123,6 +196,8 @@ Key Options
   default because this engine currently exposes one checker.
 * ``--taint.sources=<functions>`` – Comma-separated list of custom source functions.
 * ``--taint.sinks=<functions>`` – Comma-separated list of custom sink functions.
+* ``--taint.sparse`` – Enable certified sparse transfers with the shared OTF
+  call graph and the selected alias backend.
 * ``--verbose`` – Show module and source/sink tagging details.
 * ``--analysis-stats`` – Print analysis statistics.
 

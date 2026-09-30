@@ -149,6 +149,10 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     using Fact = typename Problem::FactType;
     using Value = typename Problem::ValueType;
 
+    auto session = m_problem.analysis_session();
+    if (session && &session->module() != &module)
+        throw std::invalid_argument("Analysis session belongs to a different module");
+
     if (m_injected_alias_analysis) {
         m_problem.set_alias_analysis(nullptr);
         m_owned_alias_analysis.reset();
@@ -164,6 +168,7 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     }
 
     m_steps_performed = 0;
+    m_sparse_transfers = 0;
     m_bound_reached = false;
 
     // Clear previous results and caches
@@ -182,7 +187,7 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     m_statistics.reset();
     m_statistics.start_time = std::chrono::steady_clock::now();
     m_statistics.functions_analyzed = module.size();
-    m_graph_context.initialize(module);
+    m_graph_context.initialize(module, session);
 
     auto get_return_sites = [&](const llvm::CallBase* call)
         -> std::vector<const llvm::Instruction*> {
@@ -198,28 +203,39 @@ void IDESolver<Problem>::solve(const llvm::Module& module) {
     EdgeFunctionPtr identity_func = make_edge_function(m_problem.identity());
 
     auto add_jump_function = [&](const PathEdgeType& edge, EdgeFunctionPtr phi) {
-        auto it = m_jump_functions.find(edge);
-        if (it == m_jump_functions.end()) {
-            m_jump_functions.emplace(edge, phi);
-            m_worklist.emplace_back(edge, phi);
-            if (m_config.record_edges() && m_path_edges.insert(edge).second) {
-                on_path_edge_added(edge);
+        auto current = edge;
+        while (true) {
+            auto it = m_jump_functions.find(current);
+            if (it == m_jump_functions.end()) {
+                m_jump_functions.emplace(current, phi);
+                if (m_config.record_edges() && m_path_edges.insert(current).second)
+                    on_path_edge_added(current);
+            } else {
+                auto joined = join_cached(it->second, phi);
+                if (joined == it->second)
+                    return;
+                it->second = joined;
+                phi = joined;
             }
-            return;
-        }
-
-        EdgeFunctionPtr joined = join_cached(it->second, phi);
-        // Use pointer identity to detect change: join_cached returns the
-        // existing pointer unchanged when the join is idempotent (i.e. the
-        // new phi is already subsumed).  If the pointer changed, the jump
-        // function was updated and we must re-propagate.
-        // The old semantic-equivalence probe (checking only top/bottom/join)
-        // was unsound for multi-valued domains (e.g. integer constants, type
-        // states) where two distinct functions can agree on those three probe
-        // points yet differ on other inputs.
-        if (it->second != joined) {
-            it->second = joined;
-            m_worklist.emplace_back(edge, joined);
+            const llvm::Instruction *next = nullptr;
+            if (m_config.sparse_execution()) {
+                next = m_graph_context.sparse_next(
+                    current.target_node, m_problem.sparse_fact_value(current.target_fact),
+                    [&](const llvm::Instruction *inst, const llvm::Instruction *succ) {
+                        return m_problem.is_identity_flow(inst, succ, current.target_fact) &&
+                               m_problem.is_identity_edge(inst, succ, current.target_fact);
+                    });
+            }
+            if (!next) {
+                m_worklist.emplace_back(current, phi);
+                return;
+            }
+            // Retain jump functions at skipped nodes for dense value queries.
+            // Identity edges preserve phi, including updates after joins.
+            on_normal_transition(Node(current.target_node, current.target_fact),
+                                 Node(next, current.target_fact));
+            ++m_sparse_transfers;
+            current.target_node = next;
         }
     };
 

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "Analysis/TypeHierarchy/CallGraph.h"
-
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Value.h"
+
+#include "Analysis/TypeHierarchy/CallGraph.h"
 
 #include <functional>
 #include <unordered_map>
@@ -75,10 +75,15 @@ public:
 
   [[nodiscard]] const CallGraph *getCallGraph() const noexcept { return CG; }
 
+  [[nodiscard]] bool shouldKeepInst(const llvm::Instruction *Inst,
+                                    const llvm::Value *Fact) const {
+    return SparseLLVMControlFlow::shouldKeepInst(Inst, Fact, MayAlias);
+  }
+
 private:
   struct FVHasher {
-    std::size_t operator()(
-        const std::pair<const llvm::Function *, const llvm::Value *> &FV)
+    std::size_t
+    operator()(const std::pair<const llvm::Function *, const llvm::Value *> &FV)
         const noexcept {
       return std::hash<const llvm::Function *>()(FV.first) ^
              (std::hash<const llvm::Value *>()(FV.second) << 1);
