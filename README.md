@@ -1,19 +1,69 @@
 <p align="center">
-  <img src="docs/source/_static/logo.svg" alt="Lotus — LLVM Static Analysis Framework Logo" width="80"/>
+  <img src="docs/source/_static/logo.svg" alt="Lotus — LLVM Static Analysis Framework Logo" width="120"/>
 </p>
 
 # Lotus: LLVM-based Static Analysis Framework
 
-Lotus is an LLVM-based program analysis & verification framework. It provides a comprehensive set of toolkits for alias analysis, bug detection, dataflow analysis, concurrency analysis, abstract interpretation, and model checking— usable individually or in combination.
+[![Documentation](https://img.shields.io/badge/docs-zju--pl.github.io-blue.svg)](https://zju-pl.github.io/lotus)
+[![DeepWiki Docs](https://img.shields.io/badge/deepwiki-ZJU--PL%2Flotus-blueviolet)](https://deepwiki.com/ZJU-PL/lotus)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![C++](https://img.shields.io/badge/c++-14%2F17-blue.svg)](https://en.cppreference.com/w/cpp/17)
+[![LLVM](https://img.shields.io/badge/LLVM-14.x-purple.svg)](https://llvm.org/)
+
+**Lotus** is an advanced, LLVM-based program analysis and verification framework. It provides a comprehensive set of toolkits for alias analysis, bug detection, dataflow analysis, concurrency analysis, abstract interpretation, and model checking. The framework is designed for high modularity, allowing components to be used independently or in combination.
 
 ## Features
 
-- **Alias Analysis** — Pointer analysis with flow-sensitive, context-sensitive, and insensitive variants
-- **Dataflow Analysis** — IFDS/IDE framework, Newtonian program analysis, weighted pushdown systems (WPDS), etc.
-- **Intermediate Representations** — ICFG, PDG, SVFG, SSA variants, etc.
-- **Bug Detection** — Memory safety, concurrency bugs, type errors, and more
-- **Formal Verification** — CLAM (abstract interpretation), SeaHorn, SMACK, and more
-- **Program Optimization** — Partial evaluation, pass ordering, scalar and prefetch optimization, etc.
+- **Alias Analysis** — Pointer analysis with flow-sensitive, context-sensitive, and context-insensitive variants (e.g., AserPTA, DyckAA, LotusAA, SeaDSA).
+- **Dataflow Analysis** — Distributive (IFDS/IDE), Monotone, Elimination-based (APA), and Weighted Pushdown Systems (WPDS).
+- **Intermediate Representations** — Extends LLVM with specialized IRs like ICFG, PDG, SVFG (with sparse MemorySSA), SSI, and GSA.
+- **Bug Detection** — Detects memory safety issues, concurrency bugs (races/deadlocks), integer overflows, taint-style leaks, and typestate violations using engines like Kint, AE, Pulse, and Saber.
+- **Formal Verification** — Abstract interpretation using CLAM, SeaHorn, and custom symbolic execution backends.
+- **Program Optimization** — Dead store elimination, partial evaluation, and prefetching.
+
+## Quick Start
+
+### System Requirements
+- **OS**: x86/ARM Linux, ARM macOS
+- **Compiler**: C++17 compatible (GCC 7+ or Clang 5+)
+- **Dependencies**: LLVM 14.x, Z3 4.11, CMake 3.18+, (Optional: Boost 1.80+)
+
+### Building from Source
+
+Lotus uses a standard out-of-source CMake build.
+
+```bash
+git clone https://github.com/ZJU-PL/lotus
+cd lotus
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+```
+
+> If LLVM is installed in a custom location, append `-DLLVM_BUILD_PATH=/path/to/llvm/lib/cmake/llvm` to your `cmake` command. See [INSTALL.md](INSTALL.md) for detailed configuration options.
+
+### Running an Analysis
+
+Lotus exposes its internal libraries through standalone executable drivers in `build/bin/`. All tools operate on LLVM bitcode (`.bc`) files.
+
+```bash
+# 1. Compile target program to LLVM bitcode
+clang -emit-llvm -c example.c -o example.bc
+
+# 2. Run a pointer analysis
+./build/bin/lotus-alias-sparrow-aa example.bc
+
+# 3. Run bug-detection
+./build/bin/lotus-check --engine=saber example.bc
+```
+
+## Documentation
+
+- **Official Docs**: [zju-pl.github.io/lotus](https://zju-pl.github.io/lotus)
+  - [Architecture & Major Components](https://zju-pl.github.io/lotus/user_guide/architecture.html)
+  - [Command-Line Tools Reference](https://zju-pl.github.io/lotus/tools/index.html)
+  - [Getting Started / Quickstart](https://zju-pl.github.io/lotus/user_guide/quickstart.html)
+- **DeepWiki Reference**: [deepwiki.com/ZJU-PL/lotus](https://deepwiki.com/ZJU-PL/lotus)
 
 ## Publications
 
@@ -29,37 +79,17 @@ If you use Lotus in your research or work, please cite the following:
 }
 ```
 
-Papers that use Lotus:
-
-- **SPLASH/ISSTA 2026 Demo**: Phoenix: A Modular and Versatile Framework for C/C++ Pointer Analysis. Peisen Yao, Zinan Gu, and Qingkai Shi. ([lib/Alias](https://github.com/ZJU-PL/lotus/tree/main/lib/Alias))
-- **ASE 2026**: SIMD-Accelerated Sparse Bit-Vectors for Pointer Analysis. Zhaoyang Tan, Peisen Yao, and Kui Ren. ([lib/Alias](https://github.com/ZJU-PL/lotus/tree/main/lib/Alias))
+**Papers utilizing Lotus frameworks:**
+- **SPLASH/ISSTA 2026 Demo**: Phoenix: A Modular and Versatile Framework for C/C++ Pointer Analysis. Peisen Yao, Zinan Gu, and Qingkai Shi.
+- **ASE 2026**: SIMD-Accelerated Sparse Bit-Vectors for Pointer Analysis. Zhaoyang Tan, Peisen Yao, and Kui Ren.
 - **FM 2026**: EUF-based Solving Dyck-Reachability with Applications to Static Analysis. Yide Du, Zhenbang Chen, Kunlin Liu, Guofeng Zhang, Xudong Wang, Ke Ma, Wei Dong, and Ji Wang.
-- **CAV 2026**: Sound and Precise Symbolic Automata Model for Stateful Software Systems. Xinlong Wu, Ruiyu Zhou, Peisen Yao, and Qingkai Shi. ([third-party/seal](https://github.com/ZJU-PL/lotus/tree/main/third-party/seal))
+- **CAV 2026**: Sound and Precise Symbolic Automata Model for Stateful Software Systems. Xinlong Wu, Ruiyu Zhou, Peisen Yao, and Qingkai Shi.
 - **TOSEM 2026**: Compiler Optimizations-Based SMT Simplifications: An In-Depth Study. Hanyun Jiang, Peisen Yao*, Jiachen Lu, Yongwang Zhao, and Kui Ren.
-- **ISSTA 2025**: Program Analysis Combining Generalized Bit-Level and Word-Level Abstractions. Guangsheng Fan, Liqian Chen, Banghu Yin, Wenyu Zhang, Peisen Yao, and Ji Wang. ([third-party/crab](https://github.com/ZJU-PL/lotus/tree/main/third-party/crab))
+- **ISSTA 2025**: Program Analysis Combining Generalized Bit-Level and Word-Level Abstractions. Guangsheng Fan, Liqian Chen, Banghu Yin, Wenyu Zhang, Peisen Yao, and Ji Wang.
 - **S&P 2024**: Titan: Efficient Multi-target Directed Greybox Fuzzing. Heqing Huang, Peisen Yao, Hung-Chun Chiu, Yiyuan Guo, and Charles Zhang.
-- **USENIX Security 2024**: Unleashing the Power of Type-Based Call Graph Construction by Using Regional Pointer Information. Yuandao Cai, Yibo Jin, and Charles Zhang. ([lib/Alias/Specialized/FPA](https://github.com/ZJU-PL/lotus/tree/main/lib/Alias/Specialized/FPA))
-- **TSE 2024**: Fast and Precise Static Null Exception Analysis with Synergistic Preprocessing. Yi Sun, Chengpeng Wang, Gang Fan, Qingkai Shi, and Xiangyu Zhang. ([lib/Analysis/NullPointer](https://github.com/ZJU-PL/lotus/tree/main/lib/Analysis/NullPointer))
-- **OOPSLA 2022**: Indexing the Extended Dyck-CFL Reachability for Context-Sensitive Program Analysis. Qingkai Shi, Yongchao Wang, Peisen Yao, and Charles Zhang. ([lib/CFL/CSIndex](https://github.com/ZJU-PL/lotus/tree/main/lib/CFL/CSIndex))
-
-## Quick Start
-
-```bash
-git clone https://github.com/ZJU-PL/lotus
-cd lotus
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug
-make -j$(nproc)
-```
-
-> See [INSTALL.md](INSTALL.md) for detailed build options (CMake toggles, Boost dependencies, custom LLVM path, etc.)
-
-## Documentation
-
-Full documentation: [zju-pl.github.io/lotus](https://zju-pl.github.io/lotus)
-
-- [Major Components Overview](https://zju-pl.github.io/lotus/user_guide/major_components.html) — subsystems, libraries, and tools
-- [Tools Reference](https://zju-pl.github.io/lotus/tools/index.html) — command-line tool usage
+- **USENIX Security 2024**: Unleashing the Power of Type-Based Call Graph Construction by Using Regional Pointer Information. Yuandao Cai, Yibo Jin, and Charles Zhang.
+- **TSE 2024**: Fast and Precise Static Null Exception Analysis with Synergistic Preprocessing. Yi Sun, Chengpeng Wang, Gang Fan, Qingkai Shi, and Xiangyu Zhang.
+- **OOPSLA 2022**: Indexing the Extended Dyck-CFL Reachability for Context-Sensitive Program Analysis. Qingkai Shi, Yongchao Wang, Peisen Yao, and Charles Zhang.
 
 ## Contributors
 

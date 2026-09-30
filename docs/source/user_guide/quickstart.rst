@@ -1,117 +1,126 @@
-Quick Start Guide
-==================
+Getting Started
+===============
 
-Get up and running with Lotus quickly.
+This page covers everything needed to build Lotus from source and run your first analysis. It describes the required dependencies, CMake configuration options, build steps, and a quick-start example invoking a checker against a compiled bitcode file.
 
-Basic Usage
------------
+System Requirements
+-------------------
 
-Compile your C/C++ code to LLVM IR:
+Lotus has been tested on **x86/ARM Linux** and **ARM macOS**. The following dependencies are required before building.
 
-.. code-block:: bash
+.. list-table:: Required Dependencies
+   :widths: 20 20 60
+   :header-rows: 1
 
-   clang -emit-llvm -c example.c -o example.bc
-   clang -emit-llvm -S example.c -o example.ll
+   * - Dependency
+     - Required Version
+     - Notes
+   * - LLVM
+     - 14.x
+     - Must match exactly; the build system searches for it automatically.
+   * - Z3
+     - 4.11
+     - SMT solver; found via ``cmake/FindZ3.cmake``.
+   * - CMake
+     - 3.18+
+     - Build system generator.
+   * - C++ compiler
+     - C++17 compatible
+     - GCC or Clang with ``-fexceptions -frtti``.
+   * - Boost
+     - 1.80+ (optional)
+     - Only required when ``LOTUS_ENABLE_SEAHORN``, ``LOTUS_ENABLE_CLAM``, or ``LOTUS_ENABLE_CCLYZER`` are enabled.
 
-Alias Analysis
---------------
-
-.. code-block:: bash
-
-   ./build/bin/lotus-alias-sparrow-aa example.bc    # SparrowAA (CI mode by default) analysis
-   ./build/bin/lotus-alias-dyck-aa example.bc       # Unification-based analysis
-   ./build/bin/lotus-alias-aser-aa example.bc       # AserPTA (CI mode by default) analysis
-   ./build/bin/lotus-alias-fpa example.bc           # Function pointer analysis
-   ./build/bin/lotus-alias-lotus-aa example.bc      # Inclusion-based, flow-sensitive context-sensitive
-   ./build/bin/lotus-alias-sea-dsa-dg --sea-dsa-dot example.bc  # Unification-based, flow-insensitive, context-sensitive
-   ./build/bin/lotus-alias-seadsa-tool --sea-dsa-dot --outdir results/ example.bc
-
-
-Bug Detection
--------------
-
-.. code-block:: bash
-
-   # Integer and array bugs
-   ./build/bin/lotus-check --engine=kint example.ll --checks=int-overflow  # Integer overflow
-   ./build/bin/lotus-check --engine=kint example.ll --checks=array-oob     # Array out of bounds
-   ./build/bin/lotus-check --engine=kint example.ll --checks=all           # All KINT checks
-   
-   # Memory safety: choose the engine for the workflow.
-   ./build/bin/lotus-check --engine=fitx example.bc                  # Fast feedback
-   ./build/bin/lotus-check --engine=ae example.bc --checks=all       # Broad AE pass
-   ./build/bin/lotus-check --engine=pulse example.bc                 # Witness-oriented checks
-   ./build/bin/lotus-check --engine=saber example.bc --checks=all    # Leaks and double frees
-
-    # IFDS-based, taint-style bugs  
-   ./build/bin/lotus-check --engine=taint example.bc                    # Basic taint analysis
-   ./build/bin/lotus-check --engine=taint example.bc --taint.sources=read,scanf --taint.sinks=system,exec
-
-   # Concurrency bugs
-   ./build/bin/lotus-check --engine=concur example.bc            # Concurrency bug detection
-
-   # See docs/source/checker/index.rst for the complete bug-class guide.
-
-
-Abstract Interpretation
-------------------------
-
-.. code-block:: bash
-
-   ./build/bin/clam example.bc                    # Clam analyzer
-   ./build/bin/clam-pp example.bc                 # Clam preprocessor
-   ./build/bin/clam-diff old.bc new.bc            # Differential analysis
-
-Program Dependence Graph
-------------------------
-
-.. code-block:: bash
-
-   ./build/bin/lotus-ir-pdg-query example.bc      # Query PDG
-
-The PDG query frontend is implemented in
-``tools/ir/lotus-ir-pdg-query.cpp``.
-
-
-Dynamic Validation
+Build Instructions
 ------------------
 
-.. code-block:: bash
-
-   ./build/bin/dynaa-instrument example.bc -o example.inst.bc
-   clang example.inst.bc libRuntime.a -o example.inst
-   LOG_DIR=logs/ ./example.inst
-   ./build/bin/dynaa-check example.bc logs/pts.log basic-aa
-
-Example Analysis
-----------------
-
-Analyze a vulnerable C program:
-
-.. code-block:: c
-
-   // example.c
-   #include <stdio.h>
-   
-   void vulnerable_function(char* input) {
-       char buffer[100];
-       strcpy(buffer, input);  // Potential buffer overflow
-       printf("%s", buffer);
-   }
-   
-   int main() {
-       char user_input[200];
-       scanf("%s", user_input);  // Source of tainted data
-       vulnerable_function(user_input);
-       return 0;
-   }
-
-Analysis commands:
+The standard workflow to build Lotus is to create an out-of-source build directory and invoke CMake.
 
 .. code-block:: bash
 
-   clang -emit-llvm -c example.c -o example.bc
-   clang -emit-llvm -S example.c -o example.ll
-   ./build/bin/lotus-check --engine=taint example.bc                 # Detect taint flow
-   ./build/bin/lotus-check --engine=kint example.ll --checks=array-oob # Check array bounds
-   ./build/bin/lotus-check --engine=pulse example.bc                 # Memory safety checks
+   git clone https://github.com/ZJU-PL/lotus.git
+   cd lotus
+   mkdir build && cd build
+   cmake .. -DCMAKE_BUILD_TYPE=Release
+   make -j$(nproc)
+
+If your LLVM installation is not in a standard system path, provide it to CMake:
+
+.. code-block:: bash
+
+   cmake .. -DLLVM_BUILD_PATH=/path/to/llvm/lib/cmake/llvm
+
+To run the unit test suite (recommended after building):
+
+.. code-block:: bash
+
+   make test
+   # Or using ctest:
+   ctest --output-on-failure
+
+Quick-Start Example
+-------------------
+
+The standard workflow for running a Lotus checker on C/C++ code is:
+
+1. Compile the target program to LLVM bitcode using ``clang`` with ``-emit-llvm``.
+2. Run a Lotus checker tool (from ``build/bin/``) on the ``.bc`` file.
+
+.. code-block:: bash
+
+   # 1. Compile C code to LLVM bitcode
+   clang -g -emit-llvm -c example.c -o example.bc
+
+   # 2. Run an alias analysis pass
+   ./build/bin/lotus-alias-sparrow-aa example.bc
+
+   # 3. Run a bug-finding checker (e.g., Use-After-Free & Leak checking)
+   ./build/bin/lotus-saber example.bc
+
+Command-Line Tools Reference
+----------------------------
+
+Lotus exposes its internal libraries through standalone executable drivers in ``build/bin/``. 
+
+.. list-table:: Common Tools
+   :widths: 25 35 40
+   :header-rows: 1
+
+   * - Tool Binary
+     - Source Directory
+     - Typical Invocation
+   * - ``lotus-check --engine=gvfa``
+     - ``tools/checker/``
+     - ``lotus-check --engine=gvfa target.bc``
+   * - ``lotus-check --engine=pulse``
+     - ``tools/checker/``
+     - ``lotus-check --engine=pulse target.bc``
+   * - ``lotus-check --engine=ae``
+     - ``tools/checker/``
+     - ``lotus-check --engine=ae target.bc``
+   * - ``lotus-check --engine=saber``
+     - ``tools/checker/``
+     - ``lotus-check --engine=saber target.bc``
+   * - ``lotus-check --engine=concur``
+     - ``tools/checker/``
+     - ``lotus-check --engine=concur target.bc``
+   * - ``lotus-check --engine=taint``
+     - ``tools/checker/``
+     - ``lotus-check --engine=taint target.bc``
+   * - ``lotus-dfa-ifds``
+     - ``tools/dataflow/``
+     - ``lotus-dfa-ifds target.bc``
+   * - ``lotus-dfa-mono``
+     - ``tools/dataflow/``
+     - ``lotus-dfa-mono target.bc``
+   * - ``lotus-dfa``
+     - ``tools/dataflow/``
+     - ``lotus-dfa target.bc``
+   * - ``lotus-alias-sparrow-aa``
+     - ``tools/alias/``
+     - ``lotus-alias-sparrow-aa target.bc``
+   * - ``lotus-alias-dyck-aa``
+     - ``tools/alias/``
+     - ``lotus-alias-dyck-aa target.bc``
+
+For detailed instructions on extending Lotus or adding new analysis passes, see the developer documentation.
