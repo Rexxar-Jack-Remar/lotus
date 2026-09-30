@@ -11,6 +11,9 @@ target_link_libraries(CanaryAliasCLIUtils PUBLIC AliasSpecManager ${cli_utils_ll
 llvm_map_components_to_libnames(alias_wrapper_llvm_libs Analysis)
 
 # Alias Analysis Wrapper library
+configure_file(${PROJECT_SOURCE_DIR}/include/Alias/Infrastructure/AliasAnalysisWrapper/BuildConfig.h.in
+    ${PROJECT_BINARY_DIR}/include/Alias/Infrastructure/AliasAnalysisWrapper/BuildConfig.h
+    @ONLY)
 add_library(CanaryAliasAnalysisWrapper STATIC
     AliasAnalysisWrapperCore.cpp
     AliasAnalysisWrapperQueries.cpp
@@ -18,19 +21,30 @@ add_library(CanaryAliasAnalysisWrapper STATIC
     AliasAnalysisFactory.cpp
     AliasAnalysisConfigParser.cpp
 )
+# These translation units contain identically named local query helpers.
+set_source_files_properties(AliasAnalysisWrapperCore.cpp
+    AliasAnalysisWrapperQueries.cpp AliasAnalysisWrapperBackend.cpp
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 
 target_link_libraries(CanaryAliasAnalysisWrapper
     PUBLIC
         Andersen
-        DDA
         CanaryDyckAA
-        SeaDsaAnalysis
-        CanaryAllocAA
         CanaryUnderApproxAA
-        CanaryGPG
-        FSCSPointerAnalysis
-        TPATransforms
-        TPAUtil
-        LotusCclyzerAA
         ${alias_wrapper_llvm_libs}
 )
+target_include_directories(CanaryAliasAnalysisWrapper PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>)
+if(LOTUS_AA_WRAPPER_ENABLE_DDA)
+  target_link_libraries(CanaryAliasAnalysisWrapper PRIVATE DDA)
+endif()
+if(LOTUS_AA_WRAPPER_ENABLE_TPA)
+  target_link_libraries(CanaryAliasAnalysisWrapper PRIVATE
+    FSCSPointerAnalysis TPATransforms TPAUtil)
+endif()
+if(LOTUS_AA_WRAPPER_ENABLE_GPG)
+  target_link_libraries(CanaryAliasAnalysisWrapper PRIVATE CanaryGPG)
+endif()
+if(LOTUS_AA_WRAPPER_ENABLE_CCLYZER)
+  target_link_libraries(CanaryAliasAnalysisWrapper PRIVATE LotusCclyzerAA)
+endif()

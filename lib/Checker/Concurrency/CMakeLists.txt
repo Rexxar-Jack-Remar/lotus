@@ -15,4 +15,5 @@ add_library(ConcurrencyChecker STATIC
 target_link_libraries(ConcurrencyChecker
     PUBLIC
         Concurrency  # MHP and LockSet analysis
+        SeaDsaAnalysis  # Direct DsaAnalysis/InitializePasses calls
 )

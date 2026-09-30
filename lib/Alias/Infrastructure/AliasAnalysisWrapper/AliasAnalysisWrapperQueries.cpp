@@ -11,12 +11,21 @@
  * - getAliasSet() - Get alias set for a value
  */
 
-#include "Alias/DemandDriven/DDA/FlowDDA.h"
-#include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
-#include "Alias/InclusionBased/GPG/Analysis.h"
-#include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
-#include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+
+#if LOTUS_AA_WRAPPER_ENABLE_DDA
+#include "Alias/DemandDriven/DDA/FlowDDA.h"
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_CCLYZER
+#include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_GPG
+#include "Alias/InclusionBased/GPG/Analysis.h"
+#endif
+#include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
+#if LOTUS_AA_WRAPPER_ENABLE_TPA
+#include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
+#endif
 #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 
 #include <llvm/ADT/SmallVector.h>
@@ -203,8 +212,10 @@ bool AliasAnalysisWrapper::mayNull(const Value *v) {
     return true;
   if (_dyck_aa && _initialized)
     return _dyck_aa->mayNull(const_cast<Value *>(v));
+#if LOTUS_AA_WRAPPER_ENABLE_CCLYZER
   if (_cclyzer_aa && _initialized)
     return _cclyzer_aa->isNullPointer(v);
+#endif
   return true;
 }
 
@@ -235,8 +246,11 @@ bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr,
   ptsSet.clear();
   if (_andersen_aa && _initialized && _andersen_aa->getPointsToSet(ptr, ptsSet))
     return true;
+#if LOTUS_AA_WRAPPER_ENABLE_CCLYZER
   if (_cclyzer_aa && _initialized && _cclyzer_aa->getPointsToSet(ptr, ptsSet))
     return true;
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_TPA
   if (_tpa_aa && _initialized) {
     const Value *stripped = ptr->stripPointerCasts();
     if (!stripped)
@@ -267,8 +281,12 @@ bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr,
     }
     return true;
   }
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_DDA
   if (_dda_aa && _initialized && _dda_aa->getPointsToSet(ptr, ptsSet))
     return true;
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_GPG
   if (_gpg_aa && _initialized) {
     const auto points_to =
         _gpg_aa->result().allPointeeSet(ptr->stripPointerCasts());
@@ -278,6 +296,7 @@ bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr,
     ptsSet.assign(points_to.values.begin(), points_to.values.end());
     return true;
   }
+#endif
   return false;
 }
 
@@ -296,6 +315,7 @@ bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr,
     }
     return false;
   }
+#if LOTUS_AA_WRAPPER_ENABLE_TPA
   if (_tpa_aa) {
     const Value *stripped = ptr->stripPointerCasts();
     if (!stripped)
@@ -304,6 +324,8 @@ bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr,
     outSize = pts.size();
     return true;
   }
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_DDA
   if (_dda_aa) {
     std::vector<const Value *> ptsSet;
     if (_dda_aa->getPointsToSet(ptr, ptsSet)) {
@@ -312,6 +334,8 @@ bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr,
     }
     return false;
   }
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_GPG
   if (_gpg_aa) {
     const auto points_to =
         _gpg_aa->result().allPointeeSet(ptr->stripPointerCasts());
@@ -321,6 +345,7 @@ bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr,
     outSize = points_to.values.size();
     return true;
   }
+#endif
   return false;
 }
 
@@ -346,6 +371,7 @@ void AliasAnalysisWrapper::getIndirectCallTargets(
     }
     return;
   }
+#if LOTUS_AA_WRAPPER_ENABLE_CCLYZER
   if (_cclyzer_aa && _initialized) {
     std::vector<const Value *> cclyzerTargets;
     if (_cclyzer_aa->getIndirectCallTargets(call, cclyzerTargets)) {
@@ -356,6 +382,7 @@ void AliasAnalysisWrapper::getIndirectCallTargets(
     }
     return;
   }
+#endif
   if (_dyck_aa) {
     auto *Caller = call->getFunction();
     auto *CallGraph = _dyck_aa->getDyckCallGraph();
@@ -378,17 +405,21 @@ void AliasAnalysisWrapper::getIndirectCallTargets(
     }
     return;
   }
+#if LOTUS_AA_WRAPPER_ENABLE_TPA
   if (_tpa_aa) {
     std::vector<const llvm::Function *> tpaCallees =
         _tpa_aa->getCallees(call, nullptr);
     targets.assign(tpaCallees.begin(), tpaCallees.end());
     return;
   }
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_GPG
   if (_gpg_aa) {
     const auto *gpgTargets = _gpg_aa->result().callTargets(call);
     if (gpgTargets)
       targets.assign(gpgTargets->begin(), gpgTargets->end());
   }
+#endif
 }
 
 /**

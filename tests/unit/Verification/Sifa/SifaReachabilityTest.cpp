@@ -1,6 +1,8 @@
 #include "Verification/Sifa/Sifa.h"
 
 #include "TestUtils/LLVMHelpers.h"
+#include <llvm/AsmParser/Parser.h>
+#include <llvm/Support/SourceMgr.h>
 
 #include "gtest/gtest.h"
 

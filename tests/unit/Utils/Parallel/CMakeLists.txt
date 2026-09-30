@@ -4,8 +4,10 @@ lotus_collect_test_sources(utils_tests
   ParallelSchedulerPassTest.cpp
   ThreadSafeTest.cpp
   ThreadPoolHarnessTest.cpp
-  ParallelTabulationHarnessTest.cpp
   PipelineSchedulerHarnessTest.cpp)
+if(LOTUS_ENABLE_CFL)
+  lotus_collect_test_sources(utils_tests ParallelTabulationHarnessTest.cpp)
+endif()
 
 # The discovered GTest cases use the default zero-worker pool. Repeat the
 # worker-dependent harness cases with two real workers.

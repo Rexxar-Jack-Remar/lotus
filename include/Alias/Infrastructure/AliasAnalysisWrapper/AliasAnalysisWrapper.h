@@ -1,6 +1,8 @@
 /// Unified wrapper for alias analysis - supports multiple AA backends
 #pragma once
 
+#include "Alias/Infrastructure/AliasAnalysisWrapper/BuildConfig.h"
+
 #include <memory>
 #include <string>
 
@@ -421,16 +423,21 @@ private:
   std::unique_ptr<llvm::CFLAndersAAResult> _cflanders_result;
   std::unique_ptr<llvm::CFLSteensAAResult> _cflsteens_result;
   std::unique_ptr<llvm::TargetLibraryInfoWrapperPass> _tli;
-  std::unique_ptr<AllocAA> _alloc_aa;
+#if LOTUS_AA_WRAPPER_ENABLE_DDA
   std::unique_ptr<lotus::analysis::DemandDrivenAA> _dda_aa;
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_TPA
   std::unique_ptr<tpa::SemiSparsePointerAnalysis> _tpa_aa;
   std::unique_ptr<tpa::SemiSparseProgram> _tpa_program;
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_GPG
   std::unique_ptr<lotus::gpg::GPGAnalysisEngine> _gpg_aa;
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_CCLYZER
   std::unique_ptr<lotus::cclyzer::CclyzerAA> _cclyzer_aa;
+#endif
 
   llvm::AAResults *_llvm_aa;
-  seadsa::SeaDsaAAResult *_seadsa_aa;
-  void *_sraa;
 };
 
 class AliasAnalysisFactory {

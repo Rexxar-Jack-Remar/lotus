@@ -5,7 +5,7 @@ add_library(CanaryOptimizationIPO STATIC
   IPStoreToLoadForwarding.cpp
 )
 
-target_link_libraries(CanaryOptimizationIPO PUBLIC CanaryLLVMUtils)
+target_link_libraries(CanaryOptimizationIPO PUBLIC CanaryLLVMUtils SeaDsaAnalysis)
 
 target_include_directories(CanaryOptimizationIPO PUBLIC
   $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>

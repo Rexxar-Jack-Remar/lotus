@@ -1,50 +1,37 @@
-# Alias Analysis Unit Tests
-
-add_subdirectory(InclusionBased/GPG)
-add_subdirectory(DemandDriven/DDA)
-add_subdirectory(InclusionBased/AserPTA)
-add_subdirectory(InclusionBased/BootstrapAA)
-add_subdirectory(InclusionBased/FlowSensitive)
-add_subdirectory(InclusionBased/LotusAA)
-add_subdirectory(InclusionBased/SparrowAA)
-add_subdirectory(InclusionBased/TPA)
-add_subdirectory(InclusionBased/CclyzerAA)
-add_subdirectory(UnificationBased/DyckAA)
-add_subdirectory(UnificationBased/SeaDsa)
-add_subdirectory(Specialized/AllocAA)
+# Preserve one alias_tests binary, with sources/dependencies from selected groups.
+lotus_add_test_group(alias gpg InclusionBased/GPG alias_tests
+  LINK_LIBS CanaryGPG CanaryAliasAnalysisWrapper)
+lotus_add_test_group(alias dda DemandDriven/DDA alias_tests LINK_LIBS DDA)
+lotus_add_test_group(alias aserpta InclusionBased/AserPTA alias_tests LINK_LIBS AserPTA)
+lotus_add_test_group(alias bootstrapaa InclusionBased/BootstrapAA alias_tests
+  LINK_LIBS CanaryBootstrapAA)
+lotus_add_test_group(alias flowsensitive InclusionBased/FlowSensitive alias_tests
+  LINK_LIBS FlowSensitivePTA)
+lotus_add_test_group(alias lotusaa InclusionBased/LotusAA alias_tests
+  LINK_LIBS LotusAA CanaryGuardedValueFlow CanaryAliasAnalysisWrapper
+    LLVMAnalysis LLVMTransformUtils)
+lotus_add_test_group(alias sparrowaa InclusionBased/SparrowAA alias_tests LINK_LIBS Andersen)
+lotus_add_test_group(alias tpa InclusionBased/TPA alias_tests
+  LINK_LIBS TPATransforms FSCSPointerAnalysis)
+lotus_add_test_group(alias cclyzeraa InclusionBased/CclyzerAA alias_tests
+  LINK_LIBS LotusCclyzerAA CanaryAliasAnalysisWrapper)
+lotus_add_test_group(alias dyckaa UnificationBased/DyckAA alias_tests LINK_LIBS CanaryDyckAA)
+lotus_add_test_group(alias seadsa UnificationBased/SeaDsa alias_tests LINK_LIBS SeaDsaAnalysis)
+lotus_add_test_group(alias allocaa Specialized/AllocAA alias_tests
+  LINK_LIBS CanaryAllocAA LLVMAnalysis)
 if(LOTUS_ENABLE_TYPE_QUALIFIER)
-  add_subdirectory(Specialized/TypeQualifier)
+  lotus_add_test_group(alias typequalifier Specialized/TypeQualifier alias_tests
+    LINK_LIBS TypeQualifier)
 endif()
-add_subdirectory(Specialized/UnderApproxAA)
-add_subdirectory(Infrastructure/PtsSet)
+lotus_add_test_group(alias underapproxaa Specialized/UnderApproxAA alias_tests
+  LINK_LIBS CanaryUnderApproxAA)
+lotus_add_test_group(alias ptsset Infrastructure/PtsSet alias_tests LINK_LIBS CanaryAliasPtsSet)
 
-# All alias-analysis test sources declared by the subdirectories above are
-# collected into one binary so the LLVM/Lotus libraries are linked only once.
-set(LOTUS_ALIAS_TEST_LIBS
-    CanaryGPG
-    DDA
-    AserPTA
-    CanaryBootstrapAA
-    FlowSensitivePTA
-    Andersen
-    TPATransforms
-    FSCSPointerAnalysis
-    CanaryAliasAnalysisWrapper
-    LotusAA
-    CanaryGuardedValueFlow
-    CanaryAliasPtsSet
-    CanaryAllocAA
-    CanaryUnderApproxAA
-    CanaryDyckAA
-    SeaDsaAnalysis
-    LotusCclyzerAA
-    ${Z3_LIBRARIES})
-if(LOTUS_ENABLE_TYPE_QUALIFIER)
-  list(APPEND LOTUS_ALIAS_TEST_LIBS TypeQualifier)
+get_property(alias_test_libs GLOBAL PROPERTY LOTUS_TEST_SUITE_alias_tests_LINK_LIBS)
+list(REMOVE_DUPLICATES alias_test_libs)
+add_lotus_collected_test_suite(alias_tests LINK_LIBS ${alias_test_libs})
+
+lotus_test_group_enabled(alias bootstrapaa bootstrap_selected)
+if(bootstrap_selected AND TARGET lotus-alias-bootstrap)
+  add_dependencies(alias_tests lotus-alias-bootstrap)
 endif()
-
-add_lotus_collected_test_suite(alias_tests
-  LINK_LIBS ${LOTUS_ALIAS_TEST_LIBS})
-
-# The BootstrapAA CLI smoke test needs its tool to be built first.
-add_dependencies(alias_tests lotus-alias-bootstrap)

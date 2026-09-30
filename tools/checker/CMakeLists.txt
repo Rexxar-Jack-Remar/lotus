@@ -46,7 +46,7 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/config/checkers/
 install(TARGETS lotus-check
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-if(LOTUS_BUILD_TESTS)
+if(LOTUS_BUILD_TESTS AND "checker" IN_LIST LOTUS_SELECTED_TEST_SUBSYSTEMS)
   set(CHECKER_CLI_TEST_SCRIPT
       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/verify_cli.cmake)
   set(CHECKER_CLI_MINIMAL ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/minimal.ll)

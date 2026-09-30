@@ -1,16 +1,14 @@
-add_subdirectory(MHP)
-add_subdirectory(LockSet)
-add_subdirectory(ValueFlow)
-add_subdirectory(Thread)
-add_subdirectory(Utils/Clocks)
-add_subdirectory(Utils/ThreadAPI)
-add_subdirectory(Utils/ThreadLocal)
-add_subdirectory(OpenMP)
-add_subdirectory(MPI)
-add_subdirectory(CUDA)
-add_subdirectory(LinuxKernel)
+foreach(directory MHP LockSet ValueFlow Thread Utils/Clocks Utils/ThreadAPI
+                  Utils/ThreadLocal OpenMP MPI CUDA LinuxKernel)
+  get_filename_component(group "${directory}" NAME)
+  string(TOLOWER "${group}" group)
+  lotus_test_group_enabled(concurrency "${group}" selected)
+  if(selected)
+    add_subdirectory(${directory})
+  endif()
+endforeach()
 
-# All concurrency test sources collected from the subdirectories above are
+# Selected concurrency test sources collected from the subdirectories above are
 # linked into one binary so Concurrency/CanaryParallel are linked only once.
 add_lotus_collected_test_suite(concurrency_tests
   LINK_LIBS Concurrency CanaryParallel)

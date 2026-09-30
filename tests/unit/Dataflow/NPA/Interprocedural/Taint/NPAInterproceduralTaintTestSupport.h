@@ -53,20 +53,6 @@ inline std::string writeTempTaintConfig(llvm::StringRef content) {
   return tempPath.str().str();
 }
 
-inline std::string sourceRoot() {
-  llvm::SmallString<256> path(__FILE__);
-  llvm::sys::path::remove_filename(path);
-  for (int i = 0; i < 4; ++i)
-    llvm::sys::path::remove_filename(path);
-  return path.str().str();
-}
-
-inline std::string defaultTaintConfigPath() {
-  llvm::SmallString<256> path(sourceRoot());
-  llvm::sys::path::append(path, "config", "taint.spec");
-  return path.str().str();
-}
-
 } // namespace
 
 #endif // LOTUS_UNITTEST_DATAFLOW_NPA_INTERPROCEDURAL_TAINT_TEST_SUPPORT_H_

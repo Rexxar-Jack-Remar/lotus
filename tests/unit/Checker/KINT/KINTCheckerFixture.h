@@ -4,9 +4,8 @@
  *
  * Each KINT*Test.cpp translation unit includes this header and defines a
  * group of TEST_F(KINTCheckerTest, ...) cases. Helpers that used to live in
- * an anonymous namespace in KINTCheckerTest.cpp are inline functions in
- * kint_test so every test TU can use them without textual inclusion of
- * .inc fragments.
+ * an anonymous namespace in KINTCheckerTest.cpp are compiled once in
+ * KINTCheckerFixture.cpp. PassBuilder is kept out of this shared header.
  */
 
 #ifndef LOTUS_UNITTEST_CHECKER_KINT_CHECKER_FIXTURE_H_
@@ -14,7 +13,6 @@
 
 #include "Checker/KINT/BugDetection.h"
 #include "Checker/KINT/KINTTaintAnalysis.h"
-#include "Checker/KINT/MKintPass.h"
 #include "Checker/KINT/Options.h"
 #include "Checker/KINT/SmtMemory.h"
 #include "TestUtils/LLVMHelpers.h"
@@ -22,6 +20,7 @@
 #include <memory>
 #include <optional>
 
+#include <gtest/gtest.h>
 #include <llvm/ADT/MapVector.h>
 #include <llvm/ADT/SetVector.h>
 #include <llvm/ADT/SmallString.h>
@@ -29,26 +28,12 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Passes/PassBuilder.h>
-#include <gtest/gtest.h>
 #include <z3++.h>
 
 namespace kint_test {
 
-inline uint64_t getNumeralU64(const z3::expr &expr) {
-  z3::expr simplified = expr.simplify();
-  uint64_t value = 0;
-  EXPECT_TRUE(Z3_get_numeral_uint64(simplified.ctx(), simplified, &value));
-  return value;
-}
-
-inline z3::expr bvValFromAPInt(z3::context &ctx, const llvm::APInt &value) {
-  llvm::SmallString<64> decimal;
-  value.toString(decimal, 10, /*Signed=*/false, /*formatAsCLiteral=*/false);
-  Z3_sort sort = Z3_mk_bv_sort(ctx, value.getBitWidth());
-  Z3_ast ast = Z3_mk_numeral(ctx, decimal.c_str(), sort);
-  return z3::to_expr(ctx, ast);
-}
+uint64_t getNumeralU64(const z3::expr &expr);
+z3::expr bvValFromAPInt(z3::context &ctx, const llvm::APInt &value);
 
 } // namespace kint_test
 
@@ -60,25 +45,10 @@ protected:
     return lotus::unittest::parseModule(context, source, "KINTCheckerTest");
   }
 
-  void runPass(llvm::Module &module) {
-    llvm::LoopAnalysisManager LAM;
-    llvm::FunctionAnalysisManager FAM;
-    llvm::CGSCCAnalysisManager CGAM;
-    llvm::ModuleAnalysisManager MAM;
-    llvm::PassBuilder PB;
-    PB.registerModuleAnalyses(MAM);
-    PB.registerFunctionAnalyses(FAM);
-    PB.registerCGSCCAnalyses(CGAM);
-    PB.registerLoopAnalyses(LAM);
-    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  void runPass(llvm::Module &module);
 
-    kint::MKintPass pass;
-    pass.run(module, MAM);
-  }
-
-  static bool
-  hasKintErrorMetadata(const llvm::Function &F,
-                       llvm::Instruction::BinaryOps opcode) {
+  static bool hasKintErrorMetadata(const llvm::Function &F,
+                                   llvm::Instruction::BinaryOps opcode) {
     for (const llvm::Instruction &I : llvm::instructions(F)) {
       const auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(&I);
       if (!bin || bin->getOpcode() != opcode)

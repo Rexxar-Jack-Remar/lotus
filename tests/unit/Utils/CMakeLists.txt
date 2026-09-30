@@ -15,8 +15,10 @@ set(LOTUS_UTILS_TEST_LIBS
     CanaryADT
     CanaryLLVMUtils
     CanaryFormats
-    CanaryParallel
-    CanaryCSIndexFLARE)
+    CanaryParallel)
+if(LOTUS_ENABLE_CFL)
+  list(APPEND LOTUS_UTILS_TEST_LIBS CanaryCSIndexFLARE)
+endif()
 
 if(TARGET Crab)
   lotus_collect_test_sources(utils_tests CrabMachineIntDomainTest.cpp)
@@ -28,5 +30,6 @@ else()
 endif()
 
 add_lotus_collected_test_suite(utils_tests
+  CUSTOM_MAIN
   LINK_LIBS ${LOTUS_UTILS_TEST_LIBS}
   INCLUDE_DIRS ${LOTUS_UTILS_TEST_INCLUDE_DIRS})

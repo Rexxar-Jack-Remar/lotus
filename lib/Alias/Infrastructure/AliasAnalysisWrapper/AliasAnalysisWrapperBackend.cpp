@@ -10,17 +10,24 @@
  * - Helper function for combining alias results
  */
 
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+
+#if LOTUS_AA_WRAPPER_ENABLE_DDA
 #include "Alias/DemandDriven/DDA/FlowDDA.h"
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_CCLYZER
 #include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_GPG
 #include "Alias/InclusionBased/GPG/Analysis.h"
+#endif
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
+#if LOTUS_AA_WRAPPER_ENABLE_TPA
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Support/PtsSet.h"
-#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Alias/Specialized/AllocAA/AllocAA.h"
+#endif
 #include "Alias/Specialized/UnderApproxAA/UnderApproxAA.h"
 #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/UnificationBased/seadsa/SeaDsaAliasAnalysis.hh"
 
 #include <algorithm>
 
@@ -132,9 +139,11 @@ AliasResult AliasAnalysisWrapper::queryBackend(const Value *v1,
 
   if (_andersen_aa)
     return _andersen_aa->alias(mkLoc(v1s), mkLoc(v2s));
+#if LOTUS_AA_WRAPPER_ENABLE_DDA
   if (_dda_aa)
     return _dda_aa->mayAlias(v1s, v2s) ? AliasResult::MayAlias
                                        : AliasResult::NoAlias;
+#endif
   if (_dyck_aa)
     return _dyck_aa->mayAlias(const_cast<Value *>(v1s),
                               const_cast<Value *>(v2s))
@@ -145,21 +154,15 @@ AliasResult AliasAnalysisWrapper::queryBackend(const Value *v1,
   if (_underapprox_aa)
     return _underapprox_aa->mustAlias(v1, v2) ? AliasResult::MustAlias
                                               : AliasResult::NoAlias;
+#if LOTUS_AA_WRAPPER_ENABLE_CCLYZER
   if (_cclyzer_aa && _cclyzer_aa->isInitialized())
     return _cclyzer_aa->alias(mkLoc(v1s), mkLoc(v2s));
+#endif
   if (_cflanders_result)
     return _cflanders_result->query(mkLoc(v1), mkLoc(v2));
   if (_cflsteens_result)
     return _cflsteens_result->query(mkLoc(v1), mkLoc(v2));
-  if (_seadsa_aa) {
-    SimpleAAQueryInfo AAQI;
-    return _seadsa_aa->alias(mkLoc(v1), mkLoc(v2), AAQI);
-  }
-  if (_alloc_aa)
-    return _alloc_aa->canPointToTheSameObject(const_cast<Value *>(v1),
-                                              const_cast<Value *>(v2))
-               ? AliasResult::MayAlias
-               : AliasResult::NoAlias;
+#if LOTUS_AA_WRAPPER_ENABLE_TPA
   if (_tpa_aa) {
     // Get points-to sets for both values (context-insensitive)
     tpa::PtsSet pts1 = _tpa_aa->getPtsSet(v1s);
@@ -185,6 +188,8 @@ AliasResult AliasAnalysisWrapper::queryBackend(const Value *v1,
     // Otherwise, they may alias
     return AliasResult::MayAlias;
   }
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_GPG
   if (_gpg_aa) {
     const auto pts1 = _gpg_aa->result().allPointeeSet(v1s);
     const auto pts2 = _gpg_aa->result().allPointeeSet(v2s);
@@ -215,5 +220,6 @@ AliasResult AliasAnalysisWrapper::queryBackend(const Value *v1,
     return AliasResult::MayAlias;
   }
 
+#endif
   return AliasResult::MayAlias;
 }

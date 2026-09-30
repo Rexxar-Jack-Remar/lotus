@@ -9,22 +9,28 @@
  * - Helper function for combining alias results from multiple backends
  */
 
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+
+#if LOTUS_AA_WRAPPER_ENABLE_DDA
 #include "Alias/DemandDriven/DDA/FlowDDA.h"
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_CCLYZER
 #include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
-#include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
+#endif
+#if LOTUS_AA_WRAPPER_ENABLE_GPG
 #include "Alias/InclusionBased/GPG/Analysis.h"
+#endif
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
+#if LOTUS_AA_WRAPPER_ENABLE_TPA
 #include "Alias/InclusionBased/TPA/Context/ContextPolicy.h"
 #include "Alias/InclusionBased/TPA/Context/KLimitContext.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/FrontEnd/SemiSparseProgramBuilder.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Support/PtsSet.h"
 #include "Alias/InclusionBased/TPA/Transforms/RunPrepass.h"
-#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Alias/Specialized/AllocAA/AllocAA.h"
+#endif
 #include "Alias/Specialized/UnderApproxAA/UnderApproxAA.h"
 #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/UnificationBased/seadsa/SeaDsaAliasAnalysis.hh"
 
 #include <sstream>
 
@@ -98,8 +104,7 @@ combineAliasResults(llvm::ArrayRef<llvm::AliasResult> Results) {
  * will return conservative (MayAlias) results.
  */
 AliasAnalysisWrapper::AliasAnalysisWrapper(Module &M, const AAConfig &config)
-    : _config(config), _module(&M), _initialized(false), _llvm_aa(nullptr),
-      _seadsa_aa(nullptr), _sraa(nullptr) {
+    : _config(config), _module(&M), _initialized(false), _llvm_aa(nullptr) {
   initialize();
 }
 
@@ -176,6 +181,7 @@ void AliasAnalysisWrapper::initialize() {
   }
 
   case AAConfig::Implementation::TPA: {
+#if LOTUS_AA_WRAPPER_ENABLE_TPA
     _initialized = initAA(
         [this] {
           // Set context strategy and k-limit for TPA
@@ -221,10 +227,14 @@ void AliasAnalysisWrapper::initialize() {
           _tpa_aa->runOnProgram(*_tpa_program);
         },
         _config.getName().c_str());
+#else
+    errs() << "AliasAnalysisWrapper: TPA was disabled at build time\n";
+#endif
     break;
   }
 
   case AAConfig::Implementation::GPG:
+#if LOTUS_AA_WRAPPER_ENABLE_GPG
     _initialized = initAA(
         [this] {
           lotus::gpg::GPGConfig config;
@@ -234,15 +244,22 @@ void AliasAnalysisWrapper::initialize() {
           _gpg_aa->run();
         },
         "GPG");
+#else
+    errs() << "AliasAnalysisWrapper: GPG was disabled at build time\n";
+#endif
     break;
 
   case AAConfig::Implementation::DDA:
+#if LOTUS_AA_WRAPPER_ENABLE_DDA
     _initialized = initAA(
         [this] {
           _dda_aa = std::make_unique<lotus::analysis::DemandDrivenAA>();
           _dda_aa->run(*_module);
         },
         _config.getName().c_str());
+#else
+    errs() << "AliasAnalysisWrapper: DDA was disabled at build time\n";
+#endif
     break;
 
   case AAConfig::Implementation::DyckAA:
@@ -291,6 +308,7 @@ void AliasAnalysisWrapper::initialize() {
     break;
 
   case AAConfig::Implementation::CclyzerAA:
+#if LOTUS_AA_WRAPPER_ENABLE_CCLYZER
     _initialized = initAA(
         [this] {
           lotus::cclyzer::CclyzerOptions opts;
@@ -319,6 +337,9 @@ void AliasAnalysisWrapper::initialize() {
           }
         },
         _config.getName().c_str());
+#else
+    errs() << "AliasAnalysisWrapper: CclyzerAA was disabled at build time\n";
+#endif
     break;
 
   case AAConfig::Implementation::Combined: {

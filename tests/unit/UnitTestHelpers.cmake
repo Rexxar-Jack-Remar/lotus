@@ -5,24 +5,26 @@ set(LOTUS_UNIT_TEST_COMMON_INCLUDES
     ${CMAKE_CURRENT_LIST_DIR}/../../include
     ${LLVM_INCLUDE_DIRS})
 
+# Non-template LLVM test helpers are compiled once for all suites.
+add_library(lotus_test_llvm_helpers STATIC EXCLUDE_FROM_ALL
+    TestUtils/LLVMHelpers.cpp)
+target_include_directories(lotus_test_llvm_helpers PUBLIC
+    ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
+target_link_libraries(lotus_test_llvm_helpers PUBLIC
+    GTest::gtest LLVMAsmParser LLVMIRReader)
+
 add_library(lotus_test_utils INTERFACE)
 target_include_directories(lotus_test_utils INTERFACE
     ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
 target_link_libraries(lotus_test_utils INTERFACE
-    GTest::gtest
-    GTest::gtest_main
-    LLVMAsmParser
-    LLVMIRReader
-    LLVMPasses)
+    lotus_test_llvm_helpers
+    GTest::gtest_main)
 
 add_library(lotus_test_harness_utils INTERFACE)
 target_include_directories(lotus_test_harness_utils INTERFACE
     ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
 target_link_libraries(lotus_test_harness_utils INTERFACE
-    GTest::gtest
-    LLVMAsmParser
-    LLVMIRReader
-    LLVMPasses)
+    lotus_test_llvm_helpers)
 
 include(GoogleTest)
 
@@ -39,6 +41,17 @@ function(lotus_collect_test_sources suite_name)
     endforeach()
 endfunction()
 
+# Select a child source manifest and record only its required libraries.
+function(lotus_add_test_group subsystem group directory suite_name)
+    cmake_parse_arguments(LOTUS_GROUP "" "" "LINK_LIBS" ${ARGN})
+    lotus_test_group_enabled(${subsystem} ${group} selected)
+    if(selected)
+        add_subdirectory(${directory})
+        set_property(GLOBAL APPEND PROPERTY
+            LOTUS_TEST_SUITE_${suite_name}_LINK_LIBS ${LOTUS_GROUP_LINK_LIBS})
+    endif()
+endfunction()
+
 function(add_lotus_collected_test_suite suite_name)
     get_property(sources GLOBAL PROPERTY
         LOTUS_TEST_SUITE_${suite_name}_SOURCES)
@@ -50,7 +63,7 @@ function(add_lotus_collected_test_suite suite_name)
 endfunction()
 
 function(add_lotus_test_suite test_name)
-    cmake_parse_arguments(LOTUS_SUITE "" "TIMEOUT;TEST_KIND"
+    cmake_parse_arguments(LOTUS_SUITE "CUSTOM_MAIN" "TIMEOUT;TEST_KIND"
         "SOURCES;LINK_LIBS;INCLUDE_DIRS;COMPILE_DEFINITIONS;DEPENDS;LABELS"
         ${ARGN})
     if(NOT LOTUS_SUITE_SOURCES)
@@ -72,8 +85,13 @@ function(add_lotus_test_suite test_name)
     target_compile_definitions(${test_name} PRIVATE
         LOTUS_GTEST_NO_MAIN
         ${LOTUS_SUITE_COMPILE_DEFINITIONS})
-    target_link_libraries(${test_name}
-        lotus_test_utils
+    if(LOTUS_SUITE_CUSTOM_MAIN)
+        set(test_support lotus_test_harness_utils)
+    else()
+        set(test_support lotus_test_utils)
+    endif()
+    target_link_libraries(${test_name} PRIVATE
+        ${test_support}
         ${LOTUS_SUITE_LINK_LIBS})
     if(LOTUS_SUITE_DEPENDS)
         add_dependencies(${test_name} ${LOTUS_SUITE_DEPENDS})

@@ -18,8 +18,18 @@ set(LOTUS_UNIT_TEST_TIMEOUT 60 CACHE STRING
 set(LOTUS_TEST_DISCOVERY_TIMEOUT 60 CACHE STRING
     "Default timeout in seconds for the gtest_discover_tests POST_BUILD discovery step")
 
+# Analyses load default specs relative to the test working directory. Keep
+# out-of-tree test builds independent of the source directory's parent layout.
+foreach(spec ptr modref taint)
+    configure_file(${PROJECT_SOURCE_DIR}/config/${spec}.spec
+        ${CMAKE_BINARY_DIR}/config/${spec}.spec COPYONLY)
+endforeach()
+
 # Add unit test subdirectory
 add_subdirectory(unit)
+add_test(NAME build_selection
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildSelectionTest.cmake)
+set_tests_properties(build_selection PROPERTIES LABELS "lotus;unit;build")
 
 # Note: Individual unit tests are registered in their respective subdirectories under unit/
 

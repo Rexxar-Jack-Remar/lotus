@@ -1,5 +1,12 @@
 # Analysis Unit Tests
 
+set(analysis_test_dependencies)
+set(analysis_test_definitions)
+lotus_test_group_enabled(analysis loop loop_selected)
+lotus_test_group_enabled(analysis typehierarchy type_hierarchy_selected)
+
+if(loop_selected)
+
 set(NOELLE_LOOP_PARITY_SRC_DIR
     ${CMAKE_CURRENT_SOURCE_DIR}/noelle_parity)
 set(NOELLE_LOOP_PARITY_LL_DIR
@@ -75,8 +82,14 @@ foreach(case_name ${NOELLE_LOOP_PARITY_CASES})
 endforeach()
 
 add_custom_target(noelle_loop_parity_ll_fixtures DEPENDS ${NOELLE_LOOP_PARITY_LL_OUTPUTS})
+list(APPEND analysis_test_dependencies noelle_loop_parity_ll_fixtures)
+list(APPEND analysis_test_definitions
+  LOTUS_NOELLE_LOOP_PARITY_FIXTURE_DIR="${NOELLE_LOOP_PARITY_SRC_DIR}"
+  LOTUS_NOELLE_LOOP_PARITY_LL_DIR="${NOELLE_LOOP_PARITY_LL_DIR}")
+endif()
 
 # TypeHierarchy fixture generation
+if(type_hierarchy_selected)
 set(TYPE_HIERARCHY_SRC_DIR
     ${CMAKE_SOURCE_DIR}/tests/regress/Analysis/TypeHierarchy)
 set(TYPE_HIERARCHY_LL_DIR
@@ -163,25 +176,39 @@ foreach(case_name ${TYPE_HIERARCHY_CASES})
 endforeach()
 
 add_custom_target(type_hierarchy_ll_fixtures DEPENDS ${TYPE_HIERARCHY_LL_OUTPUTS})
+list(APPEND analysis_test_dependencies type_hierarchy_ll_fixtures)
+list(APPEND analysis_test_definitions
+  LOTUS_TYPE_HIERARCHY_LL_DIR="${TYPE_HIERARCHY_LL_DIR}")
+endif()
 
-add_subdirectory(CFG)
-add_subdirectory(ControlDependence)
-add_subdirectory(DebugInfo)
-add_subdirectory(General)
-add_subdirectory(Multiplicity)
-add_subdirectory(NullPointer)
-add_subdirectory(ParameterSummary)
-add_subdirectory(Profile)
-add_subdirectory(Purity)
-add_subdirectory(SCCP)
+lotus_add_test_group(analysis cfg CFG analysis_tests LINK_LIBS CanaryCFG CanaryICFG)
+lotus_add_test_group(analysis controldependence ControlDependence analysis_tests
+  LINK_LIBS CanaryICFGControlDependence CanaryICFG)
+lotus_add_test_group(analysis debuginfo DebugInfo analysis_tests LINK_LIBS CanaryDebugInfo)
+lotus_add_test_group(analysis general General analysis_tests
+  LINK_LIBS Spectre ConstantTimeVerify CanaryNisse)
+lotus_add_test_group(analysis multiplicity Multiplicity analysis_tests LINK_LIBS CanaryMultiplicity)
+lotus_add_test_group(analysis nullpointer NullPointer analysis_tests
+  LINK_LIBS CanaryNullPointer CanaryDyckAA)
+lotus_add_test_group(analysis parametersummary ParameterSummary analysis_tests
+  LINK_LIBS CanaryParameterSummary)
+lotus_add_test_group(analysis profile Profile analysis_tests LINK_LIBS CanaryProfile)
+lotus_add_test_group(analysis purity Purity analysis_tests
+  LINK_LIBS CanaryPurityAnalysis CanaryShadowMemSSA AliasSpecManager LLVMAnalysis)
+lotus_add_test_group(analysis sccp SCCP analysis_tests LINK_LIBS CanarySCCP)
 
-# Collect TypeHierarchy and Loop test sources into analysis_tests
+if(type_hierarchy_selected)
 lotus_collect_test_sources(analysis_tests
   ../TypeHierarchy/DIBasedTypeHierarchyTest.cpp
   ../TypeHierarchy/DIBasedTypeHierarchyTransitiveReachabilityTest.cpp
   ../TypeHierarchy/DIBasedTypeHierarchySerializationTest.cpp
   ../TypeHierarchy/LLVMVFTableTest.cpp
-  ../TypeHierarchy/CallGraphAlgorithmsTest.cpp
+  ../TypeHierarchy/CallGraphAlgorithmsTest.cpp)
+set_property(GLOBAL APPEND PROPERTY LOTUS_TEST_SUITE_analysis_tests_LINK_LIBS
+  CanaryTypeHierarchy LLVMAnalysis)
+endif()
+if(loop_selected)
+lotus_collect_test_sources(analysis_tests
   Loop/LoopAnalysisFoundationTest.cpp
   Loop/LoopDependenceGraphTest.cpp
   Loop/LoopLDGBuilderTest.cpp
@@ -193,34 +220,13 @@ lotus_collect_test_sources(analysis_tests
   Loop/LoopParityIVTest.cpp
   Loop/LoopParityIterationSpaceTest.cpp
   Loop/LoopParitySCCDAGAttrsTest.cpp)
+set_property(GLOBAL APPEND PROPERTY LOTUS_TEST_SUITE_analysis_tests_LINK_LIBS
+  CanaryLoopAnalysis CanaryPDG LLVMAnalysis LLVMTransformUtils LLVMPasses)
+endif()
 
+get_property(analysis_test_libs GLOBAL PROPERTY LOTUS_TEST_SUITE_analysis_tests_LINK_LIBS)
+list(REMOVE_DUPLICATES analysis_test_libs)
 add_lotus_collected_test_suite(analysis_tests
-  LINK_LIBS
-    CanaryCFG
-    CanaryICFG
-    CanaryICFGControlDependence
-    CanaryMultiplicity
-    CanaryParameterSummary
-    CanaryProfile
-    CanarySCCP
-    CanaryDebugInfo
-    CanaryNullPointer
-    CanaryDyckAA
-    CanaryPurityAnalysis
-    CanaryShadowMemSSA
-    AliasSpecManager
-    Spectre
-    ConstantTimeVerify
-    CanaryNisse
-    CanaryTypeHierarchy
-    CanaryLoopAnalysis
-    CanaryPDG
-    LLVMAnalysis
-    LLVMTransformUtils
-  COMPILE_DEFINITIONS
-    LOTUS_TYPE_HIERARCHY_LL_DIR="${TYPE_HIERARCHY_LL_DIR}"
-    LOTUS_NOELLE_LOOP_PARITY_FIXTURE_DIR="${NOELLE_LOOP_PARITY_SRC_DIR}"
-    LOTUS_NOELLE_LOOP_PARITY_LL_DIR="${NOELLE_LOOP_PARITY_LL_DIR}"
-  DEPENDS
-    type_hierarchy_ll_fixtures
-    noelle_loop_parity_ll_fixtures)
+  LINK_LIBS ${analysis_test_libs}
+  COMPILE_DEFINITIONS ${analysis_test_definitions}
+  DEPENDS ${analysis_test_dependencies})

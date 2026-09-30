@@ -102,6 +102,150 @@ Typical configurations:
    # Enable Seal symbolic automata lifter
    cmake -S . -B build -DLOTUS_ENABLE_SEAL=ON
 
+Faster development builds
+-------------------------
+
+By default, Lotus builds every configured library and tool family. For focused
+development, keep all library targets available but build only those needed by
+the selected tools and tests:
+
+.. code-block:: bash
+
+   cmake -S . -B build-concurrency -G Ninja \
+     -DCMAKE_BUILD_TYPE=Debug \
+     -DLOTUS_BUILD_ALL_LIBRARIES=OFF \
+     -DLOTUS_TOOL_FAMILIES= \
+     -DLOTUS_BUILD_TESTS=ON \
+     -DLOTUS_TEST_SUBSYSTEMS=concurrency \
+     -DLOTUS_ENABLE_CFL=OFF
+   cmake --build build-concurrency --parallel 8
+   ctest --test-dir build-concurrency --output-on-failure
+
+``LOTUS_TOOL_FAMILIES`` is a semicolon-separated list of ``alias``, ``checker``,
+``dataflow``, ``optimization``, ``solver``, ``verifier``, ``ir``, and ``cfl``.
+Its default is ``all``; an empty value builds no tools. Existing feature switches
+still control optional tools within a selected family.
+
+``LOTUS_TEST_SUBSYSTEMS`` selects ``alias``, ``alias-wrapper``, ``analysis``,
+``checker``, ``cfl``, ``concurrency``, ``dataflow``, ``fuzzing``, ``ir``,
+``solvers``, ``symbolicexecution``, ``utils``, and ``verification``. Its default
+is ``all``. Quote multiple selections, for example
+``-DLOTUS_TEST_SUBSYSTEMS="concurrency;alias-wrapper"``. The ``alias-wrapper``
+suite checks wrapper availability without compiling all alias-analysis tests.
+CLI regression tests are registered only when their tools are configured.
+
+For finer selection, use ``subsystem/group`` in the same option. A bare subsystem
+includes all of its groups; each selected subsystem still produces one test
+binary, so full builds do not acquire a separate link step for every group.
+
+.. code-block:: bash
+
+   cmake -S . -B build-focused -G Ninja \
+     -DLOTUS_BUILD_ALL_LIBRARIES=OFF \
+     -DLOTUS_TOOL_FAMILIES= \
+     -DLOTUS_BUILD_TESTS=ON \
+     '-DLOTUS_TEST_SUBSYSTEMS=concurrency/cuda;dataflow/vasco;analysis/cfg'
+   cmake --build build-focused --target lotus_unit_tests --parallel 8
+   ctest --test-dir build-focused --output-on-failure
+
+Supported groups:
+
+* ``alias``: ``gpg``, ``dda``, ``aserpta``, ``bootstrapaa``, ``flowsensitive``,
+  ``lotusaa``, ``sparrowaa``, ``tpa``, ``cclyzeraa``, ``dyckaa``, ``seadsa``,
+  ``allocaa``, ``typequalifier``, ``underapproxaa``, ``ptsset``.
+* ``analysis``: ``cfg``, ``controldependence``, ``debuginfo``, ``general``,
+  ``multiplicity``, ``nullpointer``, ``parametersummary``, ``profile``,
+  ``purity``, ``sccp``, ``typehierarchy``, ``loop``.
+* ``checker``: ``ae``, ``concurrency``, ``framework``, ``kint``, ``pulse``,
+  ``saber``, ``reports``.
+* ``concurrency``: ``mhp``, ``lockset``, ``valueflow``, ``thread``, ``clocks``,
+  ``threadapi``, ``threadlocal``, ``openmp``, ``mpi``, ``cuda``, ``linuxkernel``.
+* ``dataflow``: ``ifdside``, ``mono``, ``wpds``, ``apa``, ``npa``, ``vasco``.
+
+Source manifests and link dependencies are restricted to the selected groups.
+TypeHierarchy and Loop IR fixtures are configured and generated only when those
+analysis groups are selected. Production libraries retain their own dependencies;
+for example CUDA tests still need the aggregate Concurrency library.
+
+Non-template functions in ``TestUtils/LLVMHelpers.h`` are implemented in a shared
+test support library, so each test source does not compile their bodies again.
+Templates remain in the header. KINT's shared fixture similarly compiles its
+PassBuilder initialization once rather than exposing it through every test
+source. The common test targets no longer link LLVMPasses; groups that use
+PassBuilder request that library explicitly. Suites with a custom entry point
+use ``CUSTOM_MAIN`` to omit ``GTest::gtest_main``.
+
+With ``LOTUS_BUILD_ALL_LIBRARIES=OFF``, CMake follows target dependencies rather
+than compiling every library. You can still request any configured library with
+``cmake --build build-concurrency --target SVFG``. Use the default full-library
+configuration for packaging/installing the complete project. Disabling
+``LOTUS_ENABLE_CFL`` removes CFL libraries, tools, and their tests; the wrapper's
+LLVM-provided CFL alias analyses remain available.
+
+The unified alias wrapper can omit heavier backends independently:
+
+.. code-block:: bash
+
+   cmake -S . -B build-concurrency \
+     -DLOTUS_AA_WRAPPER_ENABLE_DDA=OFF \
+     -DLOTUS_AA_WRAPPER_ENABLE_TPA=OFF \
+     -DLOTUS_AA_WRAPPER_ENABLE_GPG=OFF \
+     -DLOTUS_AA_WRAPPER_ENABLE_CCLYZER=OFF
+
+These switches default to ON and affect only the wrapper. Standalone backend
+libraries and tools remain available. SparrowAA, DyckAA, UnderApprox, Combined,
+and LLVM CFL backends keep their existing behavior. Requesting an omitted
+backend produces a diagnostic, leaves ``isInitialized()`` false, and returns
+conservative query results. Enable the backends your chosen analysis needs;
+these switches do not remove an independent dependency on a backend elsewhere.
+Consumers of the wrapper header must include the generated build include
+directory as well as the source include directory; linking its CMake target
+supplies that directory automatically.
+
+Profiling and optional compilation acceleration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable compiler profiling before choosing precompiled headers (PCH) or unity
+builds:
+
+.. code-block:: bash
+
+   cmake -S . -B build-concurrency -DLOTUS_ENABLE_TIME_TRACE=ON
+   cmake --build build-concurrency --parallel 8
+
+Clang/AppleClang write ``*.cpp.json`` files beside their object files. Inspect
+them in a trace viewer to distinguish header parsing and template instantiation
+from code generation. This option applies to Lotus C++ targets, not vendored
+libraries, and rejects unsupported compilers.
+
+If repeated header parsing dominates, select individual targets for private
+PCHs of stable LLVM/STL headers:
+
+.. code-block:: bash
+
+   cmake -S . -B build-concurrency \
+     '-DLOTUS_PCH_TARGETS=Concurrency;SVFG'
+
+Each target builds its own PCH with its own flags and definitions. Measure the
+PCH creation cost as well as subsequent source compilation; small targets may
+not benefit. PCH is disabled by default.
+
+Unity builds are an opt-in experiment for compatible targets:
+
+.. code-block:: bash
+
+   cmake -S . -B build-concurrency \
+     -DLOTUS_UNITY_TARGETS=CanaryAliasPtsSet \
+     -DLOTUS_UNITY_BATCH_SIZE=4
+
+Combining source files can expose local-name collisions or increase the cost
+of rebuilding one edited file. Select targets explicitly, verify their tests,
+and compare clean and incremental builds before adopting unity builds. Both
+target lists reject unknown or non-compilable targets and exclude vendored
+targets. Reset a list with ``-DLOTUS_PCH_TARGETS=`` or
+``-DLOTUS_UNITY_TARGETS=`` to disable it. Reconfigure into a new build directory
+when switching CMake generators.
+
 Z3 Installation
 ---------------
 
