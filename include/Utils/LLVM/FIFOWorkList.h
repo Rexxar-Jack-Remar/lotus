@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <queue>
 #include <unordered_set>
+#include <vector>
 
 namespace util {
 
@@ -43,6 +45,20 @@ public:
   }
 
   bool empty() const { return list.empty(); }
+
+  // Preview values without copying the duplicate-removal hash table.
+  std::vector<ElemType> peek(std::size_t limit) const {
+    std::vector<ElemType> result;
+    if (!limit)
+      return result;
+    auto pending = list;
+    result.reserve(std::min(limit, pending.size()));
+    while (!pending.empty() && result.size() < limit) {
+      result.push_back(pending.front());
+      pending.pop();
+    }
+    return result;
+  }
 };
 
 } // namespace util

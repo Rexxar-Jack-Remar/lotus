@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <queue>
 #include <unordered_set>
@@ -47,6 +48,21 @@ public:
   }
 
   bool empty() const { return list.empty(); }
+
+  // Copy only the heap's contiguous values, never the duplicate-removal set.
+  // Using the same priority_queue preserves the exact order of priority ties.
+  std::vector<ElemType> peek(std::size_t limit) const {
+    std::vector<ElemType> result;
+    if (!limit)
+      return result;
+    auto pending = list;
+    result.reserve(std::min(limit, pending.size()));
+    while (!pending.empty() && result.size() < limit) {
+      result.push_back(pending.top());
+      pending.pop();
+    }
+    return result;
+  }
 };
 
 } // namespace util

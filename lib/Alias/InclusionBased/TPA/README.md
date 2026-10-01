@@ -16,6 +16,9 @@ TPA is an **inclusion-based**, **flow- and context-sensitive** pointer analysis 
 LLVM IR → IR Transforms → Front-End Processing → Global Initialization → Semi-Sparse Analysis → Points-to Sets
 ```
 
+This path constructs semi-sparse CFGs directly from LLVM IR. It does not build
+an SVFG or run an exhaustive Andersen analysis before the flow-sensitive solver.
+
 ## End-to-End Pipeline (What Happens Internally)
 
 1. **IR normalization (`Transforms/`)**
@@ -97,6 +100,35 @@ lotus-alias-tpa [options] <input bitcode file>
 - `-ext <file>`: External pointer table file
 - `-print-pts`: Print points-to sets
 - `-cfg-dot-dir <dir>`: Output CFG dot files
+- `--parallel --threads=N`: Evaluate speculative transfers with N threads,
+  including the calling thread (0 chooses hardware concurrency)
+- `--parallel-lookahead=N`: Retain up to N predicted transfers per worker
+  (default 4)
+- `--verify-parallel`: Compare the complete Env and per-program-point incoming
+  Stores against a fresh serial run on the same program
+- `--dump-stats`: Print front-end, initialization, and solver timings plus
+  evaluation, replay, eviction, batch, and worker counters
+
+```bash
+build/bin/lotus-alias-tpa input.bc --parallel --threads=4 \
+  --verify-parallel --dump-stats
+```
+
+Parallel mode is experimental. Workers evaluate transfers against private Env
+and call-graph views and shared immutable Store versions. New call edges are
+staged as deltas, and queue preview avoids cloning worklist hash tables.
+The coordinator validates their
+reads and publishes effects in the existing two-level worklist order. Small
+Alloc/Copy/Offset operations run directly at the queue head. Changed
+inputs trigger replay, including a singleton destination that grows before a
+strong update retires. Canonical pointer visibility is staged until retirement;
+canonical objects, contexts, layouts, and points-to sets are synchronized.
+
+This implementation preserves the serial solver's behavior but keeps retirement
+and propagation serial. The local SPEC2006 checks currently show overhead,
+without a speedup. Serial execution remains the default. The reusable
+`scripts/benchmark_parallel_tpa.py` runner records phase timings, CPU time,
+peak memory, full-solution verification, and timeout results.
 
 ### Programmatic Usage
 
@@ -110,6 +142,21 @@ analysis.runOnProgram(ssProg);
 const llvm::Value *some_ptr_value = /* pointer-typed LLVM value */;
 auto ptsSet = analysis.getPtsSet(some_ptr_value);
 ```
+
+For parallel execution, pass a configuration to a fresh analysis instance:
+
+```cpp
+SemiSparsePointerAnalysis::Config config;
+config.parallel = true;
+config.threads = 4;
+SemiSparsePointerAnalysis parallelAnalysis;
+parallelAnalysis.runOnProgram(ssProg, config);
+```
+
+Each analysis instance supports one run. Keep the program/module alive while
+querying results and leave the context strategy, k-limit, external annotations,
+and LLVM IR unchanged during execution. Simultaneous analysis sessions sharing
+an LLVMContext are outside the supported parallel execution contract.
 
 ## Analysis Characteristics
 

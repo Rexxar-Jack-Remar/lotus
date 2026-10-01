@@ -1,1 +1,1 @@
-lotus_collect_test_sources(alias_tests TPATest.cpp)
+lotus_collect_test_sources(alias_tests TPATest.cpp ParallelTPATest.cpp)

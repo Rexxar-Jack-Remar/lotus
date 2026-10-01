@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <unordered_map>
+#include <vector>
 
 namespace util {
 
@@ -54,6 +55,20 @@ public:
   }
 
   bool empty() const { return globalWorkList.empty(); }
+
+  // Visit only queued contexts and their needed local prefixes. Completed
+  // contexts retained in workListMap and all hash-table nodes stay untouched.
+  std::vector<ElemType> peek(std::size_t limit) const {
+    std::vector<ElemType> result;
+    for (const auto &global : globalWorkList.peek(limit)) {
+      for (const auto &local :
+           workListMap.at(global).peek(limit - result.size()))
+        result.emplace_back(global, local);
+      if (result.size() == limit)
+        break;
+    }
+    return result;
+  }
 };
 
 } // namespace util

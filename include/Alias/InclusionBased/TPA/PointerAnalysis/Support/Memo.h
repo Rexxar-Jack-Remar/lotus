@@ -3,6 +3,7 @@
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Support/ProgramPoint.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Support/Store.h"
 
+#include <memory>
 #include <unordered_map>
 
 namespace tpa {
@@ -14,7 +15,8 @@ namespace tpa {
 // to decide whether a successor should be re-enqueued.
 class Memo {
 private:
-  using MapType = std::unordered_map<ProgramPoint, Store>;
+  using MapType =
+      std::unordered_map<ProgramPoint, std::shared_ptr<const Store>>;
   MapType inState;
 
 public:
@@ -31,7 +33,14 @@ public:
     if (itr == inState.end())
       return nullptr;
     else
-      return &itr->second;
+      return itr->second.get();
+  }
+
+  // Retained snapshots are immutable. Changed input states receive a new
+  // identity, so a candidate validates its entire input in constant time.
+  std::shared_ptr<const Store> snapshot(const ProgramPoint &pp) const {
+    auto itr = inState.find(pp);
+    return itr == inState.end() ? nullptr : itr->second;
   }
 
   // Join incoming store into pp's cached in-state.
@@ -44,10 +53,31 @@ public:
         "Memo.update() only accept Store");
     auto itr = inState.find(pp);
     if (itr == inState.end()) {
-      inState.insert(std::make_pair(pp, std::forward<StoreType>(store)));
+      inState.emplace(pp,
+                      std::make_shared<Store>(std::forward<StoreType>(store)));
       return true;
     } else {
-      return itr->second.mergeWith(store);
+      auto &current = itr->second;
+      // Stores are allocated mutable; only Memo can mutate them, and only
+      // when no immutable snapshot is retaining this version.
+      if (current.use_count() == 1)
+        return const_cast<Store *>(current.get())->mergeWith(store);
+      // Avoid allocating a replacement for an unchanged join. Presence of
+      // an explicitly empty binding still counts as a change.
+      bool changed = false;
+      for (const auto &binding : store)
+        if (!current->hasBinding(binding.first) ||
+            current->lookup(binding.first).merge(binding.second) !=
+                current->lookup(binding.first)) {
+          changed = true;
+          break;
+        }
+      if (!changed)
+        return false;
+      auto replacement = std::make_shared<Store>(*current);
+      replacement->mergeWith(store);
+      current = std::move(replacement);
+      return true;
     }
   }
 
@@ -58,14 +88,24 @@ public:
     if (itr == inState.end()) {
       auto newStore = Store();
       newStore.strongUpdate(obj, pSet);
-      inState.insert(itr, std::make_pair(pp, std::move(newStore)));
+      inState.emplace(pp, std::make_shared<Store>(std::move(newStore)));
       return true;
     } else {
-      return itr->second.weakUpdate(obj, pSet);
+      auto &current = itr->second;
+      if (current.use_count() == 1)
+        return const_cast<Store *>(current.get())->weakUpdate(obj, pSet);
+      if (current->hasBinding(obj) &&
+          current->lookup(obj).merge(pSet) == current->lookup(obj))
+        return false;
+      auto replacement = std::make_shared<Store>(*current);
+      replacement->weakUpdate(obj, pSet);
+      current = std::move(replacement);
+      return true;
     }
   }
 
   bool empty() const { return inState.empty(); }
+  const MapType &entries() const { return inState; }
   void clear() { inState.clear(); }
 };
 

@@ -28,8 +28,9 @@ class SemiSparseProgram;
 // - Env: Points-to sets for top-level pointers
 // - CallGraph: Call graph with context information
 //
-// The GlobalState is read-only during analysis (only Env changes).
-// It provides access to all components needed by transfer functions.
+// Transfers mutate Env, CallGraph, and the canonical pointer/object registries.
+// Parallel evaluations use private Env/CallGraph views and stage pointer
+// visibility; only the coordinator publishes their effects.
 class GlobalState {
 private:
   PointerManager &ptrManager;

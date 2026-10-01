@@ -4,6 +4,8 @@
 #include "Alias/InclusionBased/TPA/PointerAnalysis/MemoryModel/MemoryBlock.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/MemoryModel/MemoryObject.h"
 
+#include <memory>
+#include <mutex>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -32,6 +34,8 @@ namespace tpa {
 // - Heap: malloc/alloca allocations (includes context)
 class MemoryManager {
 private:
+  std::shared_ptr<std::recursive_mutex> registryMutex =
+      std::make_shared<std::recursive_mutex>();
   // Maps allocation sites to memory blocks
   // Memory blocks contain type layout information
   using AllocMap = std::unordered_map<AllocSite, MemoryBlock>;

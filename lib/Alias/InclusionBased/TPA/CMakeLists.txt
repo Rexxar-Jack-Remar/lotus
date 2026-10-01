@@ -10,6 +10,7 @@ set(PointerAnalysisSourceCodes
   Context/KLimitContext.cpp
   PointerAnalysis/Engine/ExternalCallAnalysis.cpp
   PointerAnalysis/Engine/Initializer.cpp
+  PointerAnalysis/Engine/ParallelSolver.cpp
   PointerAnalysis/Engine/SemiSparsePropagator.cpp
   PointerAnalysis/Engine/StorePruner.cpp
   PointerAnalysis/Engine/TransferFunction.cpp
@@ -51,4 +52,6 @@ set(PointerAnalysisSourceCodes
 )
 
 add_library(FSCSPointerAnalysis STATIC ${PointerAnalysisSourceCodes})
-target_link_libraries(FSCSPointerAnalysis Annotation)
+target_link_libraries(FSCSPointerAnalysis PUBLIC Annotation)
+find_package(Threads REQUIRED)
+target_link_libraries(FSCSPointerAnalysis PRIVATE Threads::Threads)

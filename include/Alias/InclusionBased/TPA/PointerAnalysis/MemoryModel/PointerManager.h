@@ -2,6 +2,8 @@
 
 #include "Alias/InclusionBased/TPA/PointerAnalysis/MemoryModel/Pointer.h"
 
+#include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -49,6 +51,17 @@ private:
   // Useful for context-insensitive queries
   using PointerVector = std::vector<const Pointer *>;
   std::unordered_map<const llvm::Value *, PointerVector> valuePtrMap;
+  std::unordered_set<const Pointer *> published;
+  std::shared_ptr<std::recursive_mutex> registryMutex =
+      std::make_shared<std::recursive_mutex>();
+  PointerManager *base = nullptr;
+  std::unordered_set<const Pointer *> staged;
+  using ReadKey = std::pair<const context::Context *, const llvm::Value *>;
+  mutable std::unordered_map<ReadKey, const Pointer *,
+                             util::PairHasher<ReadKey>>
+      reads;
+  const Pointer *internPointer(const context::Context *, const llvm::Value *,
+                               bool);
 
   // Create a new Pointer (internal method)
   const Pointer *buildPointer(const context::Context *ctx,
@@ -56,6 +69,12 @@ private:
 
 public:
   PointerManager();
+  PointerManager(PointerManager &&) noexcept = default;
+  // A speculative view shares canonical identities but hides unpublished
+  // registrations from other transfers until reference-order retirement.
+  explicit PointerManager(PointerManager &owner);
+  bool validateView() const;
+  void publishView();
 
   // Set up the universal pointer
   const Pointer *setUniversalPointer(const llvm::UndefValue *);

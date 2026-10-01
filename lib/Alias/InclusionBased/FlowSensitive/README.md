@@ -39,10 +39,6 @@ Precise memory reads check object contents and entry presence; missing entries
 also validate the wildcard namespace. `--parallel-object-certificates=false`
 selects whole-channel validation for comparison.
 
-The design, proof assumptions, and current research limitations are recorded
-in `docs/research/parallel-flow-sensitive-pta.md` and
-`docs/research/parallel-fspta-proof.md` at the repository root.
-
 `FlowSensitivePTA` is the thread-independent sparse solver. It maintains:
 
 - top-level points-to sets for pointer-producing SVFG nodes;
