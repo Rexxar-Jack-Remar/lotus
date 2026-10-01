@@ -1,5 +1,9 @@
 #include "IR/UseTraceSSA/TemporalHistory.h"
+
 #include <stdexcept>
+
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/SmallVector.h>
 
 namespace lotus {
 namespace usetracessa {
@@ -59,17 +63,19 @@ TemporalHistory TemporalHistory::append(TraceFlowGraph &g, FunctionID id,
       g.annotate(g.after(id, exit.second, result.execution), Event::Exit);
   return result;
 }
-void TemporalHistory::connectCall(TraceFlowGraph &g, const TemporalHistory &caller,
-                                  SiteID site, CallSiteID callSite,
-                                  const std::vector<TemporalHistory> &targets,
-                                  bool completeTargets, ObjectSet objects) {
+namespace {
+void connectTargets(TraceFlowGraph &g, const TemporalHistory &caller,
+                    SiteID site, CallSiteID callSite,
+                    llvm::ArrayRef<const TemporalHistory *> targets,
+                    bool completeTargets, ObjectSet objects) {
   if (callSite == NoNativeID || (targets.empty() && completeTargets))
     throw std::invalid_argument("UseTraceSSA: invalid temporal call");
   auto before = caller.before(g, site), after = caller.after(g, site);
   if (g.node(after).events != Event::None || !g.node(after).effects.empty())
     throw std::invalid_argument("UseTraceSSA: call splice requires a separate effect site");
   std::vector<FlowEdge> pending;
-  for (const auto &target : targets) {
+  for (const auto *targetPtr : targets) {
+    const auto &target = *targetPtr;
     FlowEdge call;
     call.from = before; call.to = target.entry(g); call.kind = FlowKind::Call;
     call.callSite = callSite; call.objects = objects; pending.push_back(call);
@@ -88,6 +94,28 @@ void TemporalHistory::connectCall(TraceFlowGraph &g, const TemporalHistory &call
     }
   for (const auto &e : pending) g.addEdge(e);
   if (!completeTargets) g.addIssue("unresolved temporal call target or external effect");
+}
+} // namespace
+void TemporalHistory::connectCall(TraceFlowGraph &g,
+                                  const TemporalHistory &caller, SiteID site,
+                                  CallSiteID callSite,
+                                  const std::vector<TemporalHistory> &targets,
+                                  bool completeTargets, ObjectSet objects) {
+  llvm::SmallVector<const TemporalHistory *, 4> references;
+  for (const auto &target : targets)
+    references.push_back(&target);
+  connectTargets(g, caller, site, callSite, references, completeTargets,
+                 std::move(objects));
+}
+void TemporalHistory::connectDirectCall(TraceFlowGraph &g,
+                                        const TemporalHistory &caller,
+                                        SiteID site, CallSiteID callSite,
+                                        const TemporalHistory &target,
+                                        bool completeTargets,
+                                        ObjectSet objects) {
+  const TemporalHistory *reference = &target;
+  connectTargets(g, caller, site, callSite, {reference}, completeTargets,
+                 std::move(objects));
 }
 } // namespace usetracessa
 } // namespace lotus

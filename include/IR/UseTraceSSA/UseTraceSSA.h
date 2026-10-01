@@ -5,6 +5,8 @@
 #include <iosfwd>
 #include <limits>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace lotus {
@@ -156,6 +158,7 @@ private:
   std::vector<Region> Regions;
   std::vector<Node> Nodes;
   std::vector<std::vector<UseVersion>> Uses;
+  std::unordered_map<SiteID, std::vector<std::pair<ValueID, ID>>> WideUses;
   std::vector<VersionID> Definitions;
   std::vector<std::vector<VersionID>> Users;
   std::vector<RegionID> IDom;

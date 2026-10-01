@@ -28,6 +28,7 @@ class InstructionLabels : private llvm::AssemblyAnnotationWriter {
     std::string *Current = nullptr;
   } Output;
   std::unordered_map<const llvm::Instruction *, std::string> Labels;
+  bool SourceLocations = true;
 
   void emitInstructionAnnot(const llvm::Instruction *instruction,
                              llvm::formatted_raw_ostream &out) override {
@@ -40,7 +41,8 @@ class InstructionLabels : private llvm::AssemblyAnnotationWriter {
     if (!Output.Current) return;
     out.flush();
     const auto &instruction = llvm::cast<llvm::Instruction>(value);
-    if (const llvm::DebugLoc &location = instruction.getDebugLoc()) {
+    if (const llvm::DebugLoc &location = instruction.getDebugLoc();
+        SourceLocations && location) {
       llvm::raw_string_ostream label(*Output.Current);
       label << " [" << location->getFilename() << ':' << location.getLine() << ':'
             << location.getCol() << ']';
@@ -49,11 +51,32 @@ class InstructionLabels : private llvm::AssemblyAnnotationWriter {
   }
 
 public:
-  InstructionLabels(const llvm::Module &module,
-                    const std::function<bool(const llvm::Instruction &)> &select) {
-    for (const auto &function : module) for (const auto &block : function)
-      for (const auto &instruction : block)
-        if (select(instruction)) Labels.emplace(&instruction, std::string{});
+  InstructionLabels(
+      const llvm::Module &module,
+      const std::function<bool(const llvm::Instruction &)> &select,
+      bool instructionText = true, bool sourceLocations = true)
+      : SourceLocations(sourceLocations) {
+    for (const auto &function : module) {
+      std::size_t site = 0;
+      for (const auto &block : function)
+        for (const auto &instruction : block) {
+          ++site;
+          if (!select(instruction))
+            continue;
+          std::string label;
+          if (!instructionText) {
+            llvm::raw_string_ostream out(label);
+            out << instruction.getOpcodeName() << " site " << site;
+            if (const llvm::DebugLoc &location = instruction.getDebugLoc();
+                SourceLocations && location)
+              out << " [" << location->getFilename() << ':'
+                  << location.getLine() << ':' << location.getCol() << ']';
+          }
+          Labels.emplace(&instruction, std::move(label));
+        }
+    }
+    if (!instructionText || Labels.empty())
+      return;
     module.print(Output, this);
     Output.flush();
   }

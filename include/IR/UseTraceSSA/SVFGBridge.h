@@ -5,12 +5,20 @@
 #include "IR/UseTraceSSA/SVFGImporter.h"
 
 #include <cstdint>
+#include <functional>
 #include <utility>
 
 namespace lotus {
 namespace usetracessa {
 
 enum class NativeHistoryMode { Full, DoubleFree, UseAfterFree, MemoryLeak, FileLeak };
+struct NativeHistoryOptions {
+  /// False keeps opcode/site identities and debug locations without printing
+  /// the whole LLVM module. Exact instruction text remains the API default.
+  bool instructionText = true;
+  /// Optional phase observer, in milliseconds; it never times upstream SVFG.
+  std::function<void(const char *, double)> phaseTiming;
+};
 
 /// Construct ordered histories from this revision's SVFG and the LLVM CFG.
 /// Sites are derived from instructions, memory phases, CFG edges and function
@@ -19,9 +27,9 @@ enum class NativeHistoryMode { Full, DoubleFree, UseAfterFree, MemoryLeak, FileL
 /// universe, and required call/return topology. Unknown source guards prevent
 /// finite object pruning. Unsupported or ambiguous facts are recorded as issues,
 /// so negative queries remain Unknown. Rebuild for a different property.
-SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
-                                               const llvm::Module &module,
-                                               NativeHistoryMode mode);
+SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(
+    const analysis::SVFG &svfg, const llvm::Module &module,
+    NativeHistoryMode mode, NativeHistoryOptions options = {});
 
 /// Copy metadata carried by a Lotus SVFG edge. The caller assigns an ID and
 /// supplies the exact consumer site (or marks a genuine boundary). Empty

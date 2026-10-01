@@ -68,12 +68,8 @@ std::string findingSite(const FlowNode &node) {
   const std::string label = node.label.substr(0, objectSuffix);
   const auto functionEnd = label.find(".temporal:");
   const std::string function = label.substr(0, functionEnd);
-  const auto open = label.rfind(" [");
-  if (open != std::string::npos) {
-    const auto close = label.find(']', open + 2);
-    if (close != std::string::npos)
-      return function + ":" + label.substr(open + 2, close - open - 2);
-  }
+  if (!node.sourceLocation.empty())
+    return function + ':' + node.sourceLocation;
   return label;
 }
 } // namespace

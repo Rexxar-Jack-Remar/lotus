@@ -1,7 +1,18 @@
 #include "IR/UseTraceSSA/SVFGBridge.h"
+
 #include "IR/UseTraceSSA/InstructionLabels.h"
 #include "IR/UseTraceSSA/TemporalHistory.h"
 
+#include <algorithm>
+#include <chrono>
+#include <iterator>
+#include <map>
+#include <set>
+#include <stdexcept>
+#include <tuple>
+#include <unordered_map>
+
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/Dominators.h>
@@ -10,19 +21,29 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include <algorithm>
-#include <iterator>
-#include <map>
-#include <set>
-#include <stdexcept>
-#include <tuple>
-
 namespace lotus {
 namespace usetracessa {
 namespace {
 
 using NativeNode = analysis::SVFGNode;
 using NativeEdge = analysis::SVFGEdge;
+
+class PhaseTimer {
+  using Clock = std::chrono::steady_clock;
+  const NativeHistoryOptions &Options;
+  Clock::time_point Start = Clock::now();
+
+public:
+  explicit PhaseTimer(const NativeHistoryOptions &options) : Options(options) {}
+  void finish(const char *name) {
+    if (!Options.phaseTiming)
+      return;
+    auto end = Clock::now();
+    Options.phaseTiming(
+        name, std::chrono::duration<double, std::milli>(end - Start).count());
+    Start = Clock::now();
+  }
+};
 
 struct Placement {
   BlockID block = InvalidID;
@@ -187,6 +208,8 @@ struct ResourcePlan {
   bool hasRequired = false;
   ObjectSet universe = ObjectSet::unknown();
   std::map<const llvm::Instruction *, GuardedEventEffect> effects;
+  std::vector<const llvm::CallBase *> calls;
+  std::vector<std::string> issues;
   bool keeps(const llvm::Instruction &instruction) const {
     return effects.count(&instruction) || structuralCall(instruction);
   }
@@ -198,16 +221,63 @@ Layout makeResourceLayout(const llvm::Function &function, FunctionID id,
   layout.function.id = id;
   layout.function.name = function.getName().str();
   Program &program = layout.function.control;
-  for (const auto &block : function)
-    layout.blocks.emplace(&block, program.addBlock(block.getName().str()));
+  // Contract empty single-successor blocks before expanding CFG edges for SSA.
+  // Keep all event/call sites, branches, terminal blocks and the external
+  // entry. An all-empty cycle gets a representative self-loop, never a return
+  // port.
+  std::vector<const llvm::BasicBlock *> blocks;
+  llvm::DenseMap<const llvm::BasicBlock *, ID> numbers;
   for (const auto &block : function) {
-    const auto *terminator = block.getTerminator();
+    numbers[&block] = blocks.size();
+    blocks.push_back(&block);
+  }
+  std::vector<BlockID> resolved(blocks.size(), InvalidID);
+  std::vector<bool> visiting(blocks.size());
+  auto retain = [&](ID index) {
+    const auto *block = blocks[index];
+    auto id = program.addBlock(block->getName().str());
+    layout.blocks.emplace(block, id);
+    layout.nativeBlocks.push_back(block);
+    resolved[index] = id;
+  };
+  for (ID index = 0; index < blocks.size(); ++index) {
+    const auto &block = *blocks[index];
+    bool keep = index == 0 || block.getTerminator()->getNumSuccessors() != 1;
+    for (const auto &instruction : block)
+      keep |= plan.keeps(instruction);
+    if (keep)
+      retain(index);
+  }
+  for (ID index = 0; index < blocks.size(); ++index) {
+    if (resolved[index] != InvalidID)
+      continue;
+    std::vector<ID> path;
+    ID current = index;
+    while (resolved[current] == InvalidID && !visiting[current]) {
+      visiting[current] = true;
+      path.push_back(current);
+      current =
+          numbers.lookup(blocks[current]->getTerminator()->getSuccessor(0));
+    }
+    if (resolved[current] == InvalidID)
+      retain(current);
+    for (auto member : path) {
+      resolved[member] = resolved[current];
+      visiting[member] = false;
+    }
+  }
+  for (const auto *block : layout.nativeBlocks) {
+    const auto *terminator = block->getTerminator();
     for (unsigned successor = 0; successor < terminator->getNumSuccessors(); ++successor)
-      program.addEdge(layout.blocks.at(&block),
-                      layout.blocks.at(terminator->getSuccessor(successor)));
+      program.addEdge(
+          layout.blocks.at(block),
+          resolved[numbers.lookup(terminator->getSuccessor(successor))]);
   }
   for (const auto &block : function) {
-    BlockID current = layout.blocks.at(&block);
+    auto retained = layout.blocks.find(&block);
+    if (retained == layout.blocks.end())
+      continue;
+    BlockID current = retained->second;
     for (const auto &instruction : block) {
       if (!plan.keeps(instruction)) continue;
       bool dereference = llvm::isa<llvm::LoadInst>(instruction) ||
@@ -359,12 +429,21 @@ ResourcePlan planResources(const analysis::SVFG &svfg, const llvm::Module &modul
   std::set<const llvm::Function *> called;
   std::map<const llvm::Instruction *, ObjectID> synthetic;
   ObjectID nextSynthetic = ObjectID(1) << 63;
+  std::vector<std::pair<const llvm::Instruction *, Event>> eventSites;
   for (const auto &function : module) for (const auto &block : function)
     for (const auto &instruction : block) {
       const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
       const auto *callee = call ? call->getCalledFunction() : nullptr;
+      if (call) {
+        plan.calls.push_back(call);
+        if (!callee || (callee->isDeclaration() && !callee->isIntrinsic()))
+          plan.issues.push_back("call in " + function.getName().str() +
+                                " has no complete native effect model");
+      }
       if (callee && !callee->isDeclaration()) called.insert(callee);
       auto event = resourceEvent(instruction, plan.property);
+      if (event != Event::None)
+        eventSites.emplace_back(&instruction, event);
       if (mode != NativeHistoryMode::Full && plan.property.exits &&
           hasEvent(event, plan.property.sources))
         synthetic.emplace(&instruction, nextSynthetic++);
@@ -374,6 +453,8 @@ ResourcePlan planResources(const analysis::SVFG &svfg, const llvm::Module &modul
     const auto *callee = call ? call->getCalledFunction() : nullptr;
     return callee && callee->getName() == name;
   };
+  std::unordered_map<const llvm::Value *, ObjectSet> objectGuards;
+  std::unordered_map<const llvm::Value *, ObjectSet> projectedGuards;
   auto effectFor = [&](const llvm::Instruction &instruction, Event event) {
     const llvm::Value *pointer = nullptr;
     Certainty certainty = Certainty::May;
@@ -393,60 +474,89 @@ ResourcePlan planResources(const analysis::SVFG &svfg, const llvm::Module &modul
            directAcquisition(pointer, "fopen")))
         certainty = Certainty::Must;
     }
-    auto objects = resourceObjects(svfg, pointer);
-    if (objects.isUnknown()) {
-      const auto *site = llvm::dyn_cast<llvm::Instruction>(pointer->stripPointerCasts());
-      auto fallback = synthetic.find(site);
-      if (fallback != synthetic.end()) objects = ObjectSet::known({fallback->second});
+    bool project =
+        !hasEvent(event, plan.property.sources) && !plan.universe.isUnknown();
+    auto &cache = project ? projectedGuards : objectGuards;
+    auto cached = cache.find(pointer);
+    if (cached == cache.end()) {
+      auto raw = objectGuards.find(pointer);
+      auto objects = raw == objectGuards.end() ? resourceObjects(svfg, pointer)
+                                               : raw->second;
+      if (objects.isUnknown()) {
+        const auto *site =
+            llvm::dyn_cast<llvm::Instruction>(pointer->stripPointerCasts());
+        auto fallback = synthetic.find(site);
+        if (fallback != synthetic.end())
+          objects = ObjectSet::known({fallback->second});
+      }
+      if (project && !objects.isUnknown()) {
+        std::vector<ObjectID> relevant;
+        const auto &universe = plan.universe.objects();
+        std::set_intersection(objects.objects().begin(),
+                              objects.objects().end(), universe.begin(),
+                              universe.end(), std::back_inserter(relevant));
+        objects = ObjectSet::known(std::move(relevant));
+      }
+      cached = cache.emplace(pointer, std::move(objects)).first;
     }
-    return GuardedEventEffect{event, std::move(objects), certainty};
+    return GuardedEventEffect{event, cached->second, certainty};
   };
 
   std::vector<ObjectID> candidates;
   bool unknownSources = mode == NativeHistoryMode::Full;
-  for (const auto &function : module) for (const auto &block : function)
-    for (const auto &instruction : block) {
-      auto event = resourceEvent(instruction, plan.property);
-      if (!hasEvent(event, plan.property.sources)) continue;
-      auto effect = effectFor(instruction, event);
-      plan.hasRequired |= hasEvent(event, plan.property.required) && !effect.objects.empty();
-      unknownSources |= effect.objects.isUnknown();
-      candidates.insert(candidates.end(), effect.objects.objects().begin(),
-                         effect.objects.objects().end());
-      plan.effects.emplace(&instruction, std::move(effect));
-    }
+  for (const auto &site : eventSites) {
+    const auto &instruction = *site.first;
+    auto event = site.second;
+    if (!hasEvent(event, plan.property.sources))
+      continue;
+    auto effect = effectFor(instruction, event);
+    plan.hasRequired |=
+        hasEvent(event, plan.property.required) && !effect.objects.empty();
+    unknownSources |= effect.objects.isUnknown();
+    candidates.insert(candidates.end(), effect.objects.objects().begin(),
+                      effect.objects.objects().end());
+    plan.effects.emplace(&instruction, std::move(effect));
+  }
   if (!plan.hasRequired) return plan;
   if (!unknownSources) plan.universe = ObjectSet::known(std::move(candidates));
 
-  for (const auto &function : module) for (const auto &block : function)
-    for (const auto &instruction : block) {
-      auto event = resourceEvent(instruction, plan.property);
-      if (event == Event::None || hasEvent(event, plan.property.sources)) continue;
-      if (event == Event::Escape && (called.count(&function) || function.hasAddressTaken()))
-        continue;
-      auto effect = effectFor(instruction, event);
-      if (!plan.universe.isUnknown() && !effect.objects.isUnknown()) {
-        std::vector<ObjectID> relevant;
-        const auto &objects = effect.objects.objects();
-        const auto &universe = plan.universe.objects();
-        std::set_intersection(objects.begin(), objects.end(), universe.begin(), universe.end(),
-                              std::back_inserter(relevant));
-        effect.objects = ObjectSet::known(std::move(relevant));
-      }
-      if (!effect.objects.empty()) plan.effects.emplace(&instruction, std::move(effect));
-    }
+  for (const auto &site : eventSites) {
+    const auto &instruction = *site.first;
+    const auto &function = *instruction.getFunction();
+    auto event = site.second;
+    if (event == Event::None || hasEvent(event, plan.property.sources))
+      continue;
+    if (event == Event::Escape &&
+        (called.count(&function) || function.hasAddressTaken()))
+      continue;
+    auto effect = effectFor(instruction, event);
+    if (!effect.objects.empty())
+      plan.effects.emplace(&instruction, std::move(effect));
+  }
   return plan;
 }
 
-void appendTemporalFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
-                         const std::map<const llvm::Function *, Layout> &layouts,
-                         FunctionID firstLayer, const ResourcePlan &plan) {
+void appendTemporalFacts(
+    SVFGHistoryResult &result, const analysis::SVFG &svfg,
+    const std::map<const llvm::Function *, Layout> &layouts,
+    FunctionID firstLayer, const ResourcePlan &plan,
+    const NativeHistoryOptions &options) {
+  PhaseTimer timer(options);
   std::map<const llvm::Function *, std::vector<TemporalEffect>> effects;
-  std::map<const llvm::Instruction *, NativeID> provenance;
-  for (const auto &item : svfg) if (const auto *instruction = anchor(*item.second)) {
-    auto it = provenance.emplace(instruction, item.second->getId());
-    if (!it.second) it.first->second = std::min<NativeID>(it.first->second, item.second->getId());
-  }
+  // Only event sites consume native provenance. A sparse resource check must
+  // not allocate a tree entry for every instruction in a multi-million-node
+  // SVFG.
+  std::unordered_map<const llvm::Instruction *, NativeID> provenance;
+  provenance.reserve(plan.effects.size());
+  for (const auto &effect : plan.effects)
+    provenance.emplace(effect.first, NoNativeID);
+  if (!provenance.empty())
+    for (const auto &item : svfg)
+      if (const auto *instruction = anchor(*item.second)) {
+        auto it = provenance.find(instruction);
+        if (it != provenance.end())
+          it->second = std::min<NativeID>(it->second, item.second->getId());
+      }
   for (const auto &entry : plan.effects) {
     const auto *instruction = entry.first;
     const auto &effect = entry.second;
@@ -458,63 +568,82 @@ void appendTemporalFacts(SVFGHistoryResult &result, const analysis::SVFG &svfg,
         effect.certainty, native == provenance.end() ? NoNativeID : native->second});
   }
   std::map<const llvm::Function *, TemporalHistory> histories;
+  timer.finish("usetracessa_provenance");
   for (const auto &item : layouts) {
-    auto history = TemporalHistory::append(result.graph, firstLayer++,
-        item.second.function.name + ".temporal", item.second.function.control, effects[item.first],
-        plan.property.exits);
+    auto history = TemporalHistory::append(
+        result.graph, firstLayer++, item.second.function.name + ".temporal",
+        item.second.function.control, effects[item.first], false);
     // A CFG sink such as unreachable/resume is not a normal return port.
     // Full layouts also have one explicit synthetic join of normal returns.
     for (auto exit = history.exits.begin(); exit != history.exits.end();) {
       bool normal = item.second.function.control.blocks()[exit->first].name == "usetracessa.exit";
-      for (const auto &block : item.second.blocks)
-        if (block.second == exit->first)
-          normal = llvm::isa<llvm::ReturnInst>(block.first->getTerminator());
-      if (normal) ++exit;
-      else exit = history.exits.erase(exit);
+      if (exit->first < item.second.nativeBlocks.size())
+        normal = llvm::isa<llvm::ReturnInst>(
+            item.second.nativeBlocks[exit->first]->getTerminator());
+      if (normal) {
+        if (plan.property.exits &&
+            result.graph.layer(history.id)
+                .history.use(exit->second, history.execution))
+          result.graph.annotate(
+              result.graph.after(history.id, exit->second, history.execution),
+              Event::Exit);
+        ++exit;
+      } else
+        exit = history.exits.erase(exit);
     }
     histories.emplace(item.first, std::move(history));
   }
-  for (const auto &item : layouts) {
-    const auto &caller = histories.at(item.first);
-    for (const auto &block : *item.first) for (const auto &instruction : block) {
-      const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
-      const auto *callee = call ? call->getCalledFunction() : nullptr;
-      if (!callee || !histories.count(callee)) continue;
-      SiteID site = item.second.returned.at(call);
-      if (!result.graph.layer(caller.id).history.use(caller.sites.at(site), caller.execution))
-        continue; // Unreachable CFG site.
-      if (llvm::isa<llvm::InvokeInst>(call)) {
-        result.graph.addIssue("exceptional temporal call exits require edge-specific modeling");
-        continue;
-      }
-      TemporalHistory::connectCall(result.graph, caller, site,
-          reinterpret_cast<std::uintptr_t>(call), {histories.at(callee)});
-    }
+  for (const auto &effect : plan.effects) {
+    const auto *instruction = effect.first;
+    const auto &location = instruction->getDebugLoc();
+    if (!location)
+      continue;
+    const auto &layout = layouts.at(instruction->getFunction());
+    const auto &history = histories.at(instruction->getFunction());
+    SiteID site = effect.second.events == Event::Dereference
+                      ? layout.before.at(instruction)
+                      : layout.after.at(instruction);
+    if (!result.graph.layer(history.id)
+             .history.use(history.sites.at(site), history.execution))
+      continue;
+    result.graph.setSourceLocation(history.after(result.graph, site),
+                                   location->getFilename().str() + ':' +
+                                       std::to_string(location.getLine()) +
+                                       ':' + std::to_string(location.getCol()));
   }
-}
-
-std::vector<std::string> callIssues(const llvm::Module &module) {
-  std::vector<std::string> issues;
-  for (const auto &function : module) for (const auto &block : function)
-    for (const auto &instruction : block) {
-      const auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
-      if (!call) continue;
-      const auto *callee = call->getCalledFunction();
-      if (!callee || (callee->isDeclaration() && !callee->isIntrinsic()))
-        issues.push_back("call in " + function.getName().str() +
-                         " has no complete native effect model");
+  timer.finish("usetracessa_history");
+  for (const auto *call : plan.calls) {
+    const auto *callee = call->getCalledFunction();
+    if (!callee || !histories.count(callee))
+      continue;
+    const auto &caller = histories.at(call->getFunction());
+    SiteID site = layouts.at(call->getFunction()).returned.at(call);
+    if (!result.graph.layer(caller.id).history.use(caller.sites.at(site),
+                                                   caller.execution))
+      continue; // Unreachable CFG site.
+    if (llvm::isa<llvm::InvokeInst>(call)) {
+      result.graph.addIssue(
+          "exceptional temporal call exits require edge-specific modeling");
+      continue;
     }
-  return issues;
+    TemporalHistory::connectDirectCall(result.graph, caller, site,
+                                       reinterpret_cast<std::uintptr_t>(call),
+                                       histories.at(callee));
+  }
+  timer.finish("usetracessa_calls");
 }
 
 } // namespace
 
 SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
-                                               const llvm::Module &module,
-                                               NativeHistoryMode mode) {
+                                                const llvm::Module &module,
+                                                NativeHistoryMode mode,
+                                                NativeHistoryOptions options) {
   SVFGConstructionInput input;
   std::map<const llvm::Function *, Layout> layouts;
+  PhaseTimer timer(options);
   const auto plan = planResources(svfg, module, mode);
+  timer.finish("usetracessa_plan");
   if (!plan.hasRequired) {
     SVFGHistoryResult result;
     result.graph.addIssue("required native source events are absent for the selected property");
@@ -522,10 +651,15 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
   }
   FunctionID nextFunction = 1;
   {
-    detail::InstructionLabels labels(module, [&](const llvm::Instruction &instruction) {
-      return mode == NativeHistoryMode::Full ? !llvm::isa<llvm::PHINode>(instruction) :
-                                             plan.keeps(instruction);
-    });
+    detail::InstructionLabels labels(
+        module,
+        [&](const llvm::Instruction &instruction) {
+          return mode == NativeHistoryMode::Full
+                     ? !llvm::isa<llvm::PHINode>(instruction)
+                     : plan.keeps(instruction);
+        },
+        options.instructionText);
+    timer.finish("usetracessa_labels");
     for (const auto &function : module) {
       if (function.isDeclaration()) continue;
       if (mode == NativeHistoryMode::Full)
@@ -534,14 +668,16 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
         layouts.emplace(&function, makeResourceLayout(function, nextFunction++, plan, labels));
     }
   }
+  timer.finish("usetracessa_layout");
   std::map<const llvm::Function *, llvm::DominatorTree> dominators;
   if (mode == NativeHistoryMode::Full)
     for (const auto &entry : layouts)
       dominators[entry.first].recalculate(*const_cast<llvm::Function *>(entry.first));
   if (mode != NativeHistoryMode::Full) {
     SVFGHistoryResult result;
-    appendTemporalFacts(result, svfg, layouts, 1, plan);
-    for (const auto &issue : callIssues(module)) result.graph.addIssue(issue);
+    appendTemporalFacts(result, svfg, layouts, 1, plan, options);
+    for (const auto &issue : plan.issues)
+      result.graph.addIssue(issue);
     if (!plan.universe.isUnknown())
       result.graph.setResourceUniverse(plan.universe.objects());
     return result;
@@ -577,7 +713,7 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
     input.nodes.push_back(std::move(located));
   }
 
-  for (auto issue : callIssues(module)) input.issues.push_back(std::move(issue));
+  input.issues = plan.issues;
 
   NativeID nextEdge = 1;
   for (const NativeNode *node : nodes) {
@@ -645,8 +781,10 @@ SVFGHistoryResult buildUseTraceSSAFromLotusSVFG(const analysis::SVFG &svfg,
   }
   input.functions.push_back(std::move(globals));
   for (const auto &item : layouts) input.functions.push_back(item.second.function);
+  timer.finish("usetracessa_native");
   auto result = SVFGImporter::build(input);
-  appendTemporalFacts(result, svfg, layouts, nextFunction, plan);
+  timer.finish("usetracessa_import");
+  appendTemporalFacts(result, svfg, layouts, nextFunction, plan, options);
   return result;
 }
 

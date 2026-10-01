@@ -4,6 +4,7 @@
 #include <deque>
 #include <map>
 #include <ostream>
+#include <queue>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -22,6 +23,15 @@ ID nextID(std::size_t size) {
 
 std::vector<ValueID> uniqueValues(const std::vector<ValueID> &values) {
   std::vector<ValueID> result;
+  result.reserve(values.size());
+  if (values.size() > 8) {
+    std::unordered_set<ValueID> seen;
+    seen.reserve(values.size());
+    for (auto value : values)
+      if (seen.insert(value).second)
+        result.push_back(value);
+    return result;
+  }
   for (ValueID v : values) {
     bool found = false;
     for (ValueID r : result) {
@@ -167,6 +177,14 @@ public:
       std::sort(users.begin(), users.end());
       users.erase(std::unique(users.begin(), users.end()), users.end());
     }
+    for (SiteID site = 0; site < G.Uses.size(); ++site) {
+      if (G.Uses[site].size() <= 8)
+        continue;
+      auto &index = G.WideUses[site];
+      for (ID i = 0; i < G.Uses[site].size(); ++i)
+        index.push_back({G.Uses[site][i].value, i});
+      std::sort(index.begin(), index.end());
+    }
   }
 
 private:
@@ -174,7 +192,8 @@ private:
   const Program &P;
   std::vector<RegionID> RPO;
   std::vector<ID> RPOIndex;
-  std::vector<std::vector<RegionID>> DomChildren, Frontier;
+  std::vector<std::vector<RegionID>> DomChildren;
+  std::vector<ID> DomDepth;
   std::vector<std::vector<RegionID>> DefBlocks, LiveSeeds;
   std::vector<std::vector<std::pair<ValueID, VersionID>>> Phis;
   std::vector<std::vector<std::pair<ValueID, VersionID>>> Psis;
@@ -266,9 +285,12 @@ private:
       }
     }
     DomChildren.resize(G.Regions.size());
+    DomDepth.resize(G.Regions.size());
     for (RegionID r : RPO)
-      if (r != entry)
+      if (r != entry) {
         DomChildren[G.IDom[r]].push_back(r);
+        DomDepth[r] = DomDepth[G.IDom[r]] + 1;
+      }
     G.DomIn.assign(G.Regions.size(), InvalidID);
     G.DomOut.assign(G.Regions.size(), InvalidID);
     ID clock = 0;
@@ -285,24 +307,6 @@ private:
         G.DomOut[f.first] = clock;
         stack.pop_back();
       }
-    }
-    Frontier.resize(G.Regions.size());
-    for (RegionID r : RPO) {
-      std::size_t livePreds = 0;
-      for (RegionID pred : G.Regions[r].predecessors)
-        livePreds += G.Regions[pred].reachable;
-      if (livePreds < 2)
-        continue;
-      for (RegionID pred : G.Regions[r].predecessors) {
-        if (!G.Regions[pred].reachable) continue;
-        for (RegionID runner = pred; runner != G.IDom[r];
-             runner = G.IDom[runner])
-          Frontier[runner].push_back(r);
-      }
-    }
-    for (auto &df : Frontier) {
-      std::sort(df.begin(), df.end());
-      df.erase(std::unique(df.begin(), df.end()), df.end());
     }
   }
 
@@ -363,7 +367,7 @@ private:
   void placePhis() {
     std::vector<bool> isDef(G.Regions.size(), false);
     std::vector<bool> isLive(G.Regions.size(), false);
-    std::vector<bool> isQueued(G.Regions.size(), false);
+    std::vector<bool> visitedTree(G.Regions.size(), false);
     std::vector<bool> hasPhi(G.Regions.size(), false);
 
     for (ValueID v = 0; v < P.values().size(); ++v) {
@@ -380,25 +384,52 @@ private:
           }
       }
 
-      std::vector<RegionID> phiWork = DefBlocks[v];
-      for (RegionID r : phiWork) isQueued[r] = true;
-
-      for (std::size_t i = 0; i < phiWork.size(); ++i) {
-        for (RegionID join : Frontier[phiWork[i]]) {
-          if (!isLive[join] || hasPhi[join]) continue;
-          hasPhi[join] = true;
-          VersionID phi = G.addNode(NodeKind::Phi, v, join, InvalidID);
-          Phis[join].push_back({v, phi});
-          if (!isQueued[join]) {
-            isQueued[join] = true;
-            phiWork.push_back(join);
+      // Compute the live iterated frontier directly, bottom-up on the
+      // dominator tree. Materializing every block's full frontier is costly
+      // for large CFGs even when there is only one execution-token variable.
+      using Priority = std::pair<ID, RegionID>;
+      std::priority_queue<Priority> pending;
+      std::vector<RegionID> touchedTree, touchedPhi, work;
+      for (auto r : DefBlocks[v]) {
+        pending.push({DomDepth[r], r});
+        visitedTree[r] = true;
+        touchedTree.push_back(r);
+      }
+      while (!pending.empty()) {
+        auto root = pending.top();
+        pending.pop();
+        work.push_back(root.second);
+        while (!work.empty()) {
+          auto current = work.back();
+          work.pop_back();
+          for (auto join : G.Regions[current].successors) {
+            if (!G.Regions[join].reachable || DomDepth[join] > root.first ||
+                hasPhi[join])
+              continue;
+            hasPhi[join] = true;
+            touchedPhi.push_back(join);
+            if (!isLive[join])
+              continue;
+            VersionID phi = G.addNode(NodeKind::Phi, v, join, InvalidID);
+            Phis[join].push_back({v, phi});
+            if (!isDef[join])
+              pending.push({DomDepth[join], join});
           }
+          for (auto child : DomChildren[current])
+            if (!visitedTree[child]) {
+              visitedTree[child] = true;
+              touchedTree.push_back(child);
+              work.push_back(child);
+            }
         }
       }
 
       for (RegionID r : DefBlocks[v]) isDef[r] = false;
       for (RegionID r : liveWork) isLive[r] = false;
-      for (RegionID r : phiWork) { isQueued[r] = false; hasPhi[r] = false; }
+      for (auto r : touchedTree)
+        visitedTree[r] = false;
+      for (auto r : touchedPhi)
+        hasPhi[r] = false;
     }
     // Preallocate psis; renaming fills operands, including backedge operands.
     for (RegionID r = 0; r < G.Regions.size(); ++r)
@@ -430,16 +461,12 @@ private:
         for (const auto &phi : Phis[r]) push(phi.first, phi.second);
         for (SiteID s : G.Regions[r].operations) {
           const Operation &op = P.operations()[s];
-          for (ValueID v : op.uses) {
+          for (std::size_t index = 0; index < op.uses.size(); ++index) {
+            ValueID v = op.uses[index];
             if (versions[v].empty())
               throw std::logic_error("UseTraceSSA: missing history during renaming");
-            VersionID before = versions[v].back(), after = InvalidID;
-            for (const auto &p : Psis[s]) {
-              if (p.first == v) {
-                after = p.second;
-                break;
-              }
-            }
+            VersionID before = versions[v].back(),
+                      after = Psis[s][index].second;
             G.Nodes[after].incoming.push_back({before, InvalidID});
             G.Uses[s].push_back({s, v, before, after});
             push(v, after);
@@ -484,6 +511,14 @@ Graph Graph::build(Program program) {
 
 const UseVersion *Graph::use(SiteID site, ValueID value) const {
   if (site >= Uses.size()) return nullptr;
+  if (Uses[site].size() > 8) {
+    const auto &index = WideUses.at(site);
+    auto found = std::lower_bound(index.begin(), index.end(),
+                                  std::make_pair(value, ID(0)));
+    return found != index.end() && found->first == value
+               ? &Uses[site][found->second]
+               : nullptr;
+  }
   for (const UseVersion &u : Uses[site])
     if (u.value == value) return &u;
   return nullptr;
@@ -541,6 +576,7 @@ bool Graph::verify(std::string *error) const {
       Definitions.size() != Input.values().size())
     return fail("inconsistent graph tables");
   std::vector<unsigned> psiBindings(Nodes.size(), 0);
+  std::vector<std::vector<VersionID>> expectedUsers(Nodes.size());
   for (VersionID id = 0; id < Nodes.size(); ++id) {
     const Node &n = Nodes[id];
     if (n.id != id || n.value >= Input.values().size() ||
@@ -579,18 +615,13 @@ bool Graph::verify(std::string *error) const {
             SitePosition[src.site] >= SitePosition[n.site])
           return fail("psi reads a future version");
       }
-      const auto &users = Users[in.version];
-      if (!std::binary_search(users.begin(), users.end(), id))
-        return fail("missing reverse adjacency");
-    }
-    for (VersionID u : Users[id]) {
-      if (u >= Nodes.size()) return fail("invalid reverse adjacency");
-      const auto &incoming = Nodes[u].incoming;
-      if (std::none_of(incoming.begin(), incoming.end(),
-                       [&](const Incoming &x) { return x.version == id; }))
-        return fail("spurious reverse adjacency");
+      auto &users = expectedUsers[in.version];
+      if (users.empty() || users.back() != id)
+        users.push_back(id);
     }
   }
+  if (expectedUsers != Users)
+    return fail("reverse adjacency mismatch");
   for (SiteID s = 0; s < Uses.size(); ++s) {
     if (!Regions[SiteRegion[s]].reachable) {
       if (!Uses[s].empty()) return fail("analyzed an unreachable use");
@@ -598,9 +629,10 @@ bool Graph::verify(std::string *error) const {
     }
     const auto &expected = Input.operations()[s].uses;
     if (Uses[s].size() != expected.size()) return fail("missing use binding");
-    for (ValueID v : expected) {
-      const UseVersion *u = use(s, v);
-      if (!u || u->site != s || u->before >= Nodes.size() ||
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+      ValueID v = expected[index];
+      const UseVersion *u = &Uses[s][index];
+      if (u->value != v || u->site != s || u->before >= Nodes.size() ||
           u->after >= Nodes.size())
         return fail("invalid use binding");
       const Node &psi = Nodes[u->after];

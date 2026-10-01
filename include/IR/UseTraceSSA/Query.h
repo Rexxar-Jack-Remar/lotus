@@ -20,7 +20,8 @@ enum class ContextMode {
 enum class QueryStatus { Found, NotFound, Unknown };
 
 /// Deterministic event automaton. May-events additionally have a no-effect
-/// transition. Product construction happens before context-sensitive solving.
+/// transition. Bounded/context-insensitive searches build the product lazily
+/// while solving; unbounded searches tabulate matched-call summaries.
 struct Automaton {
   ID states = 1;
   ID initial = 0;
@@ -40,6 +41,8 @@ struct Query {
   std::vector<FlowNodeID> traps;
   /// Must events block; May events retain the no-effect alternative.
   Event trapEvents = Event::None;
+  /// Optional event required on the accepting sink for the selected object.
+  Event sinkEvents = Event::None;
   ContextMode context = ContextMode::Realizable;
   /// Defaults to depth 3. Unset uses unbounded Dyck summaries. A supplied k
   /// retains call strings using Saber's limit semantics: k=0 merges context
@@ -115,6 +118,16 @@ struct ObjectBatchQuery {
   /// Retain shared path provenance for bounded-context and context-insensitive
   /// queries. Unbounded Dyck queries use runToSinks() for witness construction.
   bool retainWitnesses = false;
+  /// Existential search. Unvisited objects remain Unknown and enumeration is
+  /// explicitly incomplete when the first valid sink/object is accepted.
+  bool stopAfterFirstFinding = false;
+  /// Avoid exporting a dense public bitmap per sink for count-only scans.
+  bool retainSinkMasks = true;
+};
+struct ObjectSinkSummary {
+  FlowNodeID sink;
+  ObjectID representative;
+  std::size_t objects;
 };
 struct ObjectBatchStatistics {
   std::size_t productStates = 0, productEdges = 0, edgesExamined = 0;
@@ -129,6 +142,7 @@ struct ObjectBatchResult {
   ObjectMask found, notFound, unknown;
   /// Accepted masks per sink allow one shared scan with lazy witnesses.
   std::map<FlowNodeID, ObjectMask> foundAt;
+  std::vector<ObjectSinkSummary> sinks;
   ObjectBatchStatistics statistics;
   /// Stronger than unknown.none(): a budget can stop enumeration after every
   /// object already has one witness, while other accepting sites remain unseen.

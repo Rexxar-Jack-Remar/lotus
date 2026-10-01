@@ -1,9 +1,11 @@
 #include "IR/UseTraceSSA/TraceFlowGraph.h"
+
 #include <algorithm>
 #include <iomanip>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace lotus {
 namespace usetracessa {
@@ -61,19 +63,31 @@ ObjectSet ObjectSet::known(std::vector<ObjectID> objects) {
   objects.erase(std::unique(objects.begin(), objects.end()), objects.end());
   ObjectSet result;
   result.Unknown = false;
-  result.Objects = std::move(objects);
+  if (!objects.empty())
+    result.Objects =
+        std::make_shared<const std::vector<ObjectID>>(std::move(objects));
   return result;
 }
+const std::vector<ObjectID> &ObjectSet::objects() const {
+  static const std::vector<ObjectID> empty;
+  return Objects ? *Objects : empty;
+}
 bool ObjectSet::contains(ObjectID object) const {
-  return Unknown || std::binary_search(Objects.begin(), Objects.end(), object);
+  return Unknown ||
+         std::binary_search(objects().begin(), objects().end(), object);
 }
 bool ObjectSet::intersects(const ObjectSet &other) const {
   if (empty() || other.empty()) return false;
   if (Unknown || other.Unknown) return true;
+  const auto &left = objects(), &right = other.objects();
   std::size_t i = 0, j = 0;
-  while (i < Objects.size() && j < other.Objects.size()) {
-    if (Objects[i] == other.Objects[j]) return true;
-    if (Objects[i] < other.Objects[j]) ++i; else ++j;
+  while (i < left.size() && j < right.size()) {
+    if (left[i] == right[j])
+      return true;
+    if (left[i] < right[j])
+      ++i;
+    else
+      ++j;
   }
   return false;
 }
@@ -101,8 +115,8 @@ FlowEdgeID TraceFlowGraph::addEdge(FlowEdge edge) {
 void TraceFlowGraph::addHistory(FunctionID function, std::string name, Graph history) {
   if (function == InvalidID || Layers.count(function))
     throw std::invalid_argument("UseTraceSSA: duplicate/invalid layer ID");
-  std::string error;
-  if (!history.verify(&error)) throw std::invalid_argument(error);
+  // Graph::build verifies before returning. Graph's representation is private
+  // and immutable afterwards, so importing it must not repeat that full pass.
   HistoryLayer entry;
   entry.function = function; entry.name = std::move(name);
   entry.history = std::move(history);
@@ -175,14 +189,21 @@ EffectiveEvent TraceFlowGraph::effectiveEvent(FlowNodeID id, ObjectID object) co
 std::vector<ObjectID> TraceFlowGraph::resourceCandidates() const {
   if (ResourceUniverse) return *ResourceUniverse;
   std::vector<ObjectID> result;
+  std::unordered_set<const std::vector<ObjectID> *> guards;
+  bool unknown = false;
   for (const auto &n : Nodes) for (const auto &effect : n.effects) {
-    if (effect.objects.isUnknown()) result.push_back(UnknownResource);
-    else result.insert(result.end(), effect.objects.objects().begin(),
-                       effect.objects.objects().end());
+      if (effect.objects.isUnknown())
+        unknown = true;
+      else if (guards.insert(&effect.objects.objects()).second)
+        result.insert(result.end(), effect.objects.objects().begin(),
+                      effect.objects.objects().end());
   }
   for (const auto &edge : Edges)
-    if (!edge.objects.isUnknown())
+    if (!edge.objects.isUnknown() &&
+        guards.insert(&edge.objects.objects()).second)
       result.insert(result.end(), edge.objects.objects().begin(), edge.objects.objects().end());
+  if (unknown)
+    result.push_back(UnknownResource);
   std::sort(result.begin(), result.end());
   result.erase(std::unique(result.begin(), result.end()), result.end());
   return result;
@@ -217,6 +238,10 @@ void TraceFlowGraph::setNative(FlowNodeID id, NativeID native) {
   if (n.native != NoNativeID && n.native != native)
     throw std::invalid_argument("UseTraceSSA: conflicting native node provenance");
   n.native = native; ++Revision;
+}
+void TraceFlowGraph::setSourceLocation(FlowNodeID id, std::string location) {
+  Nodes.at(id).sourceLocation = std::move(location);
+  ++Revision;
 }
 void TraceFlowGraph::disableEdge(FlowEdgeID id) {
   Edges.at(id).enabled = false; ResourceUniverse.reset(); ++Revision;
@@ -307,11 +332,14 @@ void TraceFlowGraph::printJSON(std::ostream &out) const {
   }
   out << ",\"nodes\":[";
   for (const auto &n : Nodes) {
-    out << (n.id ? "," : "") << "{\"id\":" << n.id << ",\"label\":" << quoted(n.label)
+    out << (n.id ? "," : "") << "{\"id\":" << n.id
+        << ",\"label\":" << quoted(n.label)
+        << ",\"source_location\":" << quoted(n.sourceLocation)
         << ",\"function\":" << n.function << ",\"version\":" << n.version
         << ",\"native\":" << quoted(std::to_string(n.native))
         << ",\"events\":" << static_cast<std::uint32_t>(n.events)
-        << ",\"certainty\":" << quoted(n.certainty == Certainty::Must ? "must" : "may")
+        << ",\"certainty\":"
+        << quoted(n.certainty == Certainty::Must ? "must" : "may")
         << ",\"effects\":[";
     bool first = true;
     for (const auto &effect : n.effects) {

@@ -1,5 +1,11 @@
 #include "IR/UseTraceSSA/LLVMImporter.h"
 
+#include "IR/UseTraceSSA/InstructionLabels.h"
+
+#include <memory>
+#include <stdexcept>
+#include <utility>
+
 #include <llvm/IR/Argument.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
@@ -11,9 +17,6 @@
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <stdexcept>
-#include <utility>
 
 namespace lotus {
 namespace usetracessa {
@@ -101,6 +104,38 @@ LLVMHistoryResult::uses(const llvm::Use &operand) const {
 
 LLVMHistoryResult LLVMHistoryBuilder::build(const llvm::Function &function,
                                    LLVMHistoryOptions options) {
+  return buildImpl(function, options, nullptr);
+}
+
+std::vector<LLVMHistoryResult>
+LLVMHistoryBuilder::build(const llvm::Module &module,
+                          LLVMHistoryOptions options) {
+  std::string diagnostic;
+  llvm::raw_string_ostream diagnostics(diagnostic);
+  if (llvm::verifyModule(module, &diagnostics)) {
+    diagnostics.flush();
+    throw std::invalid_argument("UseTraceSSA: invalid LLVM module: " +
+                                diagnostic);
+  }
+  detail::InstructionLabels labels(
+      module,
+      [](const llvm::Instruction &instruction) {
+        return !llvm::isa<llvm::PHINode>(instruction) &&
+               !llvm::isa<llvm::DbgInfoIntrinsic>(instruction);
+      },
+      true, false);
+  std::vector<LLVMHistoryResult> results;
+  llvm::ModuleSlotTracker slots(&module, false);
+  for (const auto &function : module)
+    if (!function.isDeclaration())
+      results.push_back(buildImpl(function, options, &labels, true, &slots));
+  return results;
+}
+
+LLVMHistoryResult LLVMHistoryBuilder::buildImpl(
+    const llvm::Function &function, LLVMHistoryOptions options,
+    const detail::InstructionLabels *sharedLabels, bool verified,
+    llvm::ModuleSlotTracker *sharedSlots) {
   LLVMHistoryResult result;
   result.Function = &function;
   Program program;
@@ -110,13 +145,27 @@ LLVMHistoryResult LLVMHistoryBuilder::build(const llvm::Function &function,
   }
   std::string diagnostic;
   llvm::raw_string_ostream diagnostics(diagnostic);
-  if (llvm::verifyFunction(function, &diagnostics)) {
+  if (!verified && llvm::verifyFunction(function, &diagnostics)) {
     diagnostics.flush();
     throw std::invalid_argument("UseTraceSSA: invalid LLVM function: " + diagnostic);
   }
 
-  llvm::ModuleSlotTracker slots(function.getParent());
+  // Operand names need local slots, not a rescan of all function metadata.
+  llvm::ModuleSlotTracker localSlots(function.getParent(), false);
+  auto &slots = sharedSlots ? *sharedSlots : localSlots;
   slots.incorporateFunction(function);
+  std::unique_ptr<detail::InstructionLabels> labels;
+  if (!sharedLabels && function.getParent())
+    labels = std::make_unique<detail::InstructionLabels>(
+        *function.getParent(),
+        [&](const llvm::Instruction &instruction) {
+          return instruction.getFunction() == &function &&
+                 !llvm::isa<llvm::PHINode>(instruction) &&
+                 !llvm::isa<llvm::DbgInfoIntrinsic>(instruction);
+        },
+        true, false);
+  if (!sharedLabels)
+    sharedLabels = labels.get();
   for (const llvm::BasicBlock &block : function)
     result.BlockIDs[&block] = program.addBlock(valueName(block, slots));
   auto addValue = [&](const llvm::Value &value) {
@@ -207,8 +256,10 @@ LLVMHistoryResult LLVMHistoryBuilder::build(const llvm::Function &function,
           definitions.push_back(found->second);
       }
       result.InstructionSites[&instruction] =
-          addSite(blockID, InvalidID, instructionText(instruction, slots), operands,
-                  std::move(definitions));
+          addSite(blockID, InvalidID,
+                  sharedLabels ? sharedLabels->get(instruction)
+                               : instructionText(instruction, slots),
+                  operands, std::move(definitions));
       if (found != result.ValueIDs.end() &&
           llvm::isa<llvm::InvokeInst>(instruction)) {
         // LLVM defines the result on the normal edge, before phi operand uses.

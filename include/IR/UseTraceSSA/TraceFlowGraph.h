@@ -2,8 +2,10 @@
 #define LOTUS_IR_USETRACESSA_TRACEFLOWGRAPH_H
 
 #include "IR/UseTraceSSA/UseTraceSSA.h"
+
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -28,13 +30,14 @@ public:
   static ObjectSet unknown();
   static ObjectSet known(std::vector<ObjectID> objects);
   bool isUnknown() const { return Unknown; }
-  bool empty() const { return !Unknown && Objects.empty(); }
+  bool empty() const { return !Unknown && !Objects; }
   bool contains(ObjectID object) const;
   bool intersects(const ObjectSet &other) const;
-  const std::vector<ObjectID> &objects() const { return Objects; }
+  const std::vector<ObjectID> &objects() const;
+
 private:
   bool Unknown = true;
-  std::vector<ObjectID> Objects;
+  std::shared_ptr<const std::vector<ObjectID>> Objects;
 };
 
 enum class Event : std::uint32_t {
@@ -72,6 +75,8 @@ enum class FlowKind { History, Direct, Memory, Call, Return, Summary,
 struct FlowNode {
   FlowNodeID id = InvalidFlowID;
   std::string label;
+  /// Structured debug location; instruction operands can also contain brackets.
+  std::string sourceLocation;
   FunctionID function = InvalidID;
   VersionID version = InvalidID;
   NativeID native = NoNativeID;
@@ -134,6 +139,7 @@ public:
   void setResourceUniverse(std::vector<ObjectID> objects);
   FlowStatistics statistics() const;
   void setNative(FlowNodeID id, NativeID native);
+  void setSourceLocation(FlowNodeID id, std::string location);
   void disableEdge(FlowEdgeID id);
   void addIssue(std::string issue);
   bool complete() const { return Issues.empty(); }

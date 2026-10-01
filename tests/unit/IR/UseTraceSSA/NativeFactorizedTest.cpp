@@ -1,12 +1,15 @@
-#include "IR/UseTraceSSA/SVFGBridge.h"
 #include "IR/UseTraceSSA/DefectDetector.h"
 #include "IR/UseTraceSSA/LLVMImporter.h"
+#include "IR/UseTraceSSA/SVFGBridge.h"
+
+#include <sstream>
+
+#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/SourceMgr.h>
-#include <gtest/gtest.h>
 
 using namespace lotus::usetracessa;
 namespace {
@@ -32,6 +35,17 @@ TEST(UseTraceSSANative, LabelsPreserveUnnamedValuesAndMetadata) {
     !1 = !{i32 29}
   )IR", diagnostic, context);
   ASSERT_TRUE(module);
+  auto moduleHistories = LLVMHistoryBuilder::build(*module);
+  ASSERT_EQ(moduleHistories.size(), 2u);
+  for (const auto &history : moduleHistories) {
+    auto single = LLVMHistoryBuilder::build(history.function());
+    ASSERT_EQ(history.graph().program().operations().size(),
+              single.graph().program().operations().size());
+    for (std::size_t i = 0; i < history.graph().program().operations().size();
+         ++i)
+      EXPECT_EQ(history.graph().program().operations()[i].label,
+                single.graph().program().operations()[i].label);
+  }
   std::string moduleText;
   llvm::raw_string_ostream moduleOut(moduleText);
   module->print(moduleOut, nullptr);
@@ -276,5 +290,91 @@ TEST(UseTraceSSANative, NoReturnAndRecursion) {
       EXPECT_EQ(batch.status(object),QueryEngine(r.graph).run(q).status);
     }
   }
+}
+TEST(UseTraceSSANative, ContractsEmptyChainsAndRetainsDeadCycles) {
+  std::ostringstream text;
+  text << "declare void @free(i8*)\ndefine i8 @f(i8* %p) {\nentry:\n"
+          "call void @free(i8* %p)\nbr label %b0\n";
+  for (unsigned i = 0; i < 100; ++i)
+    text << "b" << i << ":\nbr label %"
+         << (i == 99 ? "done" : "b" + std::to_string(i + 1)) << '\n';
+  text << "done:\n%v = load i8, i8* %p\nret i8 %v\n"
+          "dead1:\nbr label %dead2\ndead2:\nbr label %dead1\n}\n";
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  auto module = llvm::parseAssemblyString(text.str(), diagnostic, context);
+  ASSERT_TRUE(module);
+  lotus::analysis::SVFG svfg;
+  auto result = buildUseTraceSSAFromLotusSVFG(svfg, *module,
+                                              NativeHistoryMode::UseAfterFree);
+  ASSERT_TRUE(result.graph.verify());
+  const auto &history =
+      result.graph.layer(result.graph.nodes().front().function).history;
+  EXPECT_EQ(history.program().blocks().size(), 3u);
+  EXPECT_TRUE(DefectDetector(result.graph)
+                  .run(DefectKind::UseAfterFree)
+                  .result.found());
+}
+
+TEST(UseTraceSSANative, CompactLabelsAndSparseProvenancePreserveEffects) {
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  auto module = llvm::parseAssemblyString(R"IR(
+    declare void @free(i8*)
+    define i8 @f(i8* %p) {
+      %unrelated = add i32 1, 2
+      call void @free(i8* %p)
+      %v = load i8, i8* %p
+      ret i8 %v
+    }
+  )IR",
+                                          diagnostic, context);
+  ASSERT_TRUE(module);
+  auto &block = module->getFunction("f")->getEntryBlock();
+  auto it = block.begin();
+  auto *unrelated = &*it++;
+  auto *release = &*it++;
+  auto *use = &*it;
+  lotus::analysis::SVFG svfg;
+  svfg.addNode(new lotus::analysis::CopySVFGNode(1, nullptr, unrelated));
+  svfg.addNode(new lotus::analysis::CopySVFGNode(90, nullptr, release));
+  svfg.addNode(new lotus::analysis::CopySVFGNode(50, nullptr, release));
+  svfg.addNode(new lotus::analysis::CopySVFGNode(99, nullptr, use));
+  auto full = buildUseTraceSSAFromLotusSVFG(svfg, *module,
+                                            NativeHistoryMode::UseAfterFree);
+  auto compact = buildUseTraceSSAFromLotusSVFG(
+      svfg, *module, NativeHistoryMode::UseAfterFree, {false});
+  ASSERT_EQ(full.graph.nodes().size(), compact.graph.nodes().size());
+  EXPECT_EQ(full.graph.edges().size(), compact.graph.edges().size());
+  for (std::size_t i = 0; i < full.graph.nodes().size(); ++i) {
+    EXPECT_EQ(full.graph.node(i).native, compact.graph.node(i).native);
+    EXPECT_EQ(full.graph.node(i).effects.size(),
+              compact.graph.node(i).effects.size());
+  }
+  auto report = DefectDetector(compact.graph).run(DefectKind::UseAfterFree);
+  ASSERT_TRUE(report.result.found());
+  EXPECT_EQ(report.nativeWitness, std::vector<NativeID>({50, 99}));
+  EXPECT_EQ(compact.graph.node(report.sink).label.find("load i8"),
+            std::string::npos);
+}
+
+TEST(UseTraceSSANative, UnreachableIsNotANormalLeakExit) {
+  llvm::LLVMContext context;
+  llvm::SMDiagnostic diagnostic;
+  auto module = llvm::parseAssemblyString(R"IR(
+    declare i8* @malloc(i64)
+    define void @f() {
+      %p = call i8* @malloc(i64 8)
+      unreachable
+    }
+  )IR",
+                                          diagnostic, context);
+  ASSERT_TRUE(module);
+  lotus::analysis::SVFG svfg;
+  auto result = buildUseTraceSSAFromLotusSVFG(svfg, *module,
+                                              NativeHistoryMode::MemoryLeak);
+  EXPECT_TRUE(result.graph.select(Event::Exit).empty());
+  EXPECT_EQ(DefectDetector(result.graph).scan(DefectKind::MemoryLeak).status,
+            QueryStatus::Unknown);
 }
 } // namespace

@@ -71,7 +71,20 @@ and universal masks. Public results retain ordinary `ObjectMask` bit vectors.
 Set `ObjectBatchQuery::retainWitnesses` to retain provenance for bounded-context,
 context-insensitive, or call-free queries. When `batch.hasWitnesses()` is true,
 `batch.witness(sink, object)` follows a shared proof chain without another search.
-Proofs are shared across objects; only acceptance records carry object masks.
+Proofs are shared across objects; acceptance records and choice branches carry
+object masks.
+Pending updates to the same state are coalesced. A shared choice proof preserves
+the originating path for every object when those updates came from different
+paths. Small universes use inline masks; sparse subsets of large universes use
+sorted bit indices or sparse exceptions to the universe. Dense masks remain
+available for other dense sets. Immutable graph ObjectSets share their sorted
+storage, and candidate enumeration visits shared guards only once.
+
+Bounded and context-insensitive queries expand product transitions directly
+from reachable search states. Call strings are interned, and mismatched returns
+do not materialize unreachable products. Unbounded queries tabulate balanced
+rows from callee entries and expose matched-call edges to the final traversal;
+they do not compute local reachability between every pair of product states.
 
 Queries default to `contextLimit=3`. Resetting the optional limit uses unbounded
 Dyck summaries. The CLI selects call/return matching with `--context=sensitive`
@@ -105,6 +118,18 @@ from a root function is treated as escaped; ownership transfer through globals
 and containers is not fully modeled. Direct release of an acquisition result is
 recognized as a definite close/free.
 
+`scan(kind)` keeps the existing eager witness API. Use
+`scan(kind, {false, true, false})` to retain deferred proofs, then
+`scan.materialize(index, graph)` to recover a report against the unchanged graph.
+`scan(kind, {false, false, false})` returns sink/object sets without retaining or
+rendering paths. Set the fourth option (`retainObjects`) to false to keep only
+sink, representative object and `objectCount`, avoiding per-sink dense bitmap
+exports and object lists. `DefectReport::sink` always identifies the accepted site, even
+when witness rendering is truncated. `findAny(kind)` stops after the first valid
+resource finding and records `first-finding` as an intentional incomplete
+enumeration; unvisited objects remain Unknown. Resource acceptance requires the
+target event on the selected object at the sink.
+
 ## Build and use
 
 ```sh
@@ -118,6 +143,23 @@ The native importer uses upstream SVFG object facts and LLVM site ordering.
 Direct internal calls, recursion and multiple callers share temporal ports.
 Instruction labels are captured in one module printing pass, preserving LLVM
 formatting and source locations without scanning module globals for every label.
+Resource layouts contract empty single-successor CFG chains, preserving entry,
+event/call sites, branches, terminal blocks and empty cycles. Only normal return
+ports receive native resource Exit events. Native provenance is retained only
+for event sites, and full-overlay imports bucket nodes and edges by function.
+History construction computes the live iterated dominance frontier directly,
+avoiding full frontier tables and duplicate validation.
+
+For checks, `--quiet` also skips full LLVM instruction formatting and witness
+materialization. Opcode/site labels and structured debug locations preserve site
+identity; array operands are never mistaken for source locations. Use
+`--full-labels` to request exact instruction text with `--quiet`. The default C++
+native builder and graph dumps still capture exact labels. `--timing` includes
+planning, labels, layout, provenance, history and call-splicing phases, plus
+separate symbolic search and report-generation times.
+The scalar LLVM importer also captures instruction text in one printing pass;
+`LLVMHistoryBuilder::build(module)` shares that pass across all definitions and
+verifies the module once.
 Taint policies and complete external-call semantics require client models.
 JSON schema 2 serializes guarded effects, using `null` for TOP and `[]` for
 BOTTOM. The API and CLI expose graph, query and mask-operation statistics.

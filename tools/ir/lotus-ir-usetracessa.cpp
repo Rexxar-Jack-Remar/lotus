@@ -43,6 +43,9 @@ llvm::cl::opt<bool> Timing("timing",
                             llvm::cl::desc("Print analysis phase timings to stderr"));
 llvm::cl::opt<bool> Quiet("quiet",
                            llvm::cl::desc("Suppress issue and witness details"));
+llvm::cl::opt<bool> FullLabels(
+    "full-labels",
+    llvm::cl::desc("Capture exact LLVM instruction labels even with --quiet"));
 cli::QueryOptionsParser QueryOptionFlags;
 llvm::cl::opt<unsigned> Source("source-node",
                                 llvm::cl::desc("SVFG source node ID for a flow query"),
@@ -64,12 +67,8 @@ std::string findingSite(const FlowNode &node) {
   const std::string &label = node.label;
   const auto functionEnd = label.find(".temporal:");
   const std::string function = label.substr(0, functionEnd);
-  const auto open = label.rfind(" [");
-  if (open != std::string::npos) {
-    const auto close = label.find(']', open + 2);
-    if (close != std::string::npos)
-      return function + ":" + label.substr(open + 2, close - open - 2);
-  }
+  if (!node.sourceLocation.empty())
+    return function + ':' + node.sourceLocation;
   return label;
 }
 } // namespace
@@ -147,7 +146,14 @@ int main(int argc, char **argv) {
                              Check == "memory-leak" ? NativeHistoryMode::MemoryLeak :
                              Check == "file-leak" ? NativeHistoryMode::FileLeak :
                                                           NativeHistoryMode::Full;
-    auto result = buildUseTraceSSAFromLotusSVFG(*svfg, *module, mode);
+    NativeHistoryOptions historyOptions;
+    historyOptions.instructionText = Check.empty() || !Quiet || FullLabels;
+    if (Timing)
+      historyOptions.phaseTiming = [](const char *phase, double elapsed) {
+        std::cerr << "timing_ms " << phase << '=' << elapsed << '\n';
+      };
+    auto result =
+        buildUseTraceSSAFromLotusSVFG(*svfg, *module, mode, historyOptions);
     const auto builtHistory = Clock::now();
     if (Timing)
       std::cerr << "timing_ms usetracessa=" << millis(builtSVFG, builtHistory) << '\n';
@@ -160,17 +166,23 @@ int main(int argc, char **argv) {
                         Check == "use-after-free" ? DefectKind::UseAfterFree :
                         Check == "memory-leak" ? DefectKind::MemoryLeak :
                                                  DefectKind::FileLeak;
-      checkReport = DefectDetector(result.graph, options.depth, options.limits, options.mode)
-                        .scan(kind);
+      checkReport = DefectDetector(result.graph, options.depth, options.limits,
+                                   options.mode)
+                        .scan(kind, {!Quiet, !Quiet, false, !Quiet});
       completion.merge(checkReport->completion);
+      if (Timing)
+        std::cerr << "timing_ms check_search="
+                  << checkReport->searchMilliseconds
+                  << " check_reporting=" << checkReport->reportingMilliseconds
+                  << '\n';
       for (std::size_t index = 0; index < checkReport->findings.size(); ++index) {
-        const auto &witness = checkReport->findings[index].result.nodes;
-        if (witness.empty()) continue;
-        const auto &sink = result.graph.node(witness.back());
+        const auto &sink = result.graph.node(checkReport->findings[index].sink);
         std::string site = findingSite(sink);
         findingGroups[site].push_back(index);
-        const auto &objects = checkReport->findings[index].objects;
-        findingObjects[site].insert(objects.begin(), objects.end());
+        if (!Quiet) {
+          const auto &objects = checkReport->findings[index].objects;
+          findingObjects[site].insert(objects.begin(), objects.end());
+        }
       }
     }
     if (query) {

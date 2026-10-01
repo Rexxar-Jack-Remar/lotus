@@ -8,6 +8,8 @@
 namespace llvm {
 class BasicBlock;
 class Function;
+class Module;
+class ModuleSlotTracker;
 class Instruction;
 class Use;
 class Value;
@@ -15,6 +17,9 @@ class Value;
 
 namespace lotus {
 namespace usetracessa {
+namespace detail {
+class InstructionLabels;
+}
 
 struct LLVMHistoryOptions {
   /// False: track all eligible SSA values. True: track pointer values only.
@@ -92,6 +97,16 @@ public:
   /// Function declarations yield an empty graph.
   static LLVMHistoryResult build(const llvm::Function &function,
                             LLVMHistoryOptions options = {});
+  /// Import all definitions in module order with one shared label-print pass.
+  static std::vector<LLVMHistoryResult> build(const llvm::Module &module,
+                                              LLVMHistoryOptions options = {});
+
+private:
+  static LLVMHistoryResult buildImpl(const llvm::Function &function,
+                                     LLVMHistoryOptions options,
+                                     const detail::InstructionLabels *labels,
+                                     bool verified = false,
+                                     llvm::ModuleSlotTracker *slots = nullptr);
 };
 
 // ---------------------------------------------------------------------------

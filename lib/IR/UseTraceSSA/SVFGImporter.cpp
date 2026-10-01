@@ -70,7 +70,8 @@ SVFGImportResult SVFGImporter::append(TraceFlowGraph &graph, const SVFGSnapshot 
     edge.guard = e.guard;
     pending.emplace(e.id, std::move(edge));
   }
-  for (const auto &p : pending) result.edges.emplace(p.first, graph.addEdge(p.second));
+  for (auto &p : pending)
+    result.edges.emplace(p.first, graph.addEdge(std::move(p.second)));
   for (const auto &issue : view.issues) graph.addIssue(issue);
   return result;
 }
@@ -83,6 +84,8 @@ SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
   SVFGHistoryResult out;
   std::map<FunctionID, const FunctionLayout *> functions;
   std::map<NativeID, const LocatedSVFGNode *> nodes;
+  std::map<FunctionID, std::vector<const LocatedSVFGNode *>> functionNodes;
+  std::map<FunctionID, std::vector<const LocatedSVFGEdge *>> functionEdges;
   std::set<NativeID> edgeIDs;
   for (const auto &f : in.functions)
     if (f.id == InvalidID || !functions.emplace(f.id, &f).second)
@@ -94,6 +97,8 @@ SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
         n.definitionSite >= functions.at(n.function)->control.operations().size())
       throw std::invalid_argument("UseTraceSSA: definition site outside function");
   }
+  for (const auto &entry : nodes)
+    functionNodes[entry.second->function].push_back(entry.second);
   std::map<NativeID, SiteID> consumers;
   for (const auto &e : in.edges) {
     if (e.id == NoNativeID || !edgeIDs.insert(e.id).second ||
@@ -107,6 +112,7 @@ SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
       if (site == InvalidID || site >= functions.at(to.function)->control.operations().size())
         throw std::invalid_argument("UseTraceSSA: local transfer has no consumer site");
       consumers[e.id] = site;
+      functionEdges[from.function].push_back(&e);
     } else if (e.useEvents != Event::None || !e.useEffects.empty()) {
       throw std::invalid_argument("UseTraceSSA: boundary edge cannot invent a local use event");
     }
@@ -120,9 +126,8 @@ SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
     std::vector<std::vector<ValueID>> definitions(f.control.operations().size());
     std::vector<std::vector<ValueID>> uses(f.control.operations().size());
     std::vector<ValueID> entry;
-    for (const auto &np : nodes) {
-      const auto &n = *np.second;
-      if (n.function != f.id) continue;
+    for (const auto *node : functionNodes[f.id]) {
+      const auto &n = *node;
       auto value = p.addValue(n.label.empty() ? "svfg:" + std::to_string(n.id) : n.label);
       out.channels.emplace(n.id, value);
       if (n.definitionSite == InvalidID) entry.push_back(value);
@@ -131,13 +136,15 @@ SVFGHistoryResult SVFGImporter::build(const SVFGConstructionInput &in) {
     if (p.blocks().empty() && !entry.empty())
       throw std::invalid_argument("UseTraceSSA: entry definitions in an empty layout");
     if (!p.blocks().empty()) p.addOperation(p.entry(), "SVFG live-on-entry", {}, entry);
-    for (const auto &e : in.edges)
-      if (!e.boundary && nodes.at(e.from)->function == f.id)
-        uses[consumers.at(e.id)].push_back(out.channels.at(e.from));
+    for (const auto *e : functionEdges[f.id])
+      uses[consumers.at(e->id)].push_back(out.channels.at(e->from));
     auto add = [&](SiteID old, BlockID block, EdgeID edge) {
       const auto &label = f.control.operations().at(old).label;
-      auto now = edge == InvalidID ? p.addOperation(block, label, uses[old], definitions[old]) :
-                                     p.addEdgeOperation(edge, label, uses[old], definitions[old]);
+      auto now = edge == InvalidID
+                     ? p.addOperation(block, label, std::move(uses[old]),
+                                      std::move(definitions[old]))
+                     : p.addEdgeOperation(edge, label, std::move(uses[old]),
+                                          std::move(definitions[old]));
       out.sites[f.id][old] = now;
     };
     for (BlockID b = 0; b < f.control.blocks().size(); ++b)

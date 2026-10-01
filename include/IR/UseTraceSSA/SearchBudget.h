@@ -15,7 +15,13 @@ struct SearchLimits {
   void apply(Query &query) const;
 };
 
-enum class SearchStopReason { None, ProductStates, SummaryPairs, WitnessUnavailable };
+enum class SearchStopReason {
+  None,
+  ProductStates,
+  SummaryPairs,
+  WitnessUnavailable,
+  FirstFinding
+};
 
 inline const char *searchStopReasonName(SearchStopReason reason) {
   switch (reason) {
@@ -23,6 +29,8 @@ inline const char *searchStopReasonName(SearchStopReason reason) {
   case SearchStopReason::ProductStates: return "max-product-states";
   case SearchStopReason::SummaryPairs: return "max-summary-pairs";
   case SearchStopReason::WitnessUnavailable: return "witness-unavailable";
+  case SearchStopReason::FirstFinding:
+    return "first-finding";
   }
   return "invalid";
 }

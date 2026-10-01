@@ -23,6 +23,12 @@ void bound(std::size_t n, std::size_t max, SearchStopReason reason) {
 }
 struct ProductNode { FlowNodeID node; ID state; };
 struct ProductEdge { ID from, to; FlowEdgeID original; };
+struct ProductTransition {
+  FlowNodeID node;
+  ID state;
+  FlowEdgeID original;
+  ID edge = InvalidID;
+};
 enum class RecipeKind { Epsilon, Edge, Concat, Match };
 struct Recipe {
   ID from, to;
@@ -126,40 +132,78 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
         std::find(out.begin(), out.end(), state) == out.end()) out.push_back(state);
     return out;
   };
+  auto validSink = [&](FlowNodeID id) {
+    return q.sinkEvents == Event::None ||
+           hasEvent(q.memoryObject
+                        ? G.effectiveEvent(id, *q.memoryObject).events
+                        : G.node(id).events,
+                    q.sinkEvents);
+  };
   std::vector<ProductNode> pn;
   std::vector<ProductEdge> pe;
   std::vector<std::vector<ID>> pout;
+  std::vector<std::vector<ProductTransition>> transitions;
+  std::vector<bool> expanded;
   std::unordered_map<detail::FlowStateKey, ID, detail::FlowStateHash> products;
   std::vector<ID> roots;
   bool incomplete = !G.complete(), limited = false, hasContext = false;
+  const bool directTraversal =
+      q.contextLimit || q.context == ContextMode::Insensitive;
   auto product = [&](FlowNodeID node, ID state) -> ID {
     detail::FlowStateKey k{node, state};
     auto it = products.find(k);
-    if (it != products.end()) return it->second;
+    if (it != products.end())
+      return it->second;
     bound(pn.size(), q.maxProductStates, SearchStopReason::ProductStates);
     ID id = asID(pn.size());
-    products.emplace(k, id); pn.push_back({node, state}); pout.emplace_back();
+    products.emplace(k, id);
+    pn.push_back({node, state});
+    pout.emplace_back();
+    transitions.emplace_back();
+    expanded.push_back(false);
+    return id;
+  };
+  auto expand = [&](ID id) {
+    if (expanded[id])
+      return;
+    expanded[id] = true;
+    ProductNode n = pn[id];
+    for (auto eid : G.outgoing(n.node)) {
+      ++result.edgesExamined;
+      const auto &e = G.edge(eid);
+      if (!e.enabled || e.objects.empty() || (q.edgeFilter && !q.edgeFilter(e)))
+        continue;
+      if (q.memoryObject && !e.objects.contains(*q.memoryObject))
+        continue;
+      if (e.kind == FlowKind::Thread && !q.includeThreadEdges) {
+        incomplete = true;
+        continue;
+      }
+      for (auto state : effects(e.to, n.state))
+        transitions[id].push_back({e.to, state, eid});
+    }
+  };
+  auto materialize = [&](ID from, std::size_t index) -> ID {
+    ProductTransition transition = transitions[from][index];
+    if (transition.edge != InvalidID)
+      return transition.edge;
+    ID target = product(transition.node, transition.state),
+       id = asID(pe.size());
+    pe.push_back({from, target, transition.original});
+    pout[from].push_back(id);
+    transitions[from][index].edge = id;
+    auto kind = G.edge(transition.original).kind;
+    hasContext |= kind == FlowKind::Call || kind == FlowKind::Return;
     return id;
   };
   try {
     for (auto src : q.sources)
       for (auto state : effects(src, q.automaton.initial))
         roots.push_back(product(src, state));
-    for (std::size_t i = 0; i < pn.size(); ++i) {
-      // product() can reallocate pn: do not retain references into it.
-      ProductNode n = pn[i];
-      for (auto eid : G.outgoing(n.node)) {
-        ++result.edgesExamined;
-        const auto &e = G.edge(eid);
-        if (!e.enabled || e.objects.empty() || (q.edgeFilter && !q.edgeFilter(e))) continue;
-        if (q.memoryObject && !e.objects.contains(*q.memoryObject)) continue;
-        if (e.kind == FlowKind::Thread && !q.includeThreadEdges) { incomplete = true; continue; }
-        for (auto state : effects(e.to, n.state)) {
-          ID target = product(e.to, state), id = asID(pe.size());
-          pe.push_back({asID(i), target, eid}); pout[i].push_back(id);
-          hasContext |= e.kind == FlowKind::Call || e.kind == FlowKind::Return;
-        }
-      }
+    for (std::size_t i = 0; !directTraversal && i < pn.size(); ++i) {
+      expand(i);
+      for (std::size_t index = 0; index < transitions[i].size(); ++index)
+        materialize(i, index);
     }
   } catch (const Budget &budget) {
     limited = true;
@@ -167,10 +211,11 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
   }
   result.productStates = pn.size();
 
-  if (q.contextLimit && q.context != ContextMode::Insensitive) {
-    using detail::ContextState;
+  if (directTraversal) {
+    using ContextState = detail::InternedContextState;
+    detail::CallStrings calls(q.contextLimit.value_or(0));
     struct ContextParent { ID previous = InvalidID, edge = InvalidID; };
-    std::unordered_map<ContextState, ID, detail::ContextStateHash> known;
+    std::unordered_map<ContextState, ID, detail::InternedContextHash> known;
     std::vector<ContextState> states;
     std::vector<ContextParent> parents;
     std::deque<ID> queue;
@@ -187,39 +232,44 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
     ID accepted = InvalidID;
     std::map<FlowNodeID, ID> acceptedSinks;
     try {
-      for (ID root : roots) insert({root, {}, false, false}, InvalidID, InvalidID);
+      for (ID root : roots)
+        insert({root, 0, false, false}, InvalidID, InvalidID);
       while (!queue.empty()) {
         ID id = queue.front(); queue.pop_front();
         ContextState current = states[id];
         ProductNode productNode = pn[current.product];
         if (sinks[productNode.node] && accepts[productNode.state] &&
+            validSink(productNode.node) &&
             (!q.requireNonEmpty || current.positive) &&
-            (q.context != ContextMode::Balanced || current.calls.empty())) {
+            (q.context != ContextMode::Balanced ||
+             calls.empty(current.stack))) {
           if (accepted == InvalidID) accepted = id;
           if (!scan) break;
           acceptedSinks.emplace(productNode.node, id);
           if (acceptedSinks.size() == static_cast<std::size_t>(sinkCount)) break;
         }
-        for (ID edgeID : pout[current.product]) {
-          const ProductEdge &step = pe[edgeID];
-          const FlowEdge &edge = G.edge(step.original);
+        expand(current.product);
+        for (std::size_t index = 0; index < transitions[current.product].size();
+             ++index) {
+          auto original = transitions[current.product][index].original;
+          const FlowEdge &edge = G.edge(original);
           ContextState next = current;
-          next.product = step.to;
-          next.positive = true;
-          if (edge.kind == FlowKind::Call) {
-            if (next.calls.size() >= *q.contextLimit) {
-              if (!next.calls.empty()) next.calls.erase(next.calls.begin());
-              next.truncated = true;
-            }
-            next.calls.push_back(edge.callSite);
-          } else if (edge.kind == FlowKind::Return) {
-            if (next.calls.empty()) {
+          next.positive = q.requireNonEmpty;
+          if (q.context != ContextMode::Insensitive &&
+              edge.kind == FlowKind::Call) {
+            next.stack = calls.push(next.stack, edge.callSite, next.truncated);
+          } else if (q.context != ContextMode::Insensitive &&
+                     edge.kind == FlowKind::Return) {
+            if (calls.empty(next.stack)) {
               if (q.context == ContextMode::Balanced && !next.truncated) continue;
             } else {
-              if (next.calls.back() != edge.callSite) continue;
-              next.calls.pop_back();
+              if (calls.top(next.stack) != edge.callSite)
+                continue;
+              next.stack = calls.pop(next.stack);
             }
           }
+          ID edgeID = materialize(current.product, index);
+          next.product = pe[edgeID].to;
           insert(std::move(next), id, edgeID);
         }
       }
@@ -228,6 +278,7 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
       result.completion.stop(budget.reason, budget.limit, budget.observed);
     }
     result.summaryPairs = states.size();
+    result.productStates = pn.size();
     result.completion.modelComplete = !incomplete;
     if (scan) scan->complete = result.completion.complete();
     if (accepted == InvalidID) {
@@ -273,85 +324,95 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
   // Sparse Dyck saturation: D ::= epsilon | local | D D | call_c D return_c.
   // Recipes only refer to previously inserted recipes, forming a witness DAG.
   std::vector<Recipe> recipes;
-  std::vector<std::vector<ID>> rout(pn.size()), rin(pn.size());
+  std::vector<std::vector<ID>> rout(pn.size());
   bool context = hasContext && q.context != ContextMode::Insensitive;
   if (context) {
-    std::unordered_map<std::uint64_t, ID> relation;
+    struct Fact {
+      ID entry, node, recipe;
+    };
+    std::vector<Fact> facts;
+    std::vector<std::vector<ID>> factsAt(pn.size()), callsIn(pn.size());
+    std::vector<std::unordered_map<CallSiteID, std::vector<ID>>> returnsBySite(
+        pn.size());
+    std::unordered_map<std::uint64_t, ID> rows, matched;
+    std::vector<ID> edgeRecipes(pe.size(), InvalidID);
     std::deque<ID> queue;
-    std::vector<std::vector<ID>> callsIn(pn.size()), returnsOut(pn.size());
+    auto recipe = [&](Recipe r) {
+      ID id = asID(recipes.size());
+      recipes.push_back(r);
+      return id;
+    };
     auto insert = [&](Recipe r) {
       auto k = key(r.from, r.to);
-      auto previous = relation.find(k);
-      if (previous != relation.end() &&
-          (recipes[previous->second].positive || !r.positive)) return;
-      bound(recipes.size(), q.maxSummaryPairs, SearchStopReason::SummaryPairs);
-      if (previous == relation.end()) ++result.summaryPairs;
-      ID id = asID(recipes.size());
-      relation[k] = id; recipes.push_back(r);
-      rout[r.from].push_back(id); rin[r.to].push_back(id); queue.push_back(id);
+      if (rows.count(k))
+        return;
+      bound(facts.size() + matched.size(), q.maxSummaryPairs,
+            SearchStopReason::SummaryPairs);
+      ID evidence = recipe(r), id = asID(facts.size());
+      rows.emplace(k, id);
+      facts.push_back({r.from, r.to, evidence});
+      factsAt[r.to].push_back(id);
+      queue.push_back(id);
+      ++result.summaryPairs;
+    };
+    auto match = [&](Recipe r) {
+      auto k = key(r.from, r.to);
+      if (matched.count(k))
+        return;
+      bound(facts.size() + matched.size(), q.maxSummaryPairs,
+            SearchStopReason::SummaryPairs);
+      ID evidence = recipe(r);
+      matched.emplace(k, evidence);
+      rout[r.from].push_back(evidence);
+      ++result.summaryPairs;
+      auto count = factsAt[r.from].size();
+      for (std::size_t i = 0; i < count; ++i) {
+        Fact fact = facts[factsAt[r.from][i]];
+        insert({fact.entry, r.to, RecipeKind::Concat, fact.recipe, evidence,
+                InvalidID, true});
+      }
     };
     try {
-      for (ID i = 0; i < pn.size(); ++i) insert({i, i, RecipeKind::Epsilon});
-      auto callSiteOf = [&](ID edgeId) { return G.edge(pe[edgeId].original).callSite; };
+      // Only callee entry rows are needed to derive matched-call edges. The
+      // final search takes ordinary edges and those summaries directly.
       for (ID i = 0; i < pe.size(); ++i) {
         const auto &e = pe[i]; auto kind = G.edge(e.original).kind;
-        if (kind == FlowKind::Call) callsIn[e.to].push_back(i);
-        else if (kind == FlowKind::Return) returnsOut[e.from].push_back(i);
-        else insert({e.from, e.to, RecipeKind::Edge, i, InvalidID, InvalidID, true});
-      }
-      for (auto &edges : callsIn) {
-        std::sort(edges.begin(), edges.end(), [&](ID a, ID b) {
-          return callSiteOf(a) < callSiteOf(b);
-        });
-      }
-      for (auto &edges : returnsOut) {
-        std::sort(edges.begin(), edges.end(), [&](ID a, ID b) {
-          return callSiteOf(a) < callSiteOf(b);
-        });
+        if (kind == FlowKind::Call) {
+          callsIn[e.to].push_back(i);
+          insert({e.to, e.to, RecipeKind::Epsilon});
+        } else if (kind == FlowKind::Return)
+          returnsBySite[e.from][G.edge(e.original).callSite].push_back(i);
       }
       while (!queue.empty()) {
-        ID rid = queue.front(); queue.pop_front();
-        Recipe r = recipes[rid];
-        // Process current predecessors and successors without copying the vectors.
-        // insert() may append to these vectors, but we only iterate up to their original size.
-        std::size_t num_preds = rin[r.from].size();
-        for (std::size_t i = 0; i < num_preds; ++i) {
-          auto l = rin[r.from][i];
-          Recipe a = recipes[l];
-          insert({a.from, r.to, RecipeKind::Concat, l, rid, InvalidID,
-                  a.positive || r.positive});
+        ID id = queue.front();
+        queue.pop_front();
+        Fact fact = facts[id];
+        for (ID edgeID : pout[fact.node]) {
+          const auto &e = pe[edgeID];
+          auto kind = G.edge(e.original).kind;
+          if (kind == FlowKind::Call || kind == FlowKind::Return)
+            continue;
+          if (edgeRecipes[edgeID] == InvalidID)
+            edgeRecipes[edgeID] = recipe({e.from, e.to, RecipeKind::Edge,
+                                          edgeID, InvalidID, InvalidID, true});
+          insert({fact.entry, e.to, RecipeKind::Concat, fact.recipe,
+                  edgeRecipes[edgeID], InvalidID, true});
         }
-        std::size_t num_succs = rout[r.to].size();
-        for (std::size_t i = 0; i < num_succs; ++i) {
-          auto h = rout[r.to][i];
-          Recipe b = recipes[h];
-          insert({r.from, b.to, RecipeKind::Concat, rid, h, InvalidID,
-                  r.positive || b.positive});
+        auto count = rout[fact.node].size();
+        for (std::size_t i = 0; i < count; ++i) {
+          ID summary = rout[fact.node][i];
+          ID target = recipes[summary].to;
+          insert({fact.entry, target, RecipeKind::Concat, fact.recipe, summary,
+                  InvalidID, true});
         }
-        const auto &cIn = callsIn[r.from];
-        const auto &rOut = returnsOut[r.to];
-        std::size_t c_idx = 0, r_idx = 0;
-        while (c_idx < cIn.size() && r_idx < rOut.size()) {
-          auto siteC = callSiteOf(cIn[c_idx]);
-          auto siteR = callSiteOf(rOut[r_idx]);
-          if (siteC < siteR) {
-            ++c_idx;
-          } else if (siteR < siteC) {
-            ++r_idx;
-          } else {
-            std::size_t c_end = c_idx + 1;
-            while (c_end < cIn.size() && callSiteOf(cIn[c_end]) == siteC) ++c_end;
-            std::size_t r_end = r_idx + 1;
-            while (r_end < rOut.size() && callSiteOf(rOut[r_end]) == siteR) ++r_end;
-            for (std::size_t cx = c_idx; cx < c_end; ++cx) {
-              for (std::size_t rx = r_idx; rx < r_end; ++rx) {
-                insert({pe[cIn[cx]].from, pe[rOut[rx]].to, RecipeKind::Match,
-                        cIn[cx], rOut[rx], rid, true});
-              }
-            }
-            c_idx = c_end;
-            r_idx = r_end;
-          }
+        for (ID call : callsIn[fact.entry]) {
+          auto site = G.edge(pe[call].original).callSite;
+          auto returns = returnsBySite[fact.node].find(site);
+          if (returns == returnsBySite[fact.node].end())
+            continue;
+          for (auto ret : returns->second)
+            match({pe[call].from, pe[ret].to, RecipeKind::Match, call, ret,
+                   fact.recipe, true});
         }
       }
     } catch (const Budget &budget) {
@@ -380,15 +441,21 @@ QueryResult QueryEngine::runImpl(const Query &q, QueryScanResult *scan) const {
   while (!queue.empty()) {
     ID s = queue.front(); queue.pop_front();
     ID p = s / 4; unsigned phase = (s % 4) / 2; bool positive = s % 2;
-    if (sinks[pn[p].node] && accepts[pn[p].state] && (!q.requireNonEmpty || positive)) {
+    if (sinks[pn[p].node] && accepts[pn[p].state] && validSink(pn[p].node) &&
+        (!q.requireNonEmpty || positive)) {
       if (accepted == InvalidID) accepted = s;
       if (!scan) break;
       acceptedSinks.emplace(pn[p].node, s);
       if (acceptedSinks.size() == static_cast<std::size_t>(sinkCount)) break;
     }
     auto push = [&](Step step, unsigned nextPhase) {
-      ID t = encode(step.to, nextPhase, positive || step.positive);
-      if (!visited[t]) { visited[t] = true; parents[t] = {s, step}; queue.push_back(t); }
+      ID t = encode(step.to, nextPhase,
+                    q.requireNonEmpty && (positive || step.positive));
+      if (!visited[t]) {
+        visited[t] = true;
+        parents[t] = {s, step};
+        queue.push_back(t);
+      }
     };
     if (!context) {
       for (auto e : pout[p]) push({pe[e].to, InvalidID, e, true}, phase);

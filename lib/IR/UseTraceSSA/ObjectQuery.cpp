@@ -1,5 +1,7 @@
 #include "IR/UseTraceSSA/Query.h"
 #include "IR/UseTraceSSA/QueryContext.h"
+#include "IR/UseTraceSSA/QueryMask.h"
+
 #include <algorithm>
 #include <deque>
 #include <memory>
@@ -38,7 +40,9 @@ namespace {
 using Budget = detail::SearchBudgetExceeded;
 // Query facts share immutable labels. TOP, BOTTOM, and unchanged masks need no
 // new dense allocation; joins replace their handle instead of mutating aliases.
-using Mask = std::shared_ptr<const ObjectMask>;
+using MaskBits = detail::AdaptiveMask;
+using Mask = std::shared_ptr<const MaskBits>;
+ObjectMask exportMask(const MaskBits &bits) { return bits.bitVector(); }
 std::uint64_t key(ID a, ID b) { return (std::uint64_t(a) << 32) | b; }
 struct ProductNode { FlowNodeID node; ID state; };
 struct ProductEdge { ID from, to; FlowEdgeID original; ID transition; };
@@ -55,9 +59,15 @@ struct Summary { ID from, to; Mask reachable, positive; };
 } // namespace
 
 struct ObjectWitnessData {
+  static constexpr ID Choice = ID(1) << 31;
   struct Proof { ID parent; FlowEdgeID edge; FlowNodeID node; ID state; };
+  struct ChoiceProof {
+    ID before, after;
+    Mask afterObjects;
+  };
   struct Acceptance { Mask objects; ID proof; };
   std::vector<Proof> proofs;
+  std::vector<ChoiceProof> choices;
   std::map<FlowNodeID, std::vector<Acceptance>> accepted;
   std::size_t maxEdges = 0;
 };
@@ -85,8 +95,15 @@ QueryResult ObjectBatchResult::witness(FlowNodeID sink, ObjectID object) const {
   result.edgesExamined = statistics.edgesExamined;
   result.summaryPairs = statistics.summaryPairs;
   std::vector<ID> path;
-  for (ID id = proof; id != InvalidID; id = Witnesses->proofs[id].parent)
-    path.push_back(id);
+  for (ID id = proof; id != InvalidID;) {
+    if (id & ObjectWitnessData::Choice) {
+      const auto &choice = Witnesses->choices[id & ~ObjectWitnessData::Choice];
+      id = choice.afterObjects->test(bit) ? choice.after : choice.before;
+    } else {
+      path.push_back(id);
+      id = Witnesses->proofs[id].parent;
+    }
+  }
   std::reverse(path.begin(), path.end());
   for (ID id : path) {
     const auto &step = Witnesses->proofs[id];
@@ -116,24 +133,61 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
   result.found = result.notFound = result.unknown = u.none();
   auto &stats = result.statistics;
   stats.candidateObjects = u.objects().size();
-  const Mask emptyMask = std::make_shared<ObjectMask>(u.none());
-  const Mask allMask = u.objects().empty() ? emptyMask :
-                       std::make_shared<ObjectMask>(u.all());
-  auto makeMask = [&](ObjectMask bits) -> Mask {
-    if (bits.none()) return emptyMask;
-    if (bits.all()) return allMask;
-    return std::make_shared<ObjectMask>(std::move(bits));
+  const Mask emptyMask = std::make_shared<MaskBits>(u.objects().size());
+  const Mask allMask =
+      u.objects().empty()
+          ? emptyMask
+          : std::make_shared<MaskBits>(u.objects().size(), true);
+  std::unordered_map<uintptr_t, Mask> smallMasks;
+  auto makeMask = [&](MaskBits bits) -> Mask {
+    if (bits.none())
+      return emptyMask;
+    if (bits.all())
+      return allMask;
+    bits.normalize();
+    if (bits.isSmall()) {
+      uintptr_t storage;
+      auto word = bits.getData(storage)[0];
+      auto cached = smallMasks.find(word);
+      if (cached != smallMasks.end())
+        return cached->second;
+      auto mask = std::make_shared<MaskBits>(std::move(bits));
+      // Bound interning memory even for adversarial combinations of guards.
+      if (smallMasks.size() < 4096)
+        smallMasks.emplace(word, mask);
+      return mask;
+    }
+    return std::make_shared<MaskBits>(std::move(bits));
   };
+  std::unordered_map<const std::vector<ObjectID> *, Mask> guardMasks;
   auto objectMask = [&](const ObjectSet &objects) -> Mask {
     if (objects.isUnknown()) return allMask;
     if (objects.empty()) return emptyMask;
-    return makeMask(u.mask(objects));
+    auto cached = guardMasks.find(&objects.objects());
+    if (cached != guardMasks.end())
+      return cached->second;
+    MaskBits bits = u.objects().size() > 256 &&
+                            objects.objects().size() <= u.objects().size() / 128
+                        ? MaskBits::sparse(u.objects().size())
+                        : MaskBits(u.objects().size());
+    for (auto object : objects.objects()) {
+      auto it =
+          std::lower_bound(u.objects().begin(), u.objects().end(), object);
+      if (it != u.objects().end() && *it == object)
+        bits.set(it - u.objects().begin());
+    }
+    auto mask = makeMask(std::move(bits));
+    guardMasks.emplace(&objects.objects(), mask);
+    return mask;
   };
   auto intersect = [&](const Mask &a, const Mask &b) -> Mask {
     ++stats.maskIntersections;
     if (a == b || b == allMask || a == emptyMask) return a;
     if (a == allMask || b == emptyMask) return b;
-    ObjectMask bits = *a; bits &= *b;
+    if (!a->anyCommon(*b))
+      return emptyMask;
+    MaskBits bits = *a;
+    bits &= *b;
     if (bits == *a) return a;
     if (bits == *b) return b;
     return makeMask(std::move(bits));
@@ -142,7 +196,10 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
     ++stats.maskUnions;
     if (a == b || a == allMask || b == emptyMask) return;
     if (a == emptyMask || b == allMask) { a = b; return; }
-    ObjectMask bits = *a; bits |= *b;
+    if (!b->test(*a))
+      return;
+    MaskBits bits = *a;
+    bits |= *b;
     if (bits == *a) return;
     if (bits == *b) { a = b; return; }
     a = makeMask(std::move(bits));
@@ -150,7 +207,12 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
   auto difference = [&](const Mask &a, const Mask &b) -> Mask {
     if (a == b || b == allMask) return emptyMask;
     if (b == emptyMask || a == emptyMask) return a;
-    ObjectMask bits = *a; bits.reset(*b);
+    if (a == allMask)
+      return makeMask(b->complemented());
+    if (!a->test(*b))
+      return emptyMask;
+    MaskBits bits = *a;
+    bits.reset(*b);
     if (bits == *a) return a;
     return makeMask(std::move(bits));
   };
@@ -233,6 +295,10 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
   std::unordered_map<detail::FlowStateKey, ID, detail::FlowStateHash> products;
   std::map<ID, Mask> roots;
   std::deque<Delta> pending;
+  const bool boundedContext =
+      q.contextLimit && q.context != ContextMode::Insensitive;
+  const bool directTraversal =
+      boundedContext || q.context == ContextMode::Insensitive;
   Mask incomplete = G.complete() ? emptyMask : allMask;
   bool limited = false, hasContext = false;
   auto product = [&](FlowNodeID node, ID state) -> ID {
@@ -256,56 +322,66 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
   auto productMask = [&](const ProductEdge &edge) -> const Mask & {
     return transitions[edge.from][edge.transition].objects;
   };
+  auto expand = [&](ID id) {
+    if (expanded[id])
+      return;
+    expanded[id] = true;
+    ProductNode n = pn[id];
+    for (auto eid : G.outgoing(n.node)) {
+      ++stats.edgesExamined;
+      const auto &e = G.edge(eid);
+      if (!e.enabled || e.objects.empty() || (q.edgeFilter && !q.edgeFilter(e)))
+        continue;
+      if (!edgeMaskReady[eid]) {
+        edgeMasks[eid] = objectMask(e.objects);
+        edgeMaskReady[eid] = true;
+      }
+      const auto &edgeMask = edgeMasks[eid];
+      if (e.kind == FlowKind::Thread && !q.includeThreadEdges) {
+        unite(omittedThreads[id], edgeMask);
+        continue;
+      }
+      for (const auto &t : effects(e.to, n.state)) {
+        auto label = intersect(edgeMask, t.second);
+        if (label != emptyMask)
+          transitions[id].push_back({e.to, t.first, eid, std::move(label)});
+      }
+    }
+  };
+  auto materialize = [&](ID from, std::size_t index) -> ID {
+    ID id = transitions[from][index].edge;
+    if (id != InvalidID)
+      return id;
+    // product() can grow the transition vector; copy the fields first.
+    const auto node = transitions[from][index].node;
+    const auto state = transitions[from][index].state;
+    const auto original = transitions[from][index].original;
+    ID target = product(node, state);
+    id = pe.size();
+    pe.push_back({from, target, original, static_cast<ID>(index)});
+    transitions[from][index].edge = id;
+    pout[from].push_back(id);
+    const auto kind = G.edge(original).kind;
+    hasContext |= kind == FlowKind::Call || kind == FlowKind::Return;
+    return id;
+  };
   try {
     for (auto source : q.sources) for (const auto &t : effects(source, q.automaton.initial)) {
       auto p = product(source, t.first);
       unite(roots.emplace(p, emptyMask).first->second, t.second);
-      reach(p, t.second);
+      if (!directTraversal)
+        reach(p, t.second);
     }
     while (!pending.empty()) {
       Delta delta = std::move(pending.front()); pending.pop_front();
-      if (!expanded[delta.id]) {
-        expanded[delta.id] = true;
-        ProductNode n = pn[delta.id];
-        for (auto eid : G.outgoing(n.node)) {
-          ++stats.edgesExamined;
-          const auto &e = G.edge(eid);
-          if (!e.enabled || e.objects.empty() || (q.edgeFilter && !q.edgeFilter(e))) continue;
-          if (!edgeMaskReady[eid]) {
-            edgeMasks[eid] = objectMask(e.objects);
-            edgeMaskReady[eid] = true;
-          }
-          const auto &edgeMask = edgeMasks[eid];
-          if (e.kind == FlowKind::Thread && !q.includeThreadEdges) {
-            unite(omittedThreads[delta.id], edgeMask);
-            continue;
-          }
-          for (const auto &t : effects(e.to, n.state)) {
-            auto label = intersect(edgeMask, t.second);
-            if (label == emptyMask) continue;
-            transitions[delta.id].push_back({e.to, t.first, eid, std::move(label)});
-          }
-        }
-      }
+      expand(delta.id);
       if (omittedThreads[delta.id] != emptyMask)
         unite(incomplete, intersect(delta.objects, omittedThreads[delta.id]));
       for (std::size_t i = 0; i < transitions[delta.id].size(); ++i) {
         const auto &transition = transitions[delta.id][i];
         auto arriving = intersect(delta.objects, transition.objects);
         if (arriving == emptyMask) continue;
-        ID id = transition.edge;
-        if (id == InvalidID) {
-          const auto node = transition.node;
-          const auto state = transition.state;
-          const auto original = transition.original;
-          ID target = product(node, state);
-          id = pe.size();
-          pe.push_back({delta.id, target, original, static_cast<ID>(i)});
-          transitions[delta.id][i].edge = id;
-          pout[delta.id].push_back(id);
-          const auto kind = G.edge(original).kind;
-          hasContext |= kind == FlowKind::Call || kind == FlowKind::Return;
-        }
+        ID id = materialize(delta.id, i);
         reach(pe[id].to, arriving);
       }
     }
@@ -322,43 +398,71 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
   auto proof = [&](ID parent, FlowEdgeID edge, ID product) -> ID {
     if (!result.Witnesses) return InvalidID;
     auto &proofs = result.Witnesses->proofs;
-    if (proofs.size() >= InvalidID)
+    if (proofs.size() >= ObjectWitnessData::Choice)
       throw std::length_error("UseTraceSSA: witness provenance too large");
     ID id = proofs.size();
     proofs.push_back({parent, edge, pn[product].node, pn[product].state});
     return id;
   };
+  std::unordered_map<FlowNodeID, Mask> sinkMasks;
   auto accept = [&](FlowNodeID sink, const Delta &delta) {
+    Mask objects = delta.objects;
+    if (q.sinkEvents != Event::None) {
+      auto cached = sinkMasks.find(sink);
+      if (cached == sinkMasks.end()) {
+        Mask relevant = emptyMask;
+        for (const auto &effect : partition(sink))
+          if (hasEvent(effect.events, q.sinkEvents))
+            unite(relevant, effect.objects);
+        cached = sinkMasks.emplace(sink, std::move(relevant)).first;
+      }
+      objects = intersect(objects, cached->second);
+    }
+    if (objects == emptyMask)
+      return;
     auto &accepted = foundAt.emplace(sink, emptyMask).first->second;
     if (result.Witnesses) {
       // A delta's objects all follow its parent's proof. Only acceptance needs
       // a mask: the immutable parent chain is already compatible with every bit.
-      auto fresh = difference(delta.objects, accepted);
+      auto fresh = difference(objects, accepted);
       if (fresh != emptyMask)
         result.Witnesses->accepted[sink].push_back({std::move(fresh), delta.proof});
     }
-    unite(foundObjects, delta.objects);
-    unite(accepted, delta.objects);
+    unite(foundObjects, objects);
+    unite(accepted, objects);
+    if (request.stopAfterFirstFinding) {
+      limited = true;
+      result.completion.stop(SearchStopReason::FirstFinding);
+    }
   };
   auto exportResult = [&] {
     auto unknown = difference(limited ? allMask : incomplete, foundObjects);
-    result.found = *foundObjects;
-    result.unknown = *unknown;
-    result.notFound = *difference(difference(allMask, foundObjects), unknown);
+    result.found = exportMask(*foundObjects);
+    result.unknown = exportMask(*unknown);
+    result.notFound =
+        exportMask(*difference(difference(allMask, foundObjects), unknown));
     result.completion.modelComplete = G.complete() && incomplete == emptyMask;
     result.complete = result.completion.complete();
-    for (const auto &sink : foundAt) result.foundAt.emplace(sink.first, *sink.second);
+    for (const auto &sink : foundAt) {
+      auto bit = sink.second->find_first();
+      result.sinks.push_back(
+          {sink.first, u.objects()[bit], sink.second->count()});
+      if (request.retainSinkMasks)
+        result.foundAt.emplace(sink.first, exportMask(*sink.second));
+    }
     stats.foundObjects = result.found.count();
     stats.notFoundObjects = result.notFound.count();
     stats.unknownObjects = result.unknown.count();
   };
 
-  if (q.contextLimit && q.context != ContextMode::Insensitive) {
-    using detail::ContextState;
-    std::unordered_map<ContextState, ID, detail::ContextStateHash> known;
+  if (directTraversal) {
+    using ContextState = detail::InternedContextState;
+    detail::CallStrings calls(q.contextLimit.value_or(0));
+    std::unordered_map<ContextState, ID, detail::InternedContextHash> known;
     std::vector<ContextState> states;
-    std::vector<Mask> visited;
-    std::deque<Delta> queue;
+    std::vector<Mask> visited, queued;
+    std::vector<ID> queuedProof;
+    std::deque<ID> queue;
     auto push = [&](ContextState state, const Mask &objects,
                     ID parent = InvalidID, FlowEdgeID edge = InvalidFlowID) {
       if (objects == emptyMask) return;
@@ -372,6 +476,8 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
         known.emplace(state, id);
         states.push_back(std::move(state));
         visited.push_back(emptyMask);
+        queued.push_back(emptyMask);
+        queuedProof.push_back(InvalidID);
       } else {
         id = found->second;
       }
@@ -379,43 +485,69 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
       if (delta == emptyMask) return;
       unite(visited[id], delta);
       ++stats.nonemptyDeltas;
-      queue.push_back({id, std::move(delta), false, proof(parent, edge, states[id].product)});
+      ID evidence = proof(parent, edge, states[id].product);
+      if (queued[id] == emptyMask) {
+        queue.push_back(id);
+        queuedProof[id] = evidence;
+      } else if (result.Witnesses) {
+        auto &choices = result.Witnesses->choices;
+        if (choices.size() >= ObjectWitnessData::Choice - 1)
+          throw std::length_error(
+              "UseTraceSSA: witness choice identifier overflow");
+        ID choice = choices.size() | ObjectWitnessData::Choice;
+        choices.push_back({queuedProof[id], evidence, delta});
+        queuedProof[id] = choice;
+      }
+      unite(queued[id], delta);
     };
     try {
       for (const auto &root : roots)
-        push({root.first, {}, false, false}, root.second);
+        push({root.first, 0, false, false}, root.second);
       while (!queue.empty()) {
-        Delta delta = std::move(queue.front()); queue.pop_front();
+        ID id = queue.front();
+        queue.pop_front();
+        Delta delta{id, std::move(queued[id]), false, queuedProof[id]};
+        queued[id] = emptyMask;
+        queuedProof[id] = InvalidID;
         ContextState current = states[delta.id];
         ProductNode point = pn[current.product];
         if (sinks[point.node] && accepts[point.state] &&
             (!q.requireNonEmpty || current.positive) &&
-            (q.context != ContextMode::Balanced || current.calls.empty())) {
+            (q.context != ContextMode::Balanced ||
+             calls.empty(current.stack))) {
           accept(point.node, delta);
+          if (request.stopAfterFirstFinding && !foundAt.empty())
+            break;
         }
-        for (ID edgeID : pout[current.product]) {
-          const ProductEdge &step = pe[edgeID];
-          auto permitted = intersect(delta.objects, productMask(step));
+        expand(current.product);
+        if (omittedThreads[current.product] != emptyMask)
+          unite(incomplete,
+                intersect(delta.objects, omittedThreads[current.product]));
+        for (std::size_t index = 0; index < transitions[current.product].size();
+             ++index) {
+          const auto original = transitions[current.product][index].original;
+          auto permitted = intersect(
+              delta.objects, transitions[current.product][index].objects);
           if (permitted == emptyMask) continue;
-          const FlowEdge &edge = G.edge(step.original);
+          const FlowEdge &edge = G.edge(original);
           ContextState next = current;
-          next.product = step.to;
-          next.positive = true;
-          if (edge.kind == FlowKind::Call) {
-            if (next.calls.size() >= *q.contextLimit) {
-              if (!next.calls.empty()) next.calls.erase(next.calls.begin());
-              next.truncated = true;
-            }
-            next.calls.push_back(edge.callSite);
-          } else if (edge.kind == FlowKind::Return) {
-            if (next.calls.empty()) {
+          next.positive = q.requireNonEmpty;
+          if (q.context != ContextMode::Insensitive &&
+              edge.kind == FlowKind::Call) {
+            next.stack = calls.push(next.stack, edge.callSite, next.truncated);
+          } else if (q.context != ContextMode::Insensitive &&
+                     edge.kind == FlowKind::Return) {
+            if (calls.empty(next.stack)) {
               if (q.context == ContextMode::Balanced && !next.truncated) continue;
             } else {
-              if (next.calls.back() != edge.callSite) continue;
-              next.calls.pop_back();
+              if (calls.top(next.stack) != edge.callSite)
+                continue;
+              next.stack = calls.pop(next.stack);
             }
           }
-          push(std::move(next), permitted, delta.proof, step.original);
+          ID edgeID = materialize(current.product, index);
+          next.product = pe[edgeID].to;
+          push(std::move(next), permitted, delta.proof, original);
         }
       }
     } catch (const Budget &budget) {
@@ -423,10 +555,15 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
       result.completion.stop(budget.reason, budget.limit, budget.observed);
     }
     stats.summaryPairs = states.size();
+    stats.productStates = pn.size();
+    stats.productEdges = pe.size();
     exportResult();
-    result.message = limited ? "bounded-context query budget exhausted" :
-        incomplete != emptyMask ? "incomplete model or omitted thread edges" :
-                           "bounded-context mask tabulation complete";
+    result.message =
+        result.completion.stopReason == SearchStopReason::FirstFinding
+            ? "first valid finding; sink enumeration stopped"
+        : limited                 ? "bounded-context query budget exhausted"
+        : incomplete != emptyMask ? "incomplete model or omitted thread edges"
+                                  : "bounded-context mask tabulation complete";
     return result;
   }
 
@@ -434,86 +571,103 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
   // intersects; alternative derivations union for the SAME relation pair.
   // Separate positive masks retain nonempty cycles even when epsilon exists.
   std::vector<Summary> summaries;
-  std::vector<std::vector<ID>> rout(pn.size()), rin(pn.size());
+  std::vector<std::vector<ID>> rout(pn.size());
+  std::size_t bodyFacts = 0;
   if (context) {
-    std::unordered_map<std::uint64_t, ID> relation;
-    std::deque<Delta> queue;
-    std::vector<std::vector<ID>> callsIn(pn.size());
+    // Tabulate balanced reachability only from demanded callee entries. Local
+    // steps and discovered matched calls propagate each entry's row. The
+    // quotient needs matched-call edges, not an all-pairs transitive closure.
+    std::vector<Summary> facts;
+    std::vector<std::vector<ID>> factsAt(pn.size()), callsIn(pn.size());
     std::vector<std::unordered_map<CallSiteID, std::vector<ID>>> returnsBySite(pn.size());
-    auto insert = [&](ID from, ID to, const Mask &objects, bool positive) {
-      if (objects == emptyMask) return;
-      auto k = key(from, to);
-      auto it = relation.find(k);
-      if (it == relation.end()) {
-        bound(summaries.size(), q.maxSummaryPairs, SearchStopReason::SummaryPairs);
-        ID id = summaries.size();
-        it = relation.emplace(k, id).first;
-        summaries.push_back({from, to, emptyMask, emptyMask});
-        rout[from].push_back(id); rin[to].push_back(id);
+    std::unordered_map<std::uint64_t, ID> rows, matched;
+    std::deque<Delta> queue;
+    auto insert = [&](ID entry, ID node, const Mask &objects) {
+      if (objects == emptyMask)
+        return;
+      auto k = key(entry, node);
+      auto found = rows.find(k);
+      if (found == rows.end()) {
+        bound(facts.size() + summaries.size(), q.maxSummaryPairs,
+              SearchStopReason::SummaryPairs);
+        ID id = facts.size();
+        found = rows.emplace(k, id).first;
+        facts.push_back({entry, node, emptyMask, emptyMask});
+        factsAt[node].push_back(id);
       }
-      ID id = it->second;
-      auto update = [&](Mask &old, bool pos) {
-        auto delta = difference(objects, old);
-        if (delta == emptyMask) return;
-        unite(old, delta); ++stats.nonemptyDeltas;
-        queue.push_back({id, std::move(delta), pos});
-      };
-      update(summaries[id].reachable, false);
-      if (positive) update(summaries[id].positive, true);
+      auto &old = facts[found->second].reachable;
+      auto delta = difference(objects, old);
+      if (delta == emptyMask)
+        return;
+      unite(old, delta);
+      ++stats.nonemptyDeltas;
+      queue.push_back({found->second, std::move(delta)});
+    };
+    auto match = [&](ID from, ID to, const Mask &objects) {
+      if (objects == emptyMask)
+        return;
+      auto k = key(from, to);
+      auto found = matched.find(k);
+      if (found == matched.end()) {
+        bound(facts.size() + summaries.size(), q.maxSummaryPairs,
+              SearchStopReason::SummaryPairs);
+        ID id = summaries.size();
+        found = matched.emplace(k, id).first;
+        summaries.push_back({from, to, emptyMask, emptyMask});
+        rout[from].push_back(id);
+      }
+      auto delta = difference(objects, summaries[found->second].reachable);
+      if (delta == emptyMask)
+        return;
+      unite(summaries[found->second].reachable, delta);
+      summaries[found->second].positive = summaries[found->second].reachable;
+      const auto count = factsAt[from].size();
+      for (std::size_t i = 0; i < count; ++i) {
+        auto fact = facts[factsAt[from][i]];
+        insert(fact.from, to, intersect(fact.reachable, delta));
+      }
     };
     try {
-      for (ID i = 0; i < pn.size(); ++i) insert(i, i, allMask, false);
       for (ID i = 0; i < pe.size(); ++i) {
         const auto &e = pe[i]; auto kind = G.edge(e.original).kind;
-        if (kind == FlowKind::Call) callsIn[e.to].push_back(i);
-        else if (kind == FlowKind::Return)
+        if (kind == FlowKind::Call) {
+          callsIn[e.to].push_back(i);
+          insert(e.to, e.to, allMask);
+        } else if (kind == FlowKind::Return)
           returnsBySite[e.from][G.edge(e.original).callSite].push_back(i);
-        else insert(e.from, e.to, productMask(e), true);
       }
       while (!queue.empty()) {
         Delta d = std::move(queue.front()); queue.pop_front();
-        // insert() can reallocate both summaries and adjacency vectors.
-        ID from = summaries[d.id].from, to = summaries[d.id].to;
-        std::size_t preds = rin[from].size(), succs = rout[to].size();
-        for (std::size_t i = 0; i < preds; ++i) {
-          ID predecessor = rin[from][i], source = summaries[predecessor].from;
-          auto reachable = intersect(summaries[predecessor].reachable, d.objects);
-          if (d.positive) {
-            insert(source, to, reachable, true);
-          } else {
-            auto positive = intersect(summaries[predecessor].positive, d.objects);
-            insert(source, to, reachable, false);
-            insert(source, to, positive, true);
-          }
+        ID entry = facts[d.id].from, node = facts[d.id].to;
+        for (auto edgeID : pout[node]) {
+          const auto &edge = pe[edgeID];
+          auto kind = G.edge(edge.original).kind;
+          if (kind != FlowKind::Call && kind != FlowKind::Return)
+            insert(entry, edge.to, intersect(d.objects, productMask(edge)));
         }
-        for (std::size_t i = 0; i < succs; ++i) {
-          ID successor = rout[to][i], target = summaries[successor].to;
-          auto reachable = intersect(d.objects, summaries[successor].reachable);
-          if (d.positive) {
-            insert(from, target, reachable, true);
-          } else {
-            auto positive = intersect(d.objects, summaries[successor].positive);
-            insert(from, target, reachable, false);
-            insert(from, target, positive, true);
-          }
+        auto count = rout[node].size();
+        for (std::size_t i = 0; i < count; ++i) {
+          auto summary = summaries[rout[node][i]];
+          insert(entry, summary.to, intersect(d.objects, summary.reachable));
         }
-        if (!d.positive) for (auto c : callsIn[from]) {
-          auto site = G.edge(pe[c].original).callSite;
-          auto matches = returnsBySite[to].find(site);
-          if (matches == returnsBySite[to].end()) continue;
-          for (auto r : matches->second) {
-            insert(pe[c].from, pe[r].to,
-                   intersect(intersect(productMask(pe[c]), d.objects), productMask(pe[r])),
-                   true);
-          }
+        for (auto call : callsIn[entry]) {
+          auto site = G.edge(pe[call].original).callSite;
+          auto returns = returnsBySite[node].find(site);
+          if (returns == returnsBySite[node].end())
+            continue;
+          for (auto ret : returns->second)
+            match(pe[call].from, pe[ret].to,
+                  intersect(intersect(productMask(pe[call]), d.objects),
+                            productMask(pe[ret])));
         }
       }
     } catch (const Budget &budget) {
       limited = true;
       result.completion.stop(budget.reason, budget.limit, budget.observed);
     }
+    bodyFacts = facts.size();
   }
-  stats.summaryPairs = summaries.size();
+  stats.summaryPairs = bodyFacts + summaries.size();
 
   // Existing realizable quotient: unmatched returns precede unmatched calls.
   // Delta masks belong to logical (product, phase, positive) states; no object
@@ -533,16 +687,18 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
     ID p = d.id / 4; unsigned phase = (d.id % 4) / 2; bool positive = d.id % 2;
     if (sinks[pn[p].node] && accepts[pn[p].state] && (!q.requireNonEmpty || positive)) {
       accept(pn[p].node, d);
+      if (request.stopAfterFirstFinding && !foundAt.empty())
+        break;
     }
-    auto step = [&](ID target, unsigned nextPhase, bool nonempty, const Mask &mask,
-                    FlowEdgeID edge = InvalidFlowID) {
-      push(target * 4 + nextPhase * 2 + unsigned(positive || nonempty),
+    auto step = [&](ID target, unsigned nextPhase, bool nonempty,
+                    const Mask &mask, FlowEdgeID edge = InvalidFlowID) {
+      push(target * 4 + nextPhase * 2 +
+               unsigned(q.requireNonEmpty && (positive || nonempty)),
            intersect(d.objects, mask), d.proof, edge);
     };
     if (context) for (auto id : rout[p]) {
       const auto &s = summaries[id];
-      step(s.to, phase, false, s.reachable);
-      step(s.to, phase, true, s.positive);
+      step(s.to, phase, true, s.reachable);
     }
     for (auto id : pout[p]) {
       const auto &e = pe[id]; auto kind = G.edge(e.original).kind;
@@ -556,9 +712,12 @@ ObjectBatchResult QueryEngine::runObjects(const ObjectBatchQuery &request) const
     }
   }
   exportResult();
-  result.message = limited ? "symbolic query budget exhausted; remaining objects unknown" :
-      incomplete != emptyMask ? "incomplete model or omitted thread edges" :
-                            "symbolic same-object reachability complete";
+  result.message =
+      result.completion.stopReason == SearchStopReason::FirstFinding
+          ? "first valid finding; sink enumeration stopped"
+      : limited ? "symbolic query budget exhausted; remaining objects unknown"
+      : incomplete != emptyMask ? "incomplete model or omitted thread edges"
+                                : "symbolic same-object reachability complete";
   return result;
 }
 } // namespace usetracessa

@@ -119,3 +119,32 @@ The command-line tool ``lotus-ir-usetracessa`` integrates the pipeline. It build
 Taint sources/sinks, sanitizers, and full external-call semantics require client models. Ambiguous native locations are reported as graph issues. Missing required native events produce an empty resource graph with an incompleteness issue, not a safety proof.
 
 JSON schema 2 serializes guarded effects, using ``null`` for TOP and ``[]`` for BOTTOM. The API and CLI expose graph, query, and mask-operation statistics.
+
+Performance and Deferred Reports
+================================
+
+Resource construction contracts empty single-successor CFG chains, computes the
+live iterated dominance frontier directly, and retains native provenance only
+for event sites. Immutable object guards share their sorted storage. The scalar
+``LLVMHistoryBuilder::build(module)`` overload shares instruction printing and
+operand slots across function definitions.
+
+Bounded and context-insensitive queries expand products from reachable search
+states, intern call strings, and coalesce pending object deltas with shared
+choice proofs. Unbounded queries derive matched-call summaries from callee-entry
+rows instead of computing an all-pairs local closure. Query masks use inline,
+dense, sparse, or sparse-complement representations within their finite universe.
+
+``DefectDetector::scan(kind)`` retains eager witnesses. Passing
+``{false, true, false}`` retains deferred proofs, recoverable through
+``scan.materialize(index, graph)`` against the unchanged graph. Passing
+``{false, false, false, false}`` keeps sink/object counts and representatives
+without expanding per-sink object lists. ``findAny(kind)`` stops after a valid
+finding and records incomplete enumeration explicitly.
+
+For checks, ``--quiet`` skips full instruction formatting, witness rendering,
+and per-sink object-list expansion. ``--full-labels`` retains exact instruction
+text with quiet output. Structured debug locations identify source sites;
+array operands are not interpreted as locations. Only normal return ports
+receive native resource Exit events. ``--timing`` reports construction subphases
+and separates symbolic search from report generation.
