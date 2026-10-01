@@ -10,7 +10,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -29,6 +31,27 @@ public:
     PointsToSetBackend setBackend = PointsToSetBackend::Mutable;
     const lotus::analysis::FilteredSVFGView *scope = nullptr;
     IndirectCallConnector connectIndirectCall;
+    // Pipeline transfers over immutable, validated effect snapshots. Graph
+    // mutation through connectIndirectCall occurs only between solving epochs.
+    bool parallel = false;
+    // Research ablation: unordered commits can choose a different fixed point
+    // for non-monotone transfers. Default commits follow the reference
+    // schedule.
+    bool unorderedParallel = false;
+    // Share immutable effect values between worker snapshots. Disabling this
+    // retains copied-set storage for performance ablation.
+    bool shareParallelSets = true;
+    // Transfers evaluated with local effect forwarding in a worker block.
+    // One disables forwarding and gives single-transfer speculation.
+    unsigned parallelBlockSize = 8;
+    // Reuse an unchanged transfer result while its complete read certificate
+    // remains valid. Reference worklist retirement is still preserved.
+    bool parallelMemoize = true;
+    // Validate precise memory guards by object, including absence and
+    // wildcard fallback; whole-channel validation remains an ablation.
+    bool parallelObjectCertificates = true;
+    // Zero selects hardware_concurrency(); includes the calling thread.
+    unsigned workerThreads = 0;
   };
 
   struct Statistics {
@@ -46,6 +69,22 @@ public:
     std::size_t indirectCallEdges = 0;
     std::size_t hashConsedUniqueSets = 0;
     std::size_t hashConsedUnionCacheHits = 0;
+    std::size_t parallelThreads = 0;
+    std::size_t parallelCommits = 0;
+    std::size_t parallelConflicts = 0;
+    std::size_t parallelPublications = 0;
+    std::size_t parallelNotifications = 0;
+    std::size_t parallelPeakWorkers = 0;
+    std::size_t parallelBlocks = 0;
+    std::size_t parallelForwardedReads = 0;
+    std::size_t parallelAcceptedForwardedReads = 0;
+    std::size_t parallelMemoHits = 0;
+    std::size_t parallelObjectReads = 0;
+    std::size_t parallelNegativeReads = 0;
+    std::size_t parallelWildcardReads = 0;
+    std::size_t parallelObjectSalvages = 0;
+    std::size_t topologyEpochs = 0;
+    double solveSeconds = 0;
   };
 
   explicit FlowSensitivePTA(const lotus::analysis::SVFG &graph);
@@ -63,10 +102,27 @@ public:
 
   const Statistics &statistics() const { return stats_; }
   PointsToSetBackend setBackend() const { return config_.setBackend; }
+  // Full differential check of public queries. A missing memory entry and an
+  // explicit empty entry both answer the empty set. Analyses must share an
+  // SVFG.
+  bool hasSameSolution(const FlowSensitivePTA &other,
+                       std::string *difference = nullptr) const;
+  // Re-evaluate every equation against immutable current inputs, without
+  // changing this result or connecting new calls.
+  bool isFixedPoint(std::string *difference = nullptr) const;
 
 private:
+  class ParallelExecution;
+  class OrderedExecution;
+  bool compareSolution(const FlowSensitivePTA &other, bool comparePresence,
+                       std::string *difference) const;
+  const Statistics &solveParallel();
+  const Statistics &solveOrderedParallel();
   struct StoredSet {
     PointsToSet mutableSet;
+    // Worker snapshots share immutable sets; transfer mutations create a new
+    // value. Public mutable/hash-consed result storage remains unchanged.
+    std::shared_ptr<const PointsToSet> sharedSet;
     HashConsedPointsToSetArena::SetID interned =
         HashConsedPointsToSetArena::EmptySet;
   };
@@ -85,8 +141,16 @@ private:
   bool mergeState(MemoryState &destination, const MemoryState &source);
   bool assignState(MemoryState &destination, const MemoryState &source);
   const StoredSet &topSet(const lotus::analysis::SVFGNode *node) const;
-  const MemoryState &outState(const lotus::analysis::SVFGNode *node) const;
-  const MemoryState &inState(const lotus::analysis::SVFGNode *node) const;
+  const MemoryState &outState(const lotus::analysis::SVFGNode *node,
+                              const PointsToSet *objects = nullptr) const;
+  const MemoryState &inState(const lotus::analysis::SVFGNode *node,
+                             const PointsToSet *objects = nullptr) const;
+  // Private read interception keeps the transfer semantics shared by the
+  // sequential solver and worker-local parallel evaluators.
+  std::function<const StoredSet &(const lotus::analysis::SVFGNode *)> topRead_;
+  std::function<const MemoryState &(const lotus::analysis::SVFGNode *, bool,
+                                    const PointsToSet *)>
+      memoryRead_;
   PointsToSet expandIndirectObjects(const PointsToSet &objects) const;
   void initializeRecursiveFunctions();
   void initializeGlobalMemory();
@@ -104,6 +168,7 @@ private:
 
   const lotus::analysis::SVFG *graph_;
   Config config_;
+  bool persistentSets_ = false;
   HashConsedPointsToSetArena arena_;
   std::unordered_map<NodeID, StoredSet> topLevelPointsTo_;
   std::unordered_map<NodeID, MemoryState> dfIn_;

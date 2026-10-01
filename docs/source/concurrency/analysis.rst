@@ -332,7 +332,7 @@ returns ``nullopt`` when refinement is unavailable, otherwise whether two
 accesses may still address a common abstract object). Mutable and hash-consed
 points-to set backends are supported.
 
-**FlowSensitivePTA** (``Alias/InclusionBased/FlowSensitive/FlowSensitivePTA.h``):
+**FlowSensitivePTA** (``Alias/InclusionBased/FlowSensitive/Sparse/FlowSensitivePTA.h``):
 the general sparse flow-sensitive inclusion-based pointer analysis. It owns the
 top-level points-to sets and per-node MemorySSA ``IN``/``OUT`` state.
 

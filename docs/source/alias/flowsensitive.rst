@@ -31,9 +31,16 @@ The solver maintains:
 Location
 ========
 
-* ``include/Alias/InclusionBased/FlowSensitive/FlowSensitivePTA.h``
-* ``include/Alias/InclusionBased/FlowSensitive/VersionedFlowSensitivePTA.h``
+* ``include/Alias/InclusionBased/FlowSensitive/Sparse/FlowSensitivePTA.h``
+* ``include/Alias/InclusionBased/FlowSensitive/Versioned/VersionedFlowSensitivePTA.h``
+* ``include/Alias/InclusionBased/FlowSensitive/ValueFlow/ValueFlowPTA.h``
+* ``include/Alias/InclusionBased/FlowSensitive/ValueFlow/ValueFlowGraph.h``
 * ``lib/Alias/InclusionBased/FlowSensitive/``
+
+Headers and implementations are grouped into matching ``Sparse/``,
+``Versioned/``, and ``ValueFlow/`` subdirectories. The value-flow graph belongs
+to the direct value-flow variant. All variants are built into the
+``FlowSensitivePTA`` library.
 
 Components
 ==========
@@ -92,6 +99,15 @@ Key options:
 * ``--analysis=fspta|vfspta|vfpta`` – Select the conventional sparse
   flow-sensitive solver (default), object-versioned solver, or direct
   value-flow solver.
+* ``--parallel --threads=N`` – Evaluate ``fspta`` transfers concurrently with
+  validated snapshots and reference-order retirement. Zero workers selects
+  hardware concurrency; the worker count includes the calling thread.
+* ``--verify-parallel`` – Compare all public pointer and memory queries with
+  sequential solving on the final graph; exit with status 3 on a mismatch.
+* ``--parallel-block-size=N`` – Transfers per speculative worker block
+  (default 8). One disables local effect forwarding.
+* ``--parallel-memo=false`` and ``--parallel-share-sets=false`` – Disable
+  certified unchanged-effect reuse and immutable set sharing for experiments.
 * ``--points-to-sets=mutable|hash-consed`` – Points-to set backend for
   ``fspta``: mutable ordered sets (default) or interned immutable sets with
   operation caching.

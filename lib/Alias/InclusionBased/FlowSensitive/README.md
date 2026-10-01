@@ -1,5 +1,48 @@
 # Flow-sensitive inclusion-based pointer analysis
 
+The public headers in `include/Alias/InclusionBased/FlowSensitive/` and the
+three analysis implementations use matching variant directories:
+
+| Directory | Analysis | Input | Driver mode |
+| --- | --- | --- | --- |
+| `Sparse/` | `FlowSensitivePTA` | SVFG and MemorySSA | `fspta` |
+| `Versioned/` | `VersionedFlowSensitivePTA` | SVFG and object versions | `vfspta` |
+| `ValueFlow/` | `ValueFlowPTA` and its `ValueFlowGraph` | LLVM IR | `vfpta` |
+
+Include headers through their variant directory, for example
+`Alias/InclusionBased/FlowSensitive/Sparse/FlowSensitivePTA.h`.
+The parent `CMakeLists.txt` builds all three variants into the `FlowSensitivePTA`
+library used by the alias driver and tests.
+The private parallel runtime lives in `Parallel/` and serves the `Sparse/`
+public API.
+
+## Parallel execution
+
+```bash
+lotus-alias-fspta input.bc --parallel --threads=4 --dump-stats
+lotus-alias-fspta input.bc --parallel --threads=4 --verify-parallel
+```
+
+`FlowSensitivePTA::Config::parallel` selects a pipeline that evaluates upcoming
+transfers on immutable effect snapshots and retires them in the reference
+solver's worklist order. Worker blocks forward predicted effects privately;
+version and producer checks reject stale predictions. Certified unchanged
+effects can be reused without re-running a transfer. Indirect-call connectors
+run on the calling thread after evaluators drain.
+
+Use `--parallel-block-size=1`, `--parallel-memo=false`, and
+`--parallel-share-sets=false` for ablation experiments. Worker snapshots use
+shared immutable sets; selecting hash-consed public storage interns the final
+results. The unordered experimental policy (`--parallel-order=unordered`)
+can choose a different fixed point on order-sensitive transfers.
+Precise memory reads check object contents and entry presence; missing entries
+also validate the wildcard namespace. `--parallel-object-certificates=false`
+selects whole-channel validation for comparison.
+
+The design, proof assumptions, and current research limitations are recorded
+in `docs/research/parallel-flow-sensitive-pta.md` and
+`docs/research/parallel-fspta-proof.md` at the repository root.
+
 `FlowSensitivePTA` is the thread-independent sparse solver. It maintains:
 
 - top-level points-to sets for pointer-producing SVFG nodes;

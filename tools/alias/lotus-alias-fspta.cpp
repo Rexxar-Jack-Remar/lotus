@@ -2,9 +2,9 @@
  * @file lotus-alias-fspta.cpp
  * @brief Driver for Lotus flow-sensitive pointer analyses.
  */
-#include "Alias/InclusionBased/FlowSensitive/FlowSensitivePTA.h"
-#include "Alias/InclusionBased/FlowSensitive/ValueFlowPTA.h"
-#include "Alias/InclusionBased/FlowSensitive/VersionedFlowSensitivePTA.h"
+#include "Alias/InclusionBased/FlowSensitive/Sparse/FlowSensitivePTA.h"
+#include "Alias/InclusionBased/FlowSensitive/ValueFlow/ValueFlowPTA.h"
+#include "Alias/InclusionBased/FlowSensitive/Versioned/VersionedFlowSensitivePTA.h"
 #include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "IR/ICFG/ICFGBuilder.h"
 #include "IR/SVFG/SVFGBuilder.h"
@@ -29,8 +29,45 @@ namespace {
 enum class SetBackendOption { Mutable, HashConsed };
 enum class PartitionOption { Distinct, IntraDisjoint, InterDisjoint };
 enum class AnalysisOption { FlowSensitive, Versioned, ValueFlow };
+enum class ParallelOrderOption { Reference, Unordered };
 
 cl::OptionCategory FsptaCategory("Lotus flow-sensitive pointer analyses");
+cl::opt<bool>
+    Parallel("parallel",
+             cl::desc("Pipeline fspta transfers with dependency validation"),
+             cl::init(false), cl::cat(FsptaCategory));
+cl::opt<ParallelOrderOption> ParallelOrder(
+    "parallel-order", cl::desc("Parallel commit policy"),
+    cl::values(
+        clEnumValN(ParallelOrderOption::Reference, "reference",
+                   "Preserve sequential transfer order (default)"),
+        clEnumValN(ParallelOrderOption::Unordered, "unordered",
+                   "Research ablation: may select a different fixed point")),
+    cl::init(ParallelOrderOption::Reference), cl::cat(FsptaCategory));
+cl::opt<unsigned> Threads(
+    "threads",
+    cl::desc("Parallel workers including caller (0: hardware concurrency)"),
+    cl::init(0), cl::cat(FsptaCategory));
+cl::opt<bool> VerifyParallel(
+    "verify-parallel",
+    cl::desc("Compare every fspta result with sequential solving"),
+    cl::init(false), cl::cat(FsptaCategory));
+cl::opt<bool>
+    ParallelShareSets("parallel-share-sets",
+                      cl::desc("Share immutable parallel effect sets"),
+                      cl::init(true), cl::cat(FsptaCategory));
+cl::opt<unsigned>
+    ParallelBlockSize("parallel-block-size",
+                      cl::desc("Transfers per speculative worker block"),
+                      cl::init(8), cl::cat(FsptaCategory));
+cl::opt<bool>
+    ParallelMemo("parallel-memo",
+                 cl::desc("Reuse certified unchanged transfer effects"),
+                 cl::init(true), cl::cat(FsptaCategory));
+cl::opt<bool> ParallelObjectCertificates(
+    "parallel-object-certificates",
+    cl::desc("Validate precise memory reads by object"), cl::init(true),
+    cl::cat(FsptaCategory));
 cl::opt<std::string> InputFilename(cl::Positional,
                                    cl::desc("<input bitcode file>"),
                                    cl::Required, cl::cat(FsptaCategory));
@@ -232,6 +269,30 @@ int main(int argc, char **argv) {
   cl::HideUnrelatedOptions(FsptaCategory);
   cl::ParseCommandLineOptions(argc, argv,
                               "Lotus flow-sensitive pointer analyses\n");
+  if ((Parallel || VerifyParallel || Threads != 0 ||
+       ParallelOrder.getNumOccurrences() != 0 ||
+       ParallelShareSets.getNumOccurrences() != 0 ||
+       ParallelBlockSize.getNumOccurrences() != 0 ||
+       ParallelMemo.getNumOccurrences() != 0 ||
+       ParallelObjectCertificates.getNumOccurrences() != 0) &&
+      Analysis != AnalysisOption::FlowSensitive) {
+    errs() << "Parallel execution is supported only for --analysis=fspta\n";
+    return 1;
+  }
+  if ((VerifyParallel || Threads != 0 ||
+       ParallelOrder.getNumOccurrences() != 0 ||
+       ParallelShareSets.getNumOccurrences() != 0 ||
+       ParallelBlockSize.getNumOccurrences() != 0 ||
+       ParallelMemo.getNumOccurrences() != 0 ||
+       ParallelObjectCertificates.getNumOccurrences() != 0) &&
+      !Parallel) {
+    errs() << "Parallel execution options require --parallel\n";
+    return 1;
+  }
+  if (ParallelBlockSize == 0) {
+    errs() << "--parallel-block-size must be positive\n";
+    return 1;
+  }
   LLVMContext context;
   SMDiagnostic diagnostic;
   std::unique_ptr<Module> module =
@@ -276,6 +337,14 @@ int main(int argc, char **argv) {
     versionedSolver->solve();
   } else {
     FlowSensitivePTA::Config solverConfig;
+    solverConfig.parallel = Parallel;
+    solverConfig.unorderedParallel =
+        ParallelOrder == ParallelOrderOption::Unordered;
+    solverConfig.workerThreads = Threads;
+    solverConfig.shareParallelSets = ParallelShareSets;
+    solverConfig.parallelBlockSize = ParallelBlockSize;
+    solverConfig.parallelMemoize = ParallelMemo;
+    solverConfig.parallelObjectCertificates = ParallelObjectCertificates;
     solverConfig.setBackend = SetBackend == SetBackendOption::HashConsed
                                   ? PointsToSetBackend::HashConsed
                                   : PointsToSetBackend::Mutable;
@@ -283,6 +352,27 @@ int main(int argc, char **argv) {
     solver =
         std::make_unique<FlowSensitivePTA>(*graph, std::move(solverConfig));
     solver->solve();
+    if (VerifyParallel) {
+      // Both solvers see the final graph after all parallel topology epochs.
+      // No additional graph mutation is permitted during this comparison.
+      FlowSensitivePTA reference(*graph);
+      reference.solve();
+      std::string difference;
+      const bool equal = solver->hasSameSolution(reference, &difference);
+      outs() << "fspta.parallel-equivalent=" << (equal ? "true" : "false")
+             << "\n";
+      if (!equal) {
+        errs() << "Parallel/sequential flow-sensitive results differ: "
+               << difference << "\n";
+        std::string parallelDifference, sequentialDifference;
+        errs() << "Parallel fixed point: "
+               << solver->isFixedPoint(&parallelDifference) << " "
+               << parallelDifference << "\nSequential fixed point: "
+               << reference.isFixedPoint(&sequentialDifference) << " "
+               << sequentialDifference << "\n";
+        return 3;
+      }
+    }
   }
   auto queryPointsTo = [&](const Value *value) -> std::optional<SVFGNodeBS> {
     return versionedSolver ? versionedSolver->pointsTo(value)
@@ -418,6 +508,37 @@ int main(int argc, char **argv) {
              << "\n"
              << "fspta.indirect-call-edges=" << stats.indirectCallEdges << "\n"
              << "fspta.hash-consed-sets=" << stats.hashConsedUniqueSets << "\n";
+      outs() << "fspta.solve-seconds=" << stats.solveSeconds << "\n"
+             << "fspta.parallel-order="
+             << (!Parallel ? "sequential"
+                 : ParallelOrder == ParallelOrderOption::Reference
+                     ? "reference"
+                     : "unordered")
+             << "\n"
+             << "fspta.parallel-threads=" << stats.parallelThreads << "\n"
+             << "fspta.parallel-commits=" << stats.parallelCommits << "\n"
+             << "fspta.parallel-conflicts=" << stats.parallelConflicts << "\n"
+             << "fspta.parallel-publications=" << stats.parallelPublications
+             << "\n"
+             << "fspta.parallel-notifications=" << stats.parallelNotifications
+             << "\n"
+             << "fspta.parallel-peak-workers=" << stats.parallelPeakWorkers
+             << "\n"
+             << "fspta.parallel-blocks=" << stats.parallelBlocks << "\n"
+             << "fspta.parallel-forwarded-reads="
+             << stats.parallelForwardedReads << "\n"
+             << "fspta.parallel-accepted-forwarded-reads="
+             << stats.parallelAcceptedForwardedReads << "\n"
+             << "fspta.parallel-memo-hits=" << stats.parallelMemoHits << "\n"
+             << "fspta.parallel-object-reads=" << stats.parallelObjectReads
+             << "\n"
+             << "fspta.parallel-negative-reads=" << stats.parallelNegativeReads
+             << "\n"
+             << "fspta.parallel-wildcard-reads=" << stats.parallelWildcardReads
+             << "\n"
+             << "fspta.parallel-object-salvages="
+             << stats.parallelObjectSalvages << "\n"
+             << "fspta.topology-epochs=" << stats.topologyEpochs << "\n";
     }
   }
   std::size_t validations = 0;
