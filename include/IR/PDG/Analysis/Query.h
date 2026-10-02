@@ -18,8 +18,11 @@
 
 #pragma once
 
-#include "IR/PDG/Analysis/DataFlowQuery.h"
+#include "IR/PDG/Analysis/ApiQuery.h"
+#include "IR/PDG/Analysis/ArithmeticQuery.h"
 #include "IR/PDG/Analysis/BoundsQuery.h"
+#include "IR/PDG/Analysis/CallContractQuery.h"
+#include "IR/PDG/Analysis/DataFlowQuery.h"
 #include "IR/PDG/Analysis/DependenceQuery.h"
 #include "IR/PDG/Analysis/DiffQuery.h"
 #include "IR/PDG/Analysis/ImpactQuery.h"

@@ -13,6 +13,9 @@ public:
   explicit FunctionFacts(llvm::Function &function);
   ~FunctionFacts();
   bool equivalent(const llvm::Value &left, const llvm::Value &right) const;
+  /// Resolve a pointer loaded from must-alias reaching stores. Ambiguous or
+  /// clobbered loads retain their own identity, rather than guessing an alias.
+  const llvm::Value &pointerOrigin(const llvm::Value &value) const;
   bool reaches(const llvm::Instruction &from,
                const llvm::Instruction &to) const;
   bool blocksConnected(const llvm::BasicBlock &left,

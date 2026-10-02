@@ -50,10 +50,13 @@ struct StateQueryResult {
 };
 
 /// PDG-native intraprocedural state service over the retained LLVM CFG.
-/// Tracks exact scalar stack cells, strong stores, predecessor joins, and
-/// pointer-null branch refinements. Unknown writes and escaping cells become
-/// unknown. Direct-call summaries describe null returns and parameter reads;
-/// dependence reachability is never interpreted as definite initialization.
+/// Tracks scalar stack cells and exact conditional output memory regions,
+/// strong stores, predecessor joins, stable value snapshots, signed constant
+/// Guards, and pointer-null refinements. Scanf effects relate assignment counts
+/// to output initialization; bounded direct-call summaries relate integral
+/// return statuses to scalar/field writes. Unknown writes and escaping cells
+/// become unknown. Mixed uninitialized paths require a bounded Guard-consistent
+/// witness; dependence reachability alone is never definite initialization.
 class StateQuery {
 public:
   static const std::vector<StateRuleDescriptor> &catalog();

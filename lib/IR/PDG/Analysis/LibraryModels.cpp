@@ -85,8 +85,14 @@ Optional<FormatModel> LibraryModels::format(const Function &function) {
                                   {"__isoc99_sscanf", 1, 2, true},
                                   {"__isoc99_fscanf", 1, 2, true}};
   for (const Entry &entry : entries)
-    if (ValueFacts::hasLibraryName(function, entry.name, true, true))
-      return FormatModel{entry.format, entry.first, entry.scanf};
+    if (ValueFacts::hasLibraryName(function, entry.name, true, true)) {
+      const StringRef name(entry.name);
+      bool wide = name == "wprintf" || name == "fwprintf" ||
+                  name == "swprintf" || name == "wscanf" || name == "fwscanf" ||
+                  name == "swscanf" || name == "StringCchPrintfW" ||
+                  name == "StringCbPrintfW";
+      return FormatModel{entry.format, entry.first, entry.scanf, wide};
+    }
   return None;
 }
 
@@ -174,6 +180,8 @@ Optional<FormatFacts> parseFormat(StringRef text, bool scanf) {
       i = start;
     }
     bool suppress = false, width = false, allocated = false;
+    Optional<unsigned> field_width, precision;
+    unsigned width_argument = 0, precision_argument = 0;
     if (scanf) {
       if (i < text.size() && text[i] == '*') {
         suppress = true;
@@ -184,6 +192,7 @@ Optional<FormatFacts> parseFormat(StringRef text, bool scanf) {
       if (i != before && !count)
         return None;
       width = count && *count > 0;
+      field_width = count;
       if (i < text.size() && text[i] == 'm') {
         allocated = true;
         ++i;
@@ -196,6 +205,7 @@ Optional<FormatFacts> parseFormat(StringRef text, bool scanf) {
           if (i == text.size() || text[i] != '.')
             break;
           ++i;
+          precision = 0;
         }
         if (i < text.size() && text[i] == '*') {
           ++i;
@@ -204,6 +214,8 @@ Optional<FormatFacts> parseFormat(StringRef text, bool scanf) {
             if (i == text.size() || text[i++] != '$')
               return None;
           }
+          unsigned argument = star ? *star : next_argument;
+          (part == 0 ? width_argument : precision_argument) = argument;
           if (!consume(star))
             return None;
         } else {
@@ -211,11 +223,20 @@ Optional<FormatFacts> parseFormat(StringRef text, bool scanf) {
           auto count = digits(i);
           if (i != before && !count)
             return None;
+          if (count)
+            (part == 0 ? field_width : precision) = count;
         }
       }
     }
-    while (i < text.size() && StringRef("hljztLq").contains(text[i]))
+    size_t length_start = i;
+    while (i < text.size() && StringRef("hljztLqw").contains(text[i]))
       ++i;
+    if (i < text.size() && text[i] == 'I') {
+      ++i;
+      if (text.substr(i).startswith("32") || text.substr(i).startswith("64"))
+        i += 2;
+    }
+    std::string length = text.slice(length_start, i).str();
     if (i == text.size())
       return None;
     char conversion = text[i];
@@ -239,7 +260,9 @@ Optional<FormatFacts> parseFormat(StringRef text, bool scanf) {
       unsigned argument = index ? *index : next_argument;
       if (!consume(index))
         return None;
-      result.conversions.push_back({argument, conversion, directive_offset});
+      result.conversions.push_back(
+          {argument, conversion, directive_offset, length, field_width,
+           precision, width_argument, precision_argument, allocated});
     }
     result.unbounded_string |=
         scanf && !suppress && !width && !allocated && conversion == 's';

@@ -57,6 +57,11 @@ This prints all node labels, edge types, node/edge properties, group labels, and
   overflow does not prove unknown accesses safe)
 - `access_bytes`, `access_capacity_bytes`, `access_offset_bytes` (exactly one
   known access; sizes follow the target ABI and offsets can be negative)
+- `arg<N>_string_termination`, `arg<N>_string_min_bytes`, `arg<N>_string_max_bytes`
+  (content before the call, keeping unknown termination distinct)
+- `format_output_max_bytes`, `format_output_small_float_max_bytes`,
+  `format_output_is_buffer`, `format_output_limit_arg` (parsed output including
+  the NUL and API destination/limit roles)
 - `pointer_nullness`, `pointee_initialization` (load/store address and pointee
   immediately before the instruction; applicable unknown facts are `unknown`)
 - `llvm` (LLVM IR string for the underlying value/instruction)
@@ -73,6 +78,7 @@ The `security/` directory contains categorized security analysis patterns.
 | File | Patterns | Analysis modes |
 |------|----------|----------------|
 | `security/codeql-taint.cypher` | Shared source/sink roles for PDG-native process, command, SQL, path and format flows | Cypher selections + `--analysis rules`; source/concat evidence in JSON |
+| `security/codeql-string-bounds.cypher` | Program-point string termination/length, buffer formatting roles and output bounds | Shared MemorySSA string/format facts; native rules for taint and relative guards |
 | `security/codeql-memory-access.cypher` | Subobject capacity, access width, negative offsets, read/write overflow | Shared BoundsQuery facts; native rules also check symbolic ends |
 | `security/codeql-memory-state.cypher` | Nullable dereferences, definite/conditional uninitialized loads | Shared StateQuery facts; native lifetime rules retain object/path state |
 | `security/codeql-buffer-bounds.cypher` | Target-ABI copy bounds versus destination capacity | Semantic Cypher predicates; native rules for dynamic lengths |
@@ -88,7 +94,7 @@ The `security/` directory contains categorized security analysis patterns.
 
 Each file documents the prerequisites and CLI invocation for each pattern.
 
-`--list-rules` lists 48 migrated CodeQL rule IDs and their coverage. Run
+`--list-rules` lists supported CodeQL rule IDs and their coverage. Run
 `--analysis rules --rule cpp/bad-strncpy-size --format json` for semantic
 checks. `--list-cwes` groups implemented IDs by original CodeQL CWE tags;
 `--analysis rules --cwe 401,415,416,457,476,775 --format json` selects relevant

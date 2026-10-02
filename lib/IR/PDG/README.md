@@ -36,15 +36,26 @@ The Cypher query-language parser and executor live separately under
 - **`RuleQuery`**: semantic CodeQL migrations with IDs, coverage boundaries,
   findings, CWE tags, and evidence; shared LLVM facts live in **`ValueFacts`**
 - **`BoundsQuery`**: allocation/subobject capacity, access widths and offsets,
-  symbolic end relations, terminator space; uses LLVM AA and MemorySSA
-- **`LifetimeQuery`**: per-object CFG release/escape states with compatible
-  branch predicates; double release, use after release, never/may resource leaks
-- **`StateQuery`**: strong local updates, CFG joins, null guards and direct-call
-  null/dereference summaries; exposes pre-access pointer/initialization facts
+  symbolic end relations, program-point string termination/length and format
+  output bounds; uses LLVM AA and MemorySSA
+- **`LifetimeQuery`**: per-object CFG release/escape states, matched direct
+  calls, realloc alternatives and lock counts; compatible branch predicates
+  distinguish double release, use after release and never/may resource leaks
+- **`StateQuery`**: strong local updates, guard-consistent path witnesses,
+  null/dereference and conditional output summaries, scanf output effects;
+  exposes pre-access pointer/initialization facts
 - **`TaintQuery`**: PDG-owned CFG worklist and context-keyed function summaries,
   matched call/return mappings, field offsets, library transfers,
-  transparent sink wrappers and domain-specific barriers; exposes source and
+  parameter-provenance wrapper summaries, flag guards and domain-specific barriers; exposes source and
   concatenation evidence without interpreting arbitrary PDG edges as taint
+- **`ArithmeticQuery`**: promotion/bitwidth-aware mathematical ranges, edge
+  guards, MemorySSA definitions, allocation provenance and scalar taint
+- **`ApiQuery`**: security settings and CFG API protocols for certificates,
+  cryptography, XML entities, DACLs and permission masks
+- **`CallContractQuery`**: target-ABI format types, argument contracts and
+  inferred variadic sentinel conventions
+- **`CppLibraryModels`**: exact standard string API effects with separate opaque
+  object contents and bytes; stable object-return aliases and numeric barriers
 - **`PDGCriteriaResolver`**: criteria resolution from nodes, LLVM values,
   function names, callee names, source locations, property specs, and Cypher
   selections
@@ -134,6 +145,10 @@ Analysis mode accepts ``--scope-function``, ``--scope-query``,
 Semantic rules use `--analysis rules --rule <CodeQL ID> --format text|json`;
 `--list-rules` lists rules and coverage. Rules use scope/criteria but do
 not infer taint or path feasibility from dependence reachability.
+CLI lifetime exploration defaults to 4096 states per object
+(`--lifetime-state-limit`, 0 disables this budget), independently of the
+`--taint-step-limit` worklist budget. Incomplete exploration is reported.
+Each rule descriptor records retained-IR and source-information limitations.
 
 ## See Also
 

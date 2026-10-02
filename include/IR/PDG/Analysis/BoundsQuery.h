@@ -1,6 +1,7 @@
 #pragma once
 
 #include "llvm/ADT/Optional.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 
 #include <cstdint>
@@ -9,6 +10,34 @@
 #include <vector>
 
 namespace pdg {
+
+struct TaintFlowResult;
+
+enum class StringTermination { Unknown, Terminated, Unproven };
+
+/// Content facts immediately before a particular instruction, with lengths in
+/// bytes excluding the terminator. Unproven means a tracked local source has
+/// no established terminator; Unknown includes escaped or unmodeled contents.
+struct StringBounds {
+  StringTermination termination = StringTermination::Unknown;
+  llvm::Optional<uint64_t> minimum_bytes;
+  llvm::Optional<uint64_t> maximum_bytes;
+  bool value_flow = false;
+  std::vector<const llvm::Instruction *> evidence;
+};
+
+/// Formatting output bounds include the terminating character. The limited
+/// float estimate follows CodeQL's convention of capping each %f conversion
+/// at eight characters, so callers can distinguish float-specific findings.
+struct FormatBounds {
+  bool output_buffer = false;
+  llvm::Optional<unsigned> explicit_limit_argument;
+  llvm::Optional<uint64_t> maximum_bytes;
+  llvm::Optional<uint64_t> maximum_bytes_without_large_floats;
+  bool value_flow = false;
+  bool floating_conversion = false;
+  std::vector<unsigned> unbounded_string_arguments;
+};
 
 /// Bounds refer to the closest statically identified subobject, not necessarily
 /// the enclosing allocation. A pointer one past the end is valid to construct;
@@ -59,9 +88,14 @@ public:
   ~BoundsQuery();
   llvm::Optional<MemoryRegion> region(const llvm::Value &pointer) const;
   std::vector<BufferAccess> accesses(const llvm::Instruction &site) const;
+  StringBounds stringBounds(const llvm::Value &pointer,
+                            const llvm::Instruction &at) const;
+  FormatBounds formatBounds(const llvm::CallBase &call) const;
   std::vector<BoundsFinding> analyze() const;
   static const std::vector<BoundsRuleDescriptor> &catalog();
-  BoundsQueryResult analyze(const llvm::Module &module) const;
+  static bool requiresTaint(const std::string &id);
+  BoundsQueryResult analyze(const llvm::Module &module,
+                            const TaintFlowResult *taint = nullptr) const;
 
 private:
   struct Impl;

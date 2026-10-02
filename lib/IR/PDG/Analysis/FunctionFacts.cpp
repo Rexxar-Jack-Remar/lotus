@@ -1,5 +1,6 @@
 #include "IR/PDG/Analysis/FunctionFacts.h"
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
@@ -51,6 +52,63 @@ struct FunctionFacts::Impl {
   mutable ScalarEvolution evolution;
   mutable std::unique_ptr<MemorySSA> memory_ssa;
   std::map<const Value *, APInt> constant_arguments;
+  mutable std::map<const Value *, const Value *> pointer_origins;
+
+  const Value *pointerOrigin(const Value *value, unsigned depth) const {
+    if (!value->getType()->isPointerTy() || !depth)
+      return value;
+    value = value->stripPointerCastsAndAliases();
+    auto known = pointer_origins.find(value);
+    if (known != pointer_origins.end())
+      return known->second;
+    const auto *load = dyn_cast<LoadInst>(value);
+    if (!load || load->getFunction() != &function || load->isAtomic() ||
+        load->isVolatile())
+      return value;
+    if (!memory_ssa)
+      memory_ssa = std::make_unique<MemorySSA>(
+          function, &aa, const_cast<DominatorTree *>(&dominators));
+    const Value *result = nullptr;
+    bool ambiguous = false;
+    SmallPtrSet<const MemoryAccess *, 16> seen;
+    SmallVector<MemoryAccess *, 16> pending;
+    pending.push_back(memory_ssa->getWalker()->getClobberingMemoryAccess(load));
+    while (!pending.empty()) {
+      auto *access = pending.pop_back_val();
+      if (!access) {
+        ambiguous = true;
+        break;
+      }
+      if (!seen.insert(access).second)
+        continue;
+      if (const auto *phi = dyn_cast<MemoryPhi>(access)) {
+        for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i)
+          pending.push_back(phi->getIncomingValue(i));
+        continue;
+      }
+      const auto *definition = dyn_cast<MemoryDef>(access);
+      const auto *store =
+          definition ? dyn_cast_or_null<StoreInst>(definition->getMemoryInst())
+                     : nullptr;
+      if (!store || store->isAtomic() || store->isVolatile() ||
+          store->getValueOperand()->getType() != load->getType() ||
+          aa.alias(MemoryLocation::get(store), MemoryLocation::get(load)) !=
+              AliasResult::MustAlias) {
+        ambiguous = true;
+        break;
+      }
+      const Value *incoming =
+          pointerOrigin(store->getValueOperand(), depth - 1);
+      if (result && result != incoming) {
+        ambiguous = true;
+        break;
+      }
+      result = incoming;
+    }
+    result = !ambiguous && result ? result : value;
+    pointer_origins.emplace(value, result);
+    return result;
+  }
 
   explicit Impl(Function &f)
       : function(f), tli_impl(Triple(f.getParent()->getTargetTriple())),
@@ -64,6 +122,8 @@ struct FunctionFacts::Impl {
   bool equivalent(const Value *left, const Value *right, unsigned depth) const {
     left = left->stripPointerCasts();
     right = right->stripPointerCasts();
+    if (isa<UndefValue>(left) || isa<UndefValue>(right))
+      return false;
     if (left == right)
       return true;
     if (depth == 0 || left->getType() != right->getType())
@@ -72,6 +132,12 @@ struct FunctionFacts::Impl {
                *b = dyn_cast<Instruction>(right);
     if (!a || !b || a->getFunction() != &function ||
         b->getFunction() != &function)
+      return false;
+    // Allocation sites create distinct storage even when their types, sizes
+    // and alignments match. Distinct freeze results may also choose different
+    // values from the same undefined input.
+    if (isa<AllocaInst>(a) || isa<AllocaInst>(b) || isa<FreezeInst>(a) ||
+        isa<FreezeInst>(b))
       return false;
     if (const auto *la = dyn_cast<LoadInst>(a)) {
       const auto *lb = dyn_cast<LoadInst>(b);
@@ -275,8 +341,12 @@ struct FunctionFacts::Impl {
                             branch->getSuccessor(1) == edge_to);
       if (!selected_edge && !dominators.dominates(branch, &at))
         continue;
-      bool yes = dominators.dominates(branch->getSuccessor(0), at.getParent());
-      bool no = dominators.dominates(branch->getSuccessor(1), at.getParent());
+      bool yes = dominators.dominates(
+          BasicBlockEdge(branch->getParent(), branch->getSuccessor(0)),
+          at.getParent());
+      bool no = dominators.dominates(
+          BasicBlockEdge(branch->getParent(), branch->getSuccessor(1)),
+          at.getParent());
       if (selected_edge) {
         yes = branch->getSuccessor(0) == edge_to;
         no = branch->getSuccessor(1) == edge_to;
@@ -424,6 +494,10 @@ FunctionFacts::FunctionFacts(Function &f) : impl_(new Impl(f)) {}
 FunctionFacts::~FunctionFacts() = default;
 bool FunctionFacts::equivalent(const Value &a, const Value &b) const {
   return impl_->equivalent(&a, &b, 32);
+}
+
+const Value &FunctionFacts::pointerOrigin(const Value &value) const {
+  return *impl_->pointerOrigin(&value, 16);
 }
 bool FunctionFacts::reaches(const Instruction &from,
                             const Instruction &to) const {

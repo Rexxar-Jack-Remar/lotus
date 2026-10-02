@@ -1,5 +1,6 @@
 #include "IR/PDG/Analysis/ValueFacts.h"
 
+#include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Demangle/Demangle.h"
@@ -173,13 +174,28 @@ const Value *ValueFacts::lengthSource(const Value &value) {
   return nullptr;
 }
 
+static std::string canonicalSymbolName(const Function &function) {
+  StringRef symbol = function.getName();
+  if (symbol.consume_front("\01")) {
+    const Module *module = function.getParent();
+    char prefix = module ? module->getDataLayout().getGlobalPrefix() : '\0';
+    if (!prefix && module &&
+        module->getDataLayoutStr().find("m:") == std::string::npos &&
+        Triple(module->getTargetTriple()).isOSDarwin())
+      prefix = '_';
+    if (prefix && !symbol.empty() && symbol.front() == prefix)
+      symbol = symbol.drop_front();
+  }
+  return symbol.str();
+}
+
 bool ValueFacts::hasLibraryName(const Function &function,
                                 const std::string &name, bool allow_std,
                                 bool allow_bsl) {
-  if (function.getName() == name)
+  const std::string mangled = canonicalSymbolName(function);
+  if (mangled == name)
     return true;
   ItaniumPartialDemangler demangler;
-  const std::string mangled = function.getName().str();
   if (demangler.partialDemangle(mangled.c_str()) || !demangler.isFunction())
     return false;
   char *base = demangler.getFunctionBaseName(nullptr, nullptr);
@@ -195,9 +211,9 @@ bool ValueFacts::hasLibraryName(const Function &function,
 
 std::string ValueFacts::functionBaseName(const Function &function) {
   ItaniumPartialDemangler demangler;
-  const std::string mangled = function.getName().str();
+  const std::string mangled = canonicalSymbolName(function);
   if (demangler.partialDemangle(mangled.c_str()) || !demangler.isFunction())
-    return function.getName().str();
+    return mangled;
   char *base = demangler.getFunctionBaseName(nullptr, nullptr);
   std::string name = base ? base : function.getName().str();
   std::free(base);

@@ -1,6 +1,9 @@
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/KnownBits.h"
 
+#include "IR/PDG/Analysis/CppLibraryModels.h"
 #include "IR/PDG/Analysis/LibraryModels.h"
 #include "IR/PDG/Analysis/ValueFacts.h"
 
@@ -26,6 +29,8 @@ Optional<uint64_t> argumentCount(const CallBase &call, unsigned index) {
 } // namespace
 
 CallTaintModel LibraryModels::taint(const CallBase &call) {
+  if (auto cpp = CppLibraryModels::taint(call))
+    return *cpp;
   CallTaintModel model;
   const Function *target = ValueFacts::callee(call);
   if (!target || !target->isDeclaration())
@@ -121,7 +126,9 @@ CallTaintModel LibraryModels::taint(const CallBase &call) {
     if (whole)
       model.overwrites.push_back(memory(dest));
     pipe(memory(source), memory(dest));
-    if (call.getType()->isPointerTy())
+    // stpcpy's result points at the newly written NUL, not at the copied
+    // user-controlled characters. It is an empty string at this point.
+    if (call.getType()->isPointerTy() && !named(*target, {"stpcpy"}))
       pipe(memory(source), memory(-1));
     return model;
   }
@@ -161,6 +168,9 @@ CallTaintModel LibraryModels::taint(const CallBase &call) {
   if (named(*target, {"strdup", "strndup", "strchr", "strrchr", "strstr",
                       "strcasestr"})) {
     model.known = true;
+    if (named(*target, {"strndup"}) && argumentCount(call, 1) &&
+        *argumentCount(call, 1) == 0)
+      return model;
     pipe(memory(0), memory(-1));
     return model;
   }
@@ -227,12 +237,32 @@ CallTaintModel LibraryModels::taint(const CallBase &call) {
   }
   model.known = allocation(*target) != AllocationKind::Unknown ||
                 release(*target) != ReleaseKind::Unknown ||
-                readsOnly(*target) || target->isIntrinsic();
+                readsOnly(*target) || target->isIntrinsic() ||
+                named(*target, {"wordexp"});
   // Sinks and SQL operations do not synthesize unknown output taint.
-  for (auto domain : {TaintDomain::Process, TaintDomain::Command,
-                      TaintDomain::Sql, TaintDomain::Path})
+  for (auto domain :
+       {TaintDomain::Process, TaintDomain::Command, TaintDomain::Sql,
+        TaintDomain::Path, TaintDomain::Wordexp})
     model.known |= !taintSinks(call, domain).empty();
   return model;
+}
+
+Optional<unsigned> LibraryModels::returnAlias(const CallBase &call) {
+  if (auto cpp = CppLibraryModels::returnAlias(call))
+    return cpp;
+  const Function *target = ValueFacts::callee(call);
+  if (!target || !target->isDeclaration() || !call.getType()->isPointerTy() ||
+      !call.arg_size())
+    return None;
+  if (named(*target,
+            {"memcpy",       "memmove",      "memset",        "strcpy",
+             "strncpy",      "strcat",       "strncat",       "wcscpy",
+             "wcsncpy",      "wcscat",       "wcsncat",       "wmemcpy",
+             "wmemmove",     "wmemset",      "__memcpy_chk",  "__memmove_chk",
+             "__memset_chk", "__strcpy_chk", "__strncpy_chk", "__strcat_chk",
+             "__strncat_chk"}))
+    return 0;
+  return None;
 }
 
 std::vector<unsigned> LibraryModels::taintSinks(const CallBase &call,
@@ -240,6 +270,14 @@ std::vector<unsigned> LibraryModels::taintSinks(const CallBase &call,
   const Function *target = ValueFacts::callee(call);
   if (!target)
     return {};
+  if (domain == TaintDomain::Wordexp && named(*target, {"wordexp"}) &&
+      target->isDeclaration() && call.arg_size() >= 3) {
+    // WRDE_NOCMD is 4 in the upstream rule's POSIX API model. Known bits also
+    // retain this guarantee for flags assembled with a dynamic bitwise OR.
+    if (sinkGuardDisabled(call, {0, 2, 4}))
+      return {};
+    return {0};
+  }
   if (domain == TaintDomain::Format) {
     auto model = format(*target);
     return model && !model->scanf && model->format < call.arg_size()
@@ -298,5 +336,25 @@ std::vector<unsigned> LibraryModels::taintSinks(const CallBase &call,
     }
   }
   return {};
+}
+
+std::vector<TaintSinkGuard> LibraryModels::taintSinkGuards(const CallBase &call,
+                                                           TaintDomain domain) {
+  const Function *target = ValueFacts::callee(call);
+  if (domain == TaintDomain::Wordexp && target && target->isDeclaration() &&
+      named(*target, {"wordexp"}) && call.arg_size() >= 3)
+    return {{0, 2, 4}};
+  return {};
+}
+
+bool LibraryModels::sinkGuardDisabled(const CallBase &call,
+                                      const TaintSinkGuard &guard) {
+  const Value *flags = ValueFacts::argument(call, guard.flag_argument);
+  if (!flags || !flags->getType()->isIntegerTy())
+    return false;
+  const auto bits = computeKnownBits(flags, call.getModule()->getDataLayout(),
+                                     0, nullptr, &call);
+  return !(bits.One & APInt(bits.getBitWidth(), guard.disabled_by_any_set_bits))
+              .isZero();
 }
 } // namespace pdg

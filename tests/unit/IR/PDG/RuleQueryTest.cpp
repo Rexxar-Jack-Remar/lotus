@@ -1,5 +1,6 @@
 #include "IR/PDG/Analysis/RuleQuery.h"
 
+#include "IR/PDG/Analysis/ArithmeticQuery.h"
 #include "IR/PDG/Analysis/BoundsQuery.h"
 #include "IR/PDG/Analysis/FunctionFacts.h"
 #include "IR/PDG/Analysis/LibraryModels.h"
@@ -9,6 +10,8 @@
 #include "IR/PDG/Analysis/ValueFacts.h"
 #include "IR/PDG/QueryLanguage/Cypher.h"
 #include "TestUtils/LLVMHelpers.h"
+
+#include <chrono>
 
 #include <gtest/gtest.h>
 
@@ -1200,12 +1203,14 @@ TEST_F(PDGRuleQueryTest, CypherMemoryFactsRespectWidthsGuardsAndPreStoreState) {
                   "n.access_offset_bytes = 4 AND n.access_capacity_bytes = 4 "
                   "AND n.access_bytes = 1 RETURN n"),
             1u);
-  EXPECT_EQ(count("MATCH (n:INST) WHERE n.opcode = 'load' AND "
+  EXPECT_EQ(count("MATCH (n:INST) WHERE n.name = 'uninit' AND "
                   "n.pointee_initialization = 'uninitialized' RETURN n"),
             1u);
-  EXPECT_EQ(count("MATCH (n:INST) WHERE n.opcode = 'store' AND "
-                  "n.pointee_initialization = 'uninitialized' RETURN n"),
-            1u);
+  EXPECT_EQ(
+      count(
+          "MATCH (n:INST) WHERE n.opcode = 'store' AND n.access_bytes = 4 AND "
+          "n.pointee_initialization = 'uninitialized' RETURN n"),
+      1u);
   EXPECT_EQ(count("MATCH (n:INST) WHERE n.name = 'initialized' AND "
                   "n.pointee_initialization = 'initialized' RETURN n"),
             1u);
@@ -1341,5 +1346,465 @@ TEST_F(PDGRuleQueryTest,
   auto result = run("cpp/memory-never-freed");
   ASSERT_EQ(result.findings.size(), 1u);
   EXPECT_EQ(result.findings.front().site->getFunc()->getName(), "private");
+}
+TEST_F(PDGRuleQueryTest, StorageIdentityAndFreezeAreNotStructuralEquivalence) {
+  load(R"(
+    define i32 @identity(i32 %left, i32 %right) {
+      %a = alloca i32
+      %b = alloca i32
+      store i32 %left, i32* %a
+      store i32 %right, i32* %b
+      %x = load i32, i32* %a
+      %y = load i32, i32* %b
+      %again = load i32, i32* %a
+      %f1 = freeze i32 undef
+      %f2 = freeze i32 undef
+      %sum = add i32 %x, %y
+      ret i32 %sum
+    }
+  )");
+  auto *function = module->getFunction("identity");
+  auto named = [&](StringRef name) -> Value * {
+    for (auto &inst : function->getEntryBlock())
+      if (inst.getName() == name)
+        return &inst;
+    return nullptr;
+  };
+  FunctionFacts facts(*function);
+  EXPECT_FALSE(facts.equivalent(*named("a"), *named("b")));
+  EXPECT_FALSE(facts.equivalent(*named("x"), *named("y")));
+  EXPECT_TRUE(facts.equivalent(*named("x"), *named("again")));
+  EXPECT_FALSE(facts.equivalent(*named("f1"), *named("f2")));
+  EXPECT_TRUE(facts.equivalent(*named("f1"), *named("f1")));
+}
+
+TEST_F(PDGRuleQueryTest, RangeGuardsRequireTheControllingEdgeToDominateTheUse) {
+  load(R"(
+    declare i8* @malloc(i64)
+    declare void @observe()
+    define i8* @join_guard(i64 %n) {
+      %large = icmp ugt i64 %n, 1024
+      br i1 %large, label %observe, label %join
+    observe:
+      call void @observe()
+      br label %join
+    join:
+      %allocation = call i8* @malloc(i64 %n)
+      ret i8* %allocation
+    }
+    define i8* @exit_guard(i64 %n) {
+      %large = icmp ugt i64 %n, 1024
+      br i1 %large, label %exit, label %allocate
+    exit:
+      ret i8* null
+    allocate:
+      %allocation = call i8* @malloc(i64 %n)
+      ret i8* %allocation
+    }
+  )");
+  for (const char *name : {"join_guard", "exit_guard"}) {
+    auto *function = module->getFunction(name);
+    const Instruction *allocation = nullptr;
+    for (const auto &block : *function)
+      for (const auto &inst : block)
+        if (inst.getName() == "allocation")
+          allocation = &inst;
+    ASSERT_NE(allocation, nullptr);
+    EXPECT_EQ(
+        FunctionFacts(*function).boundedAt(*function->getArg(0), *allocation),
+        StringRef(name) == "exit_guard");
+  }
+}
+
+TEST_F(PDGRuleQueryTest, ScalarAndMemoryTaintFactsKeepProgramPointSeparation) {
+  load(R"(
+    @name = private constant [2 x i8] c"X\00"
+    @clean = private constant [3 x i8] c"ok\00"
+    declare i8* @getenv(i8*)
+    declare i32 @atoi(i8*)
+    declare i8* @strcpy(i8*,i8*)
+    declare i64 @strlen(i8*)
+    define i32 @main() {
+      %name = getelementptr [2 x i8], [2 x i8]* @name, i32 0, i32 0
+      %input = call i8* @getenv(i8* %name)
+      %number = call i32 @atoi(i8* %input)
+      %sum = add i32 %number, 1
+      %buffer = alloca [3 x i8]
+      %p = getelementptr [3 x i8], [3 x i8]* %buffer, i32 0, i32 0
+      %copy = call i8* @strcpy(i8* %p,i8* %input)
+      %before = call i64 @strlen(i8* %p)
+      %literal = getelementptr [3 x i8], [3 x i8]* @clean, i32 0, i32 0
+      %overwrite = call i8* @strcpy(i8* %p,i8* %literal)
+      %after = call i64 @strlen(i8* %p)
+      ret i32 %sum
+    }
+  )");
+  auto *function = module->getFunction("main");
+  auto named = [&](StringRef name) -> Instruction * {
+    for (auto &inst : function->getEntryBlock())
+      if (inst.getName() == name)
+        return &inst;
+    return nullptr;
+  };
+  auto result = TaintQuery(graph).analyze(*module);
+  EXPECT_FALSE(result.origins(*named("sum")).empty());
+  EXPECT_FALSE(result.originsAt(*named("before"), *named("p")).empty());
+  EXPECT_TRUE(result.originsAt(*named("after"), *named("p")).empty());
+}
+
+TEST_F(PDGRuleQueryTest, WordexpFlagsRemainConditionalAcrossWrapperCalls) {
+  load(R"(
+    @name = private constant [2 x i8] c"X\00"
+    declare i8* @getenv(i8*)
+    declare i32 @wordexp(i8*,i8*,i32)
+    define void @expand(i8* %input, i32 %flags) {
+      %result = call i32 @wordexp(i8* %input,i8* null,i32 %flags)
+      ret void
+    }
+    define i32 @main(i32 %flags) {
+      %name = getelementptr [2 x i8], [2 x i8]* @name, i32 0, i32 0
+      %input = call i8* @getenv(i8* %name)
+      %bad = call i32 @wordexp(i8* %input,i8* null,i32 0)
+      %good = call i32 @wordexp(i8* %input,i8* null,i32 4)
+      %safe_flags = or i32 %flags, 4
+      %safe_dynamic = call i32 @wordexp(i8* %input,i8* null,i32 %safe_flags)
+      call void @expand(i8* %input, i32 0)
+      call void @expand(i8* %input, i32 4)
+      ret i32 0
+    }
+  )");
+  auto result = run("cpp/wordexp-injection");
+  ASSERT_EQ(result.findings.size(), 2u);
+  for (const auto &finding : result.findings)
+    EXPECT_EQ(finding.site->getFunc()->getName(), "main");
+}
+
+TEST_F(PDGRuleQueryTest, MemoryPhiDiamondsShareDefinitionTraversal) {
+  std::string ir = R"(
+    target datalayout = "e-p:64:64-i32:32"
+    declare i8* @malloc(i64)
+    define i8* @diamonds(i32 %n, i32 %m, i1 %condition) {
+    entry:
+      %source = alloca i32
+      %other = alloca i32
+      store i32 %n, i32* %source
+      br label %guard0
+  )";
+  for (unsigned index = 0; index < 40; ++index) {
+    std::string id = std::to_string(index);
+    ir += "guard" + id + ":\n  br i1 %condition, label %left" + id +
+          ", label %right" + id + "\n";
+    ir += "left" + id + ":\n  store i32 1, i32* %other\n  br label %join" + id +
+          "\n";
+    ir += "right" + id + ":\n  store i32 2, i32* %other\n  br label %join" +
+          id + "\n";
+    ir += "join" + id + ":\n";
+    if (index < 39)
+      ir += "  br label %guard" + std::to_string(index + 1) + "\n";
+  }
+  ir += R"(
+      %read = load i32, i32* %source
+      %product = mul i32 %read, %m
+      %size = zext i32 %product to i64
+      %allocation = call i8* @malloc(i64 %size)
+      ret i8* %allocation
+    }
+  )";
+  load(ir.c_str());
+  auto begin = std::chrono::steady_clock::now();
+  auto result = run("cpp/multiplication-overflow-in-alloc");
+  EXPECT_EQ(result.findings.size(), 1u);
+  EXPECT_LT(std::chrono::steady_clock::now() - begin, std::chrono::seconds(2));
+}
+
+TEST_F(PDGRuleQueryTest, WrapperRolesFollowContentWritesAndLocalSources) {
+  load(R"(
+    @name = private constant [2 x i8] c"X\00"
+    @clean = private constant [3 x i8] c"ok\00"
+    declare i8* @getenv(i8*)
+    declare i8* @strcpy(i8*,i8*)
+    declare i32 @wordexp(i8*,i8*,i32)
+    define void @clear(i8* %input) {
+      store i8 0, i8* %input
+      %result = call i32 @wordexp(i8* %input,i8* null,i32 0)
+      ret void
+    }
+    define void @overwrite(i8* %input) {
+      %name = getelementptr [2 x i8], [2 x i8]* @name, i32 0, i32 0
+      %source = call i8* @getenv(i8* %name)
+      %copied = call i8* @strcpy(i8* %input,i8* %source)
+      %result = call i32 @wordexp(i8* %input,i8* null,i32 0)
+      ret void
+    }
+    define i32 @main() {
+      %name = getelementptr [2 x i8], [2 x i8]* @name, i32 0, i32 0
+      %input = call i8* @getenv(i8* %name)
+      call void @clear(i8* %input)
+      %buffer = alloca [8 x i8]
+      %p = getelementptr [8 x i8], [8 x i8]* %buffer, i32 0, i32 0
+      %clean = getelementptr [3 x i8], [3 x i8]* @clean, i32 0, i32 0
+      %copied = call i8* @strcpy(i8* %p,i8* %clean)
+      call void @overwrite(i8* %p)
+      ret i32 0
+    }
+  )");
+  auto result = run("cpp/wordexp-injection");
+  ASSERT_EQ(result.findings.size(), 1u);
+  EXPECT_EQ(result.findings.front().site->getFunc()->getName(), "overwrite");
+}
+TEST_F(PDGRuleQueryTest, PointerOriginsKeepLiveOnEntryAndClobbersUnknown) {
+  load(R"(
+    @outside = external global i8*
+    declare void @opaque(i8**)
+    define void @aliases(i8* %p) {
+      %slot = alloca i8*
+      store i8* %p, i8** %slot
+      %known = load i8*, i8** %slot
+      %incoming = load i8*, i8** @outside
+      call void @opaque(i8** %slot)
+      %clobbered = load i8*, i8** %slot
+      ret void
+    }
+  )");
+  auto *function = module->getFunction("aliases");
+  auto named = [&](StringRef name) -> Instruction * {
+    for (auto &inst : function->getEntryBlock())
+      if (inst.getName() == name)
+        return &inst;
+    return nullptr;
+  };
+  FunctionFacts facts(*function);
+  EXPECT_EQ(&facts.pointerOrigin(*named("known")), function->getArg(0));
+  EXPECT_EQ(&facts.pointerOrigin(*named("incoming")), named("incoming"));
+  EXPECT_EQ(&facts.pointerOrigin(*named("clobbered")), named("clobbered"));
+}
+
+TEST_F(PDGRuleQueryTest,
+       StandardStringContentIsSeparateFromObjectLayoutAndRefs) {
+  load(R"(
+    target datalayout = "e-m:e-p:64:64-i64:64"
+    %"class.std::basic_string" = type { i64, i64, i64 }
+    %Pair = type { %"class.std::basic_string", %"class.std::basic_string" }
+    @name = private constant [2 x i8] c"X\00"
+    @clean = private constant [3 x i8] c"ok\00"
+    declare i8* @getenv(i8*)
+    declare i32 @system(i8*)
+    declare void @_ZNSt12basic_stringIcSt11char_traitsIcESaIcEEC1EPKc(
+        %"class.std::basic_string"*, i8*)
+    declare %"class.std::basic_string"* @_ZNSt12basic_stringIcSt11char_traitsIcESaIcEE6assignEPKc(
+        %"class.std::basic_string"*, i8*)
+    declare i8* @_ZNKSt12basic_stringIcSt11char_traitsIcESaIcEE5c_strEv(
+        %"class.std::basic_string"*)
+    define void @clear_helper(%"class.std::basic_string"* %object, i8* %literal) {
+      %slot = alloca %"class.std::basic_string"*
+      store %"class.std::basic_string"* %object, %"class.std::basic_string"** %slot
+      %receiver = load %"class.std::basic_string"*, %"class.std::basic_string"** %slot
+      %assigned = call %"class.std::basic_string"* @_ZNSt12basic_stringIcSt11char_traitsIcESaIcEE6assignEPKc(
+          %"class.std::basic_string"* %receiver, i8* %literal)
+      ret void
+    }
+    define i32 @main() {
+      %name = getelementptr [2 x i8], [2 x i8]* @name, i32 0, i32 0
+      %input = call i8* @getenv(i8* %name)
+      %clean = getelementptr [3 x i8], [3 x i8]* @clean, i32 0, i32 0
+      %pair = alloca %Pair
+      %left = getelementptr %Pair, %Pair* %pair, i32 0, i32 0
+      %right = getelementptr %Pair, %Pair* %pair, i32 0, i32 1
+      call void @_ZNSt12basic_stringIcSt11char_traitsIcESaIcEEC1EPKc(
+          %"class.std::basic_string"* %left, i8* %input)
+      call void @_ZNSt12basic_stringIcSt11char_traitsIcESaIcEEC1EPKc(
+          %"class.std::basic_string"* %right, i8* %clean)
+      %left_data = call i8* @_ZNKSt12basic_stringIcSt11char_traitsIcESaIcEE5c_strEv(
+          %"class.std::basic_string"* %left)
+      %bad = call i32 @system(i8* %left_data)
+      %raw = bitcast %"class.std::basic_string"* %left to i8*
+      %byte = load i8, i8* %raw
+      %right_data = call i8* @_ZNKSt12basic_stringIcSt11char_traitsIcESaIcEE5c_strEv(
+          %"class.std::basic_string"* %right)
+      %isolated = call i32 @system(i8* %right_data)
+      %reference = call %"class.std::basic_string"* @_ZNSt12basic_stringIcSt11char_traitsIcESaIcEE6assignEPKc(
+          %"class.std::basic_string"* %left, i8* %input)
+      call void @clear_helper(%"class.std::basic_string"* %left,i8* %clean)
+      %ref_data = call i8* @_ZNKSt12basic_stringIcSt11char_traitsIcESaIcEE5c_strEv(
+          %"class.std::basic_string"* %reference)
+      %cleared = call i32 @system(i8* %ref_data)
+      ret i32 0
+    }
+  )");
+  auto result = run("cpp/uncontrolled-process-operation");
+  ASSERT_EQ(result.findings.size(), 1u);
+  EXPECT_EQ(result.findings.front().site->getValue()->getName(), "bad");
+  auto facts = TaintQuery(graph).analyze(*module);
+  for (auto &inst : module->getFunction("main")->getEntryBlock())
+    if (inst.getName() == "byte")
+      EXPECT_TRUE(facts.origins(inst).empty());
+}
+
+TEST_F(PDGRuleQueryTest,
+       LibrarySymbolEscapesFollowTargetManglingAndExactAliases) {
+  load(R"(
+    target datalayout = "e-m:o-p:64:64"
+    target triple = "arm64-apple-darwin"
+    declare i32 @"\01_system"(i8*)
+    declare i32 @_system(i8*)
+    declare i8* @strcpy(i8*,i8*)
+    declare i8* @stpcpy(i8*,i8*)
+    define void @calls(i8* %destination,i8* %source) {
+      %copy = call i8* @strcpy(i8* %destination,i8* %source)
+      %end = call i8* @stpcpy(i8* %destination,i8* %source)
+      ret void
+    }
+  )");
+  EXPECT_TRUE(
+      ValueFacts::hasLibraryName(*module->getFunction("\1_system"), "system"));
+  EXPECT_FALSE(
+      ValueFacts::hasLibraryName(*module->getFunction("_system"), "system"));
+  for (auto &inst : module->getFunction("calls")->getEntryBlock())
+    if (auto *call = dyn_cast<CallBase>(&inst)) {
+      if (inst.getName() == "copy")
+        EXPECT_EQ(LibraryModels::returnAlias(*call), Optional<unsigned>(0));
+      if (inst.getName() == "end")
+        EXPECT_FALSE(LibraryModels::returnAlias(*call));
+    }
+}
+
+TEST_F(PDGRuleQueryTest, ApiConfigurationChecksRequireActualUnsafeSettings) {
+  load(R"(
+    declare i32 @EVP_PKEY_CTX_set_rsa_keygen_bits(i8*,i32)
+    declare i32 @SetSecurityDescriptorDacl(i8*,i32,i8*,i32)
+    declare i8* @xmlReadMemory(i8*,i32,i8*,i8*,i32)
+    define void @config(i8* %context,i8* %data) {
+      %weak = call i32 @EVP_PKEY_CTX_set_rsa_keygen_bits(i8* %context,i32 1024)
+      %good = call i32 @EVP_PKEY_CTX_set_rsa_keygen_bits(i8* %context,i32 2048)
+      %unknown = call i32 @EVP_PKEY_CTX_set_rsa_keygen_bits(i8* %context,i32 0)
+      %bad_dacl = call i32 @SetSecurityDescriptorDacl(i8* %context,i32 1,i8* null,i32 0)
+      %absent_dacl = call i32 @SetSecurityDescriptorDacl(i8* %context,i32 0,i8* null,i32 0)
+      %xml_bad = call i8* @xmlReadMemory(i8* %data,i32 8,i8* null,i8* null,i32 2)
+      %xml_good = call i8* @xmlReadMemory(i8* %data,i32 8,i8* null,i8* null,i32 0)
+      ret void
+    }
+  )");
+  EXPECT_EQ(run("cpp/insufficient-key-size").findings.size(), 1u);
+  EXPECT_EQ(run("cpp/unsafe-dacl-security-descriptor").findings.size(), 1u);
+  EXPECT_EQ(run("cpp/external-entity-expansion").findings.size(), 1u);
+}
+
+TEST_F(PDGRuleQueryTest, FormatAbiAndSentinelConventionsKeepSafeCallsSeparate) {
+  load(R"(
+    target datalayout = "e-m:e-p:64:64-i64:64"
+    target triple = "x86_64-unknown-linux-gnu"
+    @format = private constant [3 x i8] c"%s\00"
+    @star = private constant [4 x i8] c"%*s\00"
+    declare i32 @printf(i8*,...)
+    declare void @collect(i32,...)
+    define void @calls(i8* %text) {
+      %fmt = getelementptr [3 x i8], [3 x i8]* @format,i32 0,i32 0
+      %star = getelementptr [4 x i8], [4 x i8]* @star,i32 0,i32 0
+      %bad = call i32 (i8*,...) @printf(i8* %fmt,i32 5)
+      %good = call i32 (i8*,...) @printf(i8* %fmt,i8* %text)
+      %bad_width = call i32 (i8*,...) @printf(i8* %star,double 2.0,i8* %text)
+      call void (i32,...) @collect(i32 1,i8* %text,i8* null)
+      call void (i32,...) @collect(i32 2,i8* %text,i8* null)
+      call void (i32,...) @collect(i32 3,i8* %text,i8* null)
+      call void (i32,...) @collect(i32 4,i8* %text,i8* null)
+      call void (i32,...) @collect(i32 5,i8* %text)
+      ret void
+    }
+  )");
+  EXPECT_EQ(run("cpp/wrong-type-format-argument").findings.size(), 2u);
+  EXPECT_EQ(run("cpp/unterminated-variadic-call").findings.size(), 1u);
+}
+
+TEST_F(PDGRuleQueryTest,
+       ReallocZeroThroughAStackSlotDoesNotInventFailureLeaks) {
+  load(R"(
+    declare i8* @malloc(i64)
+    declare i8* @realloc(i8*,i64)
+    declare void @free(i8*)
+    define void @zero() {
+      %size_slot = alloca i64
+      store i64 0,i64* %size_slot
+      %p = call i8* @malloc(i64 8)
+      %size = load i64,i64* %size_slot
+      %r = call i8* @realloc(i8* %p,i64 %size)
+      %null = icmp eq i8* %r,null
+      br i1 %null,label %exit,label %release
+    release:
+      call void @free(i8* %r)
+      br label %exit
+    exit:
+      ret void
+    }
+  )");
+  EXPECT_TRUE(
+      run("cpp/memory-leak-on-failed-call-to-realloc").findings.empty());
+  EXPECT_TRUE(run("cpp/memory-may-not-be-freed").findings.empty());
+}
+
+TEST_F(PDGRuleQueryTest, ScanfWritesInvalidateOldNullAndConstantFacts) {
+  load(R"(
+    @fmt_pointer = private constant [3 x i8] c"%p\00"
+    @fmt_integer = private constant [3 x i8] c"%d\00"
+    declare i32 @scanf(i8*,...)
+    define i32 @pointer() {
+      %slot = alloca i32*
+      store i32* null,i32** %slot
+      %format = getelementptr [3 x i8],[3 x i8]* @fmt_pointer,i32 0,i32 0
+      %rc = call i32 (i8*,...) @scanf(i8* %format,i32** %slot)
+      %success = icmp eq i32 %rc,1
+      br i1 %success,label %read,label %exit
+    read:
+      %p = load i32*,i32** %slot
+      %value = load i32,i32* %p
+      ret i32 %value
+    exit:
+      ret i32 0
+    }
+    define i32 @scalar() {
+      %slot = alloca i32
+      store i32 1,i32* %slot
+      %format = getelementptr [3 x i8],[3 x i8]* @fmt_integer,i32 0,i32 0
+      %rc = call i32 (i8*,...) @scanf(i8* %format,i32* %slot)
+      %value = load i32,i32* %slot
+      %changed = icmp eq i32 %value,0
+      br i1 %changed,label %read,label %exit
+    read:
+      %bad = load i32,i32* null
+      ret i32 %bad
+    exit:
+      ret i32 0
+    }
+  )");
+  auto result = run("cpp/missing-null-test");
+  ASSERT_EQ(result.findings.size(), 1u);
+  EXPECT_EQ(result.findings.front().site->getFunc()->getName(), "scalar");
+}
+
+TEST_F(PDGRuleQueryTest, LifetimeBudgetDoesNotReduceTheIndependentTaintBudget) {
+  load(R"(
+    @name = private constant [2 x i8] c"X\00"
+    declare i8* @getenv(i8*)
+    declare i8* @malloc(i64)
+    declare i32 @wordexp(i8*,i8*,i32)
+    define i32 @main() {
+      %name = getelementptr [2 x i8],[2 x i8]* @name,i32 0,i32 0
+      %input = call i8* @getenv(i8* %name)
+      %bad = call i32 @wordexp(i8* %input,i8* null,i32 0)
+      %allocation = call i8* @malloc(i64 8)
+      br label %exit
+    exit:
+      ret i32 0
+    }
+  )");
+  RuleQueryPolicy policy;
+  policy.lifetime_states_per_object = 1;
+  auto result = RuleQuery(graph).analyze(
+      {"cpp/wordexp-injection", "cpp/memory-never-freed"}, {}, {}, module.get(),
+      {}, policy);
+  ASSERT_TRUE(result.diagnostics.state_limit_hit);
+  ASSERT_EQ(result.findings.size(), 1u);
+  EXPECT_EQ(result.findings.front().rule_id, "cpp/wordexp-injection");
+  for (const auto &note : result.diagnostics.notes)
+    EXPECT_EQ(note.find("Taint step limit reached"), std::string::npos);
 }
 } // namespace

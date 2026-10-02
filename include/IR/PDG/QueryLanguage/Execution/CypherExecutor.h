@@ -127,6 +127,7 @@ private:
       boundsFacts_;
   std::unordered_map<const llvm::Module *, StateQueryResult> stateFacts_;
   void syncSemanticFacts();
+  BoundsQuery &getBoundsFacts(const llvm::Module &module);
 
   // Helper methods
   bool evaluateCondition(const CypherWhereClause &condition,

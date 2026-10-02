@@ -29,6 +29,12 @@ struct RuleQueryResult {
   PDGQueryDiagnostics diagnostics;
 };
 
+struct RuleQueryPolicy {
+  /// Separate per-object lifetime budget; zero uses shared traversal limits.
+  /// This does not lower the independent taint worklist budget.
+  size_t lifetime_states_per_object = 0;
+};
+
 /// Semantic checks over LLVM values associated with PDG nodes. Dependence
 /// reachability alone is never interpreted as taint, must-flow, or a feasible
 /// execution path. Works with both a full PDG and its structural graph.
@@ -41,7 +47,8 @@ public:
           const PDGCriteria &criteria = PDGCriteria(),
           const PDGQueryOptions &options = PDGQueryOptions(),
           const llvm::Module *module = nullptr,
-          const TaintPolicy &taint_policy = TaintPolicy()) const;
+          const TaintPolicy &taint_policy = TaintPolicy(),
+          const RuleQueryPolicy &rule_policy = RuleQueryPolicy()) const;
 
 private:
   ProgramGraph &graph_;

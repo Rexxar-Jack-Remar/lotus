@@ -215,7 +215,17 @@ void Output::printSchema() const {
                                          "taint_sql_args",
                                          "taint_path_args",
                                          "taint_format_args",
-                                         "taint_allocation_args"};
+                                         "taint_allocation_args",
+                                         "taint_wordexp_args",
+                                         "arg<N>_string_termination",
+                                         "arg<N>_string_min_bytes",
+                                         "arg<N>_string_max_bytes",
+                                         "format_output_max_bytes",
+                                         "format_output_small_float_max_bytes",
+                                         "format_output_value_flow",
+                                         "format_output_has_float",
+                                         "format_output_is_buffer",
+                                         "format_output_limit_arg"};
 
   // Edge properties
   static const char *edgeProperties[] = {
@@ -449,6 +459,12 @@ void Output::printRuleResult(const RuleQueryResult &result) const {
            << stableNodeKey(finding.site) << "\n";
   for (const auto &rule : result.rules)
     outs() << rule.id << " coverage: " << rule.coverage << "\n";
+  if (result.diagnostics.state_limit_hit)
+    errs() << "Analysis incomplete: a state budget or convergence limit was "
+              "reached.\n";
+  for (const auto &note : result.diagnostics.notes)
+    if (note.find("incomplete") != std::string::npos)
+      errs() << note << "\n";
 }
 
 void Output::printResultText(const PDGQueryResult &result) const {

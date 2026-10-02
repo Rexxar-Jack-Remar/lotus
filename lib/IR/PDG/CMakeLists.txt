@@ -33,6 +33,10 @@ add_library(CanaryPDG STATIC
   Analysis/LibraryModels.cpp
   Analysis/FunctionFacts.cpp
   Analysis/BoundsQuery.cpp
+  Analysis/ArithmeticQuery.cpp
+  Analysis/ApiQuery.cpp
+  Analysis/CallContractQuery.cpp
+  Analysis/CppLibraryModels.cpp
   Analysis/LifetimeQuery.cpp
   Analysis/StateQuery.cpp
   Analysis/TaintModels.cpp

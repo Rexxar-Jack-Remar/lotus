@@ -4,6 +4,8 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 
+#include <cstdint>
+#include <string>
 #include <vector>
 
 namespace pdg {
@@ -18,13 +20,22 @@ struct FormatModel {
   unsigned format;
   unsigned first_argument;
   bool scanf;
+  bool wide = false;
 };
 
 enum class AllocationKind { Unknown, Malloc, New, NewArray };
 enum class ReleaseKind { Unknown, Free, Delete, DeleteArray };
 
-enum class TaintChannel { Value, Memory };
-enum class TaintDomain { Process, Command, Sql, Path, Format, Allocation };
+enum class TaintChannel { Value, Memory, ObjectContent };
+enum class TaintDomain {
+  Process,
+  Command,
+  Sql,
+  Path,
+  Format,
+  Allocation,
+  Wordexp
+};
 struct TaintEndpoint {
   int argument = -1; // -1 is the return value
   TaintChannel channel = TaintChannel::Memory;
@@ -44,6 +55,14 @@ struct CallTaintModel {
   std::vector<TaintEndpoint> overwrites;
 };
 
+/// A sink is disabled when its flag argument provably contains any mask bit.
+/// The same parameter roles can be instantiated at transparent wrapper calls.
+struct TaintSinkGuard {
+  unsigned argument = 0;
+  unsigned flag_argument = 0;
+  uint64_t disabled_by_any_set_bits = 0;
+};
+
 /// Shared argument roles and effects for semantic checks. Unknown APIs retain
 /// unknown effects; no fallback infers a model from a substring in an IR dump.
 class LibraryModels {
@@ -53,9 +72,14 @@ public:
   static bool readsOnly(const llvm::Function &function);
   static AllocationKind allocation(const llvm::Function &function);
   static ReleaseKind release(const llvm::Function &function);
+  static llvm::Optional<unsigned> returnAlias(const llvm::CallBase &call);
   static CallTaintModel taint(const llvm::CallBase &call);
   static std::vector<unsigned> taintSinks(const llvm::CallBase &call,
                                           TaintDomain domain);
+  static std::vector<TaintSinkGuard> taintSinkGuards(const llvm::CallBase &call,
+                                                     TaintDomain domain);
+  static bool sinkGuardDisabled(const llvm::CallBase &call,
+                                const TaintSinkGuard &guard);
 };
 
 struct FormatFacts {
@@ -63,6 +87,12 @@ struct FormatFacts {
     unsigned argument = 0; // one based among format arguments
     char conversion = 0;
     unsigned offset = 0;
+    std::string length;
+    llvm::Optional<unsigned> width;
+    llvm::Optional<unsigned> precision;
+    unsigned width_argument = 0;
+    unsigned precision_argument = 0;
+    bool allocated = false;
   };
   unsigned required_arguments = 0;
   bool unbounded_string = false;

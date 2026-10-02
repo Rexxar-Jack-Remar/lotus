@@ -100,6 +100,12 @@ static cl::opt<unsigned long long>
                    cl::desc("PDG taint step budget for rules (0: unbounded)"),
                    cl::init(200000));
 
+static cl::opt<unsigned long long> LifetimeStateLimit(
+    "lifetime-state-limit",
+    cl::desc(
+        "Lifetime exploration budget per object (default: 4096, 0: unbounded)"),
+    cl::init(4096));
+
 static cl::opt<std::string>
     CriteriaQuery("criteria-query",
                   cl::desc("Cypher query selecting analysis criteria"),
@@ -187,6 +193,7 @@ Options parseOptions(int argc, char **argv) {
   config.listCwes = ListCwes.getValue();
   config.listRules = ListRules.getValue();
   config.taintStepLimit = TaintStepLimit.getValue();
+  config.lifetimeStateLimit = LifetimeStateLimit.getValue();
   config.criteriaQuery = CriteriaQuery.getValue();
   config.targetQuery = TargetQuery.getValue();
   config.baselineQuery = BaselineQuery.getValue();

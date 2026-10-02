@@ -28,3 +28,7 @@ MATCH (c:INST_FUNCALL) WHERE c.taint_allocation_args IS NOT NULL RETURN c.callee
 
 # Restricting --criteria-query with these selections narrows reporting sites.
 # PDG still analyzes the whole module so interprocedural sources are retained.
+# wordexp's shared sink role excludes flags that prove WRDE_NOCMD is set.
+# Native conditional wrapper summaries retain the forwarded flag parameter.
+# --analysis rules --rule cpp/wordexp-injection --format json
+MATCH (c:INST_FUNCALL) WHERE c.taint_wordexp_args IS NOT NULL RETURN c.callee AS api, c.taint_wordexp_args AS input_arguments, c.arg2_int AS flags, c.src AS location, c

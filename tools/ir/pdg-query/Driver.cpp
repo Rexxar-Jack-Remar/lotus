@@ -289,8 +289,10 @@ static bool executeAnalysis(ProgramGraph &pdg, const Module &module,
         return false;
       TaintPolicy taint_policy;
       taint_policy.max_steps = config.taintStepLimit;
-      output.printRuleResult(RuleQuery(pdg).analyze(ids, criteria, options,
-                                                    &module, taint_policy));
+      RuleQueryPolicy rule_policy;
+      rule_policy.lifetime_states_per_object = config.lifetimeStateLimit;
+      output.printRuleResult(RuleQuery(pdg).analyze(
+          ids, criteria, options, &module, taint_policy, rule_policy));
       return true;
     } catch (const std::invalid_argument &error) {
       errs() << error.what() << "\n";

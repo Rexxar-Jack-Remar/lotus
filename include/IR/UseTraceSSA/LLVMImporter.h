@@ -19,7 +19,7 @@ namespace lotus {
 namespace usetracessa {
 namespace detail {
 class InstructionLabels;
-}
+} // namespace detail
 
 struct LLVMHistoryOptions {
   /// False: track all eligible SSA values. True: track pointer values only.

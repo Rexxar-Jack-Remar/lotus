@@ -4,7 +4,10 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 
+#include "IR/PDG/Analysis/ApiQuery.h"
+#include "IR/PDG/Analysis/ArithmeticQuery.h"
 #include "IR/PDG/Analysis/BoundsQuery.h"
+#include "IR/PDG/Analysis/CallContractQuery.h"
 #include "IR/PDG/Analysis/DataFlowQuery.h"
 #include "IR/PDG/Analysis/FunctionFacts.h"
 #include "IR/PDG/Analysis/Internal/QuerySupport.h"
@@ -157,7 +160,7 @@ const std::vector<RuleDescriptor> &RuleQuery::catalog() {
          "Security/CWE/CWE-114/UncontrolledProcessOperation.ql",
          "PDG user-input content flow into modeled process/library-loading "
          "arguments; matched parameter/return and memory updates. Unknown "
-         "aliases/indirect calls/C++ string objects excluded."},
+         "unknown aliases/indirect calls/unmodeled C++ objects excluded."},
         {"cpp/command-line-injection", "error",
          "Security/CWE/CWE-078/ExecTainted.ql",
          "PDG flow-state requires a noninitial %s/%S conversion or strcat "
@@ -179,7 +182,7 @@ const std::vector<RuleDescriptor> &RuleQuery::catalog() {
          "transparent "
          "wrappers. Numeric/content facts are separate; custom format "
          "attributes "
-         "and C++ string libraries excluded."},
+         "and unmodeled C++ string APIs excluded."},
         {"cpp/non-constant-format", "recommendation",
          "Likely Bugs/Format/NonConstantFormat.ql",
          "PDG format-content provenance from input, uncalled pointer "
@@ -193,7 +196,14 @@ const std::vector<RuleDescriptor> &RuleQuery::catalog() {
          "candidates. Signed upper guards also require nonnegativity. "
          "Source-AST "
          "variable checks, stack allocation expressions and indirect/custom "
-         "allocators remain partial."}};
+         "allocators remain partial."},
+        {"cpp/wordexp-injection", "error",
+         "experimental/Security/CWE/CWE-078/WordexpTainted.ql",
+         "PDG-native user-content flow to POSIX wordexp input, including "
+         "direct call/return summaries and transparent wrappers. WRDE_NOCMD "
+         "in constant or OR-composed flags suppresses command substitution. "
+         "Unknown aliases, indirect calls and unmodeled C++ object APIs remain "
+         "partial."}};
     auto append = [&](const auto &catalog) {
       for (const auto &rule : catalog)
         rules.push_back(
@@ -202,47 +212,95 @@ const std::vector<RuleDescriptor> &RuleQuery::catalog() {
     append(BoundsQuery::catalog());
     append(LifetimeQuery::catalog());
     append(StateQuery::catalog());
+    append(ArithmeticQuery::catalog());
+    append(ApiQuery::catalog());
+    append(CallContractQuery::catalog());
     static const std::map<std::string, std::vector<unsigned>>
         original_cwe_tags = {
             {"cpp/alloca-in-loop", {770}},
+            {"cpp/arithmetic-with-extreme-values", {190, 191}},
+            {"cpp/bad-addition-overflow-check", {190, 192}},
             {"cpp/bad-strncpy-size", {119, 251, 676}},
+            {"cpp/badly-bounded-write", {120, 787, 805}},
+            {"cpp/certificate-not-checked", {295}},
+            {"cpp/certificate-result-conflation", {295}},
             {"cpp/command-line-injection", {78, 88}},
+            {"cpp/conditionally-uninitialized-variable", {457}},
             {"cpp/curl-disabled-ssl", {295}},
             {"cpp/dangerous-function-overflow", {242, 676}},
+            {"cpp/dangerous-use-of-ssl-shutdown", {670}},
             {"cpp/dead-code-function", {561}},
             {"cpp/deref-null-result", {476}},
+            {"cpp/descriptor-may-not-be-closed", {775}},
             {"cpp/descriptor-never-closed", {775}},
+            {"cpp/divide-by-zero-using-return-value", {369}},
             {"cpp/double-free", {415}},
-            {"cpp/file-never-closed", {775}},
+            {"cpp/double-release", {666, 675}},
+            {"cpp/external-entity-expansion", {611}},
             {"cpp/file-may-not-be-closed", {775}},
+            {"cpp/file-never-closed", {775}},
+            {"cpp/if-statement-addition-overflow", {190}},
+            {"cpp/improper-check-return-value-scanf", {754, 908}},
+            {"cpp/improper-null-termination", {170, 665}},
+            {"cpp/inconsistent-null-check", {476}},
+            {"cpp/inconsistent-nullness-testing", {476}},
             {"cpp/incorrectly-checked-scanf", {253}},
             {"cpp/insecure-generation-of-filename", {377}},
+            {"cpp/insufficient-key-size", {326}},
+            {"cpp/integer-multiplication-cast-to-long", {190, 192, 197, 681}},
+            {"cpp/integer-overflow-tainted", {190, 197, 681}},
             {"cpp/invalid-pointer-deref", {119, 125, 193, 787}},
-            {"cpp/memory-never-freed", {401}},
+            {"cpp/late-check-of-function-argument", {20}},
+            {"cpp/memory-leak-on-failed-call-to-realloc", {401}},
             {"cpp/memory-may-not-be-freed", {401}},
+            {"cpp/memory-never-freed", {401}},
             {"cpp/memory-unsafe-function-scan", {120}},
+            {"cpp/missing-check-scanf", {252, 253}},
             {"cpp/missing-null-test", {476}},
+            {"cpp/multiplication-overflow-in-alloc", {128, 190}},
             {"cpp/new-free-mismatch", {762}},
             {"cpp/no-space-for-terminator", {120, 122, 131}},
             {"cpp/non-constant-format", {134}},
             {"cpp/not-initialised", {457}},
             {"cpp/open-call-with-mode-argument", {732}},
             {"cpp/overflow-buffer", {119, 121, 122, 126}},
+            {"cpp/overflow-calculated", {120, 131}},
+            {"cpp/overflow-destination", {119, 131}},
+            {"cpp/overflowing-snprintf", {190, 253}},
+            {"cpp/overrunning-write", {120, 787, 805}},
+            {"cpp/overrunning-write-with-float", {120, 787, 805}},
             {"cpp/path-injection", {22, 23, 36, 73}},
+            {"cpp/potential-buffer-overflow", {676}},
             {"cpp/potentially-dangerous-function", {676}},
             {"cpp/return-stack-allocated-memory", {825}},
             {"cpp/return-value-ignored", {252}},
             {"cpp/signed-overflow-check", {128, 190}},
             {"cpp/sql-injection", {89}},
             {"cpp/static-buffer-overflow", {119, 131}},
+            {"cpp/tainted-arithmetic", {190, 191}},
             {"cpp/tainted-format-string", {134}},
+            {"cpp/too-few-arguments", {234, 685}},
+            {"cpp/twice-locked", {764, 833}},
+            {"cpp/unbounded-write", {120, 787, 805}},
+            {"cpp/unclear-array-index-validation", {129}},
             {"cpp/uncontrolled-allocation-size", {190, 789}},
+            {"cpp/uncontrolled-arithmetic", {190, 191}},
             {"cpp/uncontrolled-process-operation", {73, 78, 114}},
             {"cpp/uninitialized-local", {457, 665}},
+            {"cpp/unreleased-lock", {764, 833}},
+            {"cpp/unsafe-dacl-security-descriptor", {732}},
             {"cpp/unsafe-strncat", {119, 251, 676, 788}},
+            {"cpp/unsigned-difference-expression-compared-zero", {191}},
+            {"cpp/unterminated-variadic-call", {121}},
             {"cpp/use-after-free", {416}},
+            {"cpp/user-controlled-null-termination-tainted", {170}},
+            {"cpp/very-likely-overrunning-write", {120, 787, 805}},
+            {"cpp/weak-cryptographic-algorithm", {327}},
+            {"cpp/wordexp-injection", {78}},
             {"cpp/world-writable-file-creation", {732}},
             {"cpp/wrong-number-format-arguments", {234, 685}},
+            {"cpp/wrong-type-format-argument", {686}},
+            {"cpp/wrong-use-of-the-umask", {200, 264, 266, 560, 687}},
         };
     for (auto &rule : rules) {
       auto it = original_cwe_tags.find(rule.id);
@@ -258,6 +316,8 @@ const std::vector<RuleDescriptor> &RuleQuery::catalog() {
 namespace {
 
 Optional<TaintDomain> taintDomain(const std::string &id) {
+  if (id == "cpp/wordexp-injection")
+    return TaintDomain::Wordexp;
   if (id == "cpp/uncontrolled-process-operation")
     return TaintDomain::Process;
   if (id == "cpp/command-line-injection")
@@ -624,7 +684,8 @@ RuleQueryResult RuleQuery::analyze(const std::vector<std::string> &rule_ids,
                                    const PDGCriteria &criteria,
                                    const PDGQueryOptions &options,
                                    const Module *module,
-                                   const TaintPolicy &taint_policy) const {
+                                   const TaintPolicy &taint_policy,
+                                   const RuleQueryPolicy &rule_policy) const {
   RuleQueryResult result;
   std::set<std::string> selected(rule_ids.begin(), rule_ids.end());
   for (const auto &id : selected)
@@ -688,12 +749,52 @@ RuleQueryResult RuleQuery::analyze(const std::vector<std::string> &rule_ids,
             {finding.rule_id, finding.message, site, evidence, {}});
       }
     };
+    Optional<TaintFlowResult> taint;
+    if (std::any_of(result.rules.begin(), result.rules.end(),
+                    [](const RuleDescriptor &rule) {
+                      return bool(taintDomain(rule.id)) ||
+                             BoundsQuery::requiresTaint(rule.id) ||
+                             ArithmeticQuery::requiresTaint(rule.id);
+                    })) {
+      TaintPolicy policy = taint_policy;
+      policy.include_nonconstant_sources |=
+          std::any_of(result.rules.begin(), result.rules.end(),
+                      [](const RuleDescriptor &rule) {
+                        return rule.id == "cpp/non-constant-format";
+                      });
+      if (options.limits.max_states)
+        policy.max_steps = options.limits.max_states;
+      taint = TaintQuery(graph_).analyze(*input, policy);
+      result.diagnostics.explored_states += taint->diagnostics.explored_states;
+      result.diagnostics.state_limit_hit |= taint->diagnostics.state_limit_hit;
+      result.diagnostics.summary_cache_hits +=
+          taint->diagnostics.summary_cache_hits;
+      result.diagnostics.summary_cache_misses +=
+          taint->diagnostics.summary_cache_misses;
+      result.diagnostics.notes.insert(result.diagnostics.notes.end(),
+                                      taint->diagnostics.notes.begin(),
+                                      taint->diagnostics.notes.end());
+    }
     if (selected(BoundsQuery::catalog()))
-      appendFindings(BoundsQuery().analyze(*input).findings);
+      appendFindings(
+          BoundsQuery().analyze(*input, taint ? &*taint : nullptr).findings);
     if (selected(LifetimeQuery::catalog())) {
-      auto lifetime =
-          LifetimeQuery().analyze(*input, options.limits.max_states);
+      size_t lifetime_budget = options.limits.max_states;
+      if (rule_policy.lifetime_states_per_object)
+        lifetime_budget = lifetime_budget
+                              ? std::min(lifetime_budget,
+                                         rule_policy.lifetime_states_per_object)
+                              : rule_policy.lifetime_states_per_object;
+      auto lifetime = LifetimeQuery().analyze(*input, lifetime_budget);
       appendFindings(lifetime.findings);
+      result.diagnostics.explored_states += lifetime.explored_states;
+      result.diagnostics.summary_cache_hits += lifetime.summary_cache_hits;
+      result.diagnostics.summary_cache_misses += lifetime.summary_cache_misses;
+      if (lifetime.matched_calls)
+        result.diagnostics.notes.push_back(
+            "Lifetime analysis matched " +
+            std::to_string(lifetime.matched_calls) +
+            " direct call(s) with callee resource effects.");
       if (lifetime.incomplete_objects) {
         result.diagnostics.state_limit_hit |= lifetime.state_limit_hit;
         result.diagnostics.notes.push_back(
@@ -720,30 +821,14 @@ RuleQueryResult RuleQuery::analyze(const std::vector<std::string> &rule_ids,
             "results are incomplete.");
       }
     }
-    Optional<TaintFlowResult> taint;
-    if (std::any_of(result.rules.begin(), result.rules.end(),
-                    [](const RuleDescriptor &rule) {
-                      return bool(taintDomain(rule.id));
-                    })) {
-      TaintPolicy policy = taint_policy;
-      policy.include_nonconstant_sources |=
-          std::any_of(result.rules.begin(), result.rules.end(),
-                      [](const RuleDescriptor &rule) {
-                        return rule.id == "cpp/non-constant-format";
-                      });
-      if (options.limits.max_states)
-        policy.max_steps = options.limits.max_states;
-      taint = TaintQuery(graph_).analyze(*input, policy);
-      result.diagnostics.explored_states += taint->diagnostics.explored_states;
-      result.diagnostics.state_limit_hit |= taint->diagnostics.state_limit_hit;
-      result.diagnostics.summary_cache_hits +=
-          taint->diagnostics.summary_cache_hits;
-      result.diagnostics.summary_cache_misses +=
-          taint->diagnostics.summary_cache_misses;
-      result.diagnostics.notes.insert(result.diagnostics.notes.end(),
-                                      taint->diagnostics.notes.begin(),
-                                      taint->diagnostics.notes.end());
-    }
+    if (selected(ArithmeticQuery::catalog()))
+      appendFindings(ArithmeticQuery()
+                         .analyze(*input, taint ? &*taint : nullptr)
+                         .findings);
+    if (selected(ApiQuery::catalog()))
+      appendFindings(ApiQuery().analyze(*input).findings);
+    if (selected(CallContractQuery::catalog()))
+      appendFindings(CallContractQuery().analyze(*input).findings);
     for (const Function &function : *input) {
       if (function.isDeclaration())
         continue;
@@ -786,9 +871,8 @@ RuleQueryResult RuleQuery::analyze(const std::vector<std::string> &rule_ids,
                                 *domain != TaintDomain::Process;
                 for (unsigned index :
                      taint->sinkArguments(*call, *domain, wrappers)) {
-                  if (wrappers &&
-                      taint->forwardedParameter(*call, index, *domain))
-                    continue;
+                  bool forwarded = wrappers && taint->forwardedParameter(
+                                                   *call, index, *domain);
                   if (*domain == TaintDomain::Allocation &&
                       index < call->arg_size() &&
                       facts.boundedAt(*call->getArgOperand(index), *call))
@@ -798,6 +882,18 @@ RuleQueryResult RuleQuery::analyze(const std::vector<std::string> &rule_ids,
                                              : TaintChannel::Memory;
                   for (const auto &origin :
                        taint->origins(*call, index, channel)) {
+                    // A wrapper may also introduce fresh input internally.
+                    // Only caller-origin facts are represented by its outer
+                    // role; local sources still need the actual sink report.
+                    const Function *source_function = nullptr;
+                    if (const auto *source =
+                            dyn_cast_or_null<Instruction>(origin.source))
+                      source_function = source->getFunction();
+                    else if (const auto *source =
+                                 dyn_cast_or_null<Argument>(origin.source))
+                      source_function = source->getParent();
+                    if (forwarded && source_function != call->getFunction())
+                      continue;
                     if (*domain == TaintDomain::Allocation &&
                         origin.allocation_bounded)
                       continue;

@@ -1387,6 +1387,14 @@ void CypherQueryExecutor::syncSemanticFacts() {
   }
 }
 
+BoundsQuery &CypherQueryExecutor::getBoundsFacts(const llvm::Module &module) {
+  syncSemanticFacts();
+  auto &facts = boundsFacts_[&module];
+  if (!facts)
+    facts = std::make_unique<BoundsQuery>(const_cast<llvm::Module &>(module));
+  return *facts;
+}
+
 std::string CypherQueryExecutor::getNodeProperty(Node *node,
                                                  const std::string &property) {
   if (!node)
@@ -1402,12 +1410,7 @@ std::string CypherQueryExecutor::getNodeProperty(Node *node,
         prop == "read_out_of_bounds" || prop == "write_out_of_bounds" ||
         prop == "access_bytes" || prop == "access_capacity_bytes" ||
         prop == "access_offset_bytes") {
-      syncSemanticFacts();
-      auto &facts = boundsFacts_[inst->getModule()];
-      if (!facts)
-        facts = std::make_unique<BoundsQuery>(
-            *const_cast<llvm::Module *>(inst->getModule()));
-      const auto accesses = facts->accesses(*inst);
+      const auto accesses = getBoundsFacts(*inst->getModule()).accesses(*inst);
       if (prop == "known_access_count")
         return std::to_string(accesses.size());
       if (accesses.empty())
@@ -1534,6 +1537,37 @@ std::string CypherQueryExecutor::getNodeProperty(Node *node,
 
   if (const auto *call =
           llvm::dyn_cast_or_null<llvm::CallBase>(node->getValue())) {
+    if (prop == "format_output_max_bytes" ||
+        prop == "format_output_small_float_max_bytes" ||
+        prop == "format_output_value_flow" ||
+        prop == "format_output_has_float" ||
+        prop == "format_output_is_buffer" ||
+        prop == "format_output_limit_arg") {
+      const auto *target = ValueFacts::callee(*call);
+      auto model = target ? LibraryModels::format(*target) : llvm::None;
+      if (!model || model->scanf)
+        return "";
+      const auto facts = getBoundsFacts(*call->getModule()).formatBounds(*call);
+      if (prop == "format_output_is_buffer")
+        return facts.output_buffer ? "true" : "false";
+      if (prop == "format_output_limit_arg")
+        return facts.explicit_limit_argument
+                   ? std::to_string(*facts.explicit_limit_argument)
+                   : "";
+      const auto *format = ValueFacts::argument(*call, model->format);
+      auto literal = format ? ValueFacts::constantString(*format) : llvm::None;
+      if (!literal || !parseFormat(*literal, false))
+        return "";
+      if (prop == "format_output_max_bytes")
+        return facts.maximum_bytes ? std::to_string(*facts.maximum_bytes) : "";
+      if (prop == "format_output_small_float_max_bytes")
+        return facts.maximum_bytes_without_large_floats
+                   ? std::to_string(*facts.maximum_bytes_without_large_floats)
+                   : "";
+      if (prop == "format_output_value_flow")
+        return facts.value_flow ? "true" : "false";
+      return facts.floating_conversion ? "true" : "false";
+    }
     const auto *target = ValueFacts::callee(*call);
     if (target) {
       if (prop == "taint_source_kind") {
@@ -1550,14 +1584,17 @@ std::string CypherQueryExecutor::getNodeProperty(Node *node,
             outputs += ",";
           outputs +=
               source.argument < 0 ? "return" : std::to_string(source.argument);
-          outputs +=
-              source.channel == TaintChannel::Memory ? ":content" : ":value";
+          outputs += source.channel == TaintChannel::Value ? ":value"
+                     : source.channel == TaintChannel::ObjectContent
+                         ? ":object-content"
+                         : ":content";
         }
         return outputs;
       }
       if (prop == "taint_process_args" || prop == "taint_command_args" ||
           prop == "taint_sql_args" || prop == "taint_path_args" ||
-          prop == "taint_format_args" || prop == "taint_allocation_args") {
+          prop == "taint_format_args" || prop == "taint_allocation_args" ||
+          prop == "taint_wordexp_args") {
         TaintDomain domain = TaintDomain::Process;
         if (prop == "taint_command_args")
           domain = TaintDomain::Command;
@@ -1569,6 +1606,8 @@ std::string CypherQueryExecutor::getNodeProperty(Node *node,
           domain = TaintDomain::Format;
         if (prop == "taint_allocation_args")
           domain = TaintDomain::Allocation;
+        if (prop == "taint_wordexp_args")
+          domain = TaintDomain::Wordexp;
         std::string positions;
         for (unsigned index : LibraryModels::taintSinks(*call, domain)) {
           if (!positions.empty())
@@ -1677,6 +1716,28 @@ std::string CypherQueryExecutor::getNodeProperty(Node *node,
           if (parts.second == "object_bytes")
             if (auto bytes = ValueFacts::objectBytes(*argument))
               return std::to_string(*bytes);
+          if (parts.second == "string_termination" ||
+              parts.second == "string_min_bytes" ||
+              parts.second == "string_max_bytes") {
+            if (!argument->getType()->isPointerTy())
+              return "";
+            const auto facts = getBoundsFacts(*call->getModule())
+                                   .stringBounds(*argument, *call);
+            if (parts.second == "string_min_bytes")
+              return facts.minimum_bytes ? std::to_string(*facts.minimum_bytes)
+                                         : "";
+            if (parts.second == "string_max_bytes")
+              return facts.maximum_bytes ? std::to_string(*facts.maximum_bytes)
+                                         : "";
+            switch (facts.termination) {
+            case StringTermination::Terminated:
+              return "terminated";
+            case StringTermination::Unproven:
+              return "unproven";
+            case StringTermination::Unknown:
+              return "unknown";
+            }
+          }
         }
       }
     }
