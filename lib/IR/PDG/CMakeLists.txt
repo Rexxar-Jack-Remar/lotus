@@ -28,6 +28,15 @@ add_library(CanaryPDG STATIC
   Analysis/SummaryQuery.cpp
   Analysis/ImpactQuery.cpp
   Analysis/ResourceFlowQuery.cpp
+  Analysis/RuleQuery.cpp
+  Analysis/ValueFacts.cpp
+  Analysis/LibraryModels.cpp
+  Analysis/FunctionFacts.cpp
+  Analysis/BoundsQuery.cpp
+  Analysis/LifetimeQuery.cpp
+  Analysis/StateQuery.cpp
+  Analysis/TaintModels.cpp
+  Analysis/TaintQuery.cpp
   Analysis/PropertySpec.cpp
   Support/DebugInfoUtils.cpp
   Support/GraphWriter.cpp

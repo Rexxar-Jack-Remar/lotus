@@ -1,5 +1,7 @@
 #pragma once
 
+#include "IR/PDG/Analysis/BoundsQuery.h"
+#include "IR/PDG/Analysis/StateQuery.h"
 #include "IR/PDG/QueryLanguage/AST/CypherAST.h"
 #include "IR/PDG/QueryLanguage/Execution/CypherResult.h"
 
@@ -83,7 +85,12 @@ public:
   const std::string &getLastError() const { return lastError_; }
 
   // Caching
-  void clearCache() { queryCache_.clear(); }
+  // Also call this after changing the retained LLVM IR without rebuilding PDG.
+  void clearCache() {
+    queryCache_.clear();
+    boundsFacts_.clear();
+    stateFacts_.clear();
+  }
   void setCacheMaxSize(size_t maxSize) { cacheMaxSize_ = maxSize; }
   void setQueryTimeout(std::chrono::seconds timeout) {
     queryTimeout_ = timeout;
@@ -113,6 +120,13 @@ private:
   std::unordered_map<std::string, std::vector<Node *>> boundVariables_;
   std::unordered_map<std::string, std::vector<Edge *>> boundRelationships_;
   int unboundedMaxHops_ = 5;
+
+  // Semantic services are evaluated on demand, once per unchanged module.
+  unsigned long long semanticEpoch_ = 0;
+  std::unordered_map<const llvm::Module *, std::unique_ptr<BoundsQuery>>
+      boundsFacts_;
+  std::unordered_map<const llvm::Module *, StateQueryResult> stateFacts_;
+  void syncSemanticFacts();
 
   // Helper methods
   bool evaluateCondition(const CypherWhereClause &condition,

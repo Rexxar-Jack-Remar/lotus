@@ -1,9 +1,12 @@
 #include "IR/PDG/QueryLanguage/Execution/CypherExecutor.h"
 
+#include "llvm/ADT/SmallString.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "IR/PDG/Analysis/LibraryModels.h"
 #include "IR/PDG/Analysis/Query.h"
+#include "IR/PDG/Analysis/ValueFacts.h"
 #include "IR/PDG/Support/DebugInfoUtils.h"
 
 #include <algorithm>
@@ -132,6 +135,10 @@ CypherQueryExecutor::execute(const CypherQuery &query) {
 std::unique_ptr<CypherResult>
 CypherQueryExecutor::execute(const CypherQuery &query,
                              CypherQueryStats &stats) {
+  // IR edits need not change the graph epoch; each execution observes fresh
+  // semantic facts and shares them across its predicates and projections.
+  boundsFacts_.clear();
+  stateFacts_.clear();
   auto startTime = std::chrono::high_resolution_clock::now();
   lastStats_ = CypherQueryStats();
 
@@ -1258,7 +1265,23 @@ bool CypherQueryExecutor::evaluateCondition(
     return false;
   }
 
-  return applyComparison(lhs, condition.getComparisonOp(), condition.getValue());
+  if (condition.comparesProperty()) {
+    std::string rhs;
+    auto node = row.nodes.find(condition.getRightVariable());
+    auto edge = row.rels.find(condition.getRightVariable());
+    if (node != row.nodes.end())
+      rhs = getNodeProperty(node->second, condition.getRightProperty());
+    else if (edge != row.rels.end())
+      rhs = getEdgeProperty(edge->second, condition.getRightProperty());
+    else
+      return false;
+    // Missing facts are unknown, including under NOT_EQUALS.
+    if (lhs.empty() || rhs.empty())
+      return false;
+    return applyComparison(lhs, condition.getComparisonOp(), rhs);
+  }
+  return applyComparison(lhs, condition.getComparisonOp(),
+                         condition.getValue());
 }
 
 bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
@@ -1284,6 +1307,32 @@ bool CypherQueryExecutor::evaluateCondition(const CypherWhereClause &condition,
 bool CypherQueryExecutor::applyComparison(const std::string &nodeValue,
                                           CypherComparisonOp op,
                                           const std::string &queryValue) {
+  if (op == CypherComparisonOp::LESS_THAN ||
+      op == CypherComparisonOp::LESS_THAN_OR_EQUAL ||
+      op == CypherComparisonOp::GREATER_THAN ||
+      op == CypherComparisonOp::GREATER_THAN_OR_EQUAL) {
+    auto parseInteger =
+        [](llvm::StringRef text) -> llvm::Optional<llvm::APInt> {
+      bool negative = text.consume_front("-");
+      llvm::APInt integer;
+      if (text.empty() || text.getAsInteger(10, integer))
+        return llvm::None;
+      integer = integer.zext(integer.getBitWidth() + 1);
+      return negative ? -integer : integer;
+    };
+    auto left = parseInteger(nodeValue), right = parseInteger(queryValue);
+    if (left && right) {
+      unsigned width = std::max(left->getBitWidth(), right->getBitWidth());
+      auto a = left->sextOrTrunc(width), b = right->sextOrTrunc(width);
+      if (op == CypherComparisonOp::LESS_THAN)
+        return a.slt(b);
+      if (op == CypherComparisonOp::LESS_THAN_OR_EQUAL)
+        return a.sle(b);
+      if (op == CypherComparisonOp::GREATER_THAN)
+        return a.sgt(b);
+      return a.sge(b);
+    }
+  }
   switch (op) {
   case CypherComparisonOp::EQUALS:
     return nodeValue == queryValue;
@@ -1330,6 +1379,14 @@ bool CypherQueryExecutor::applyComparison(const std::string &nodeValue,
   return true;
 }
 
+void CypherQueryExecutor::syncSemanticFacts() {
+  if (semanticEpoch_ != pdg_.getEpoch()) {
+    boundsFacts_.clear();
+    stateFacts_.clear();
+    semanticEpoch_ = pdg_.getEpoch();
+  }
+}
+
 std::string CypherQueryExecutor::getNodeProperty(Node *node,
                                                  const std::string &property) {
   if (!node)
@@ -1338,6 +1395,91 @@ std::string CypherQueryExecutor::getNodeProperty(Node *node,
   const std::string prop = toLower(property);
   if (prop.empty())
     return "";
+
+  if (const auto *inst =
+          llvm::dyn_cast_or_null<llvm::Instruction>(node->getValue())) {
+    if (prop == "known_access_count" || prop == "out_of_bounds_access_count" ||
+        prop == "read_out_of_bounds" || prop == "write_out_of_bounds" ||
+        prop == "access_bytes" || prop == "access_capacity_bytes" ||
+        prop == "access_offset_bytes") {
+      syncSemanticFacts();
+      auto &facts = boundsFacts_[inst->getModule()];
+      if (!facts)
+        facts = std::make_unique<BoundsQuery>(
+            *const_cast<llvm::Module *>(inst->getModule()));
+      const auto accesses = facts->accesses(*inst);
+      if (prop == "known_access_count")
+        return std::to_string(accesses.size());
+      if (accesses.empty())
+        return "";
+      size_t bad = 0;
+      bool badRead = false, badWrite = false;
+      for (const auto &access : accesses) {
+        if (access.outOfBounds()) {
+          ++bad;
+          (access.writes ? badWrite : badRead) = true;
+        }
+      }
+      if (prop == "out_of_bounds_access_count")
+        return std::to_string(bad);
+      // Absence of a proven bad access is not a proof about unknown accesses.
+      if (prop == "read_out_of_bounds")
+        return badRead ? "true" : "false";
+      if (prop == "write_out_of_bounds")
+        return badWrite ? "true" : "false";
+      if (accesses.size() == 1) {
+        const auto &access = accesses.front();
+        if (prop == "access_bytes")
+          return std::to_string(access.bytes);
+        if (prop == "access_capacity_bytes")
+          return std::to_string(access.region.capacity);
+        if (prop == "access_offset_bytes")
+          return std::to_string(access.region.offset);
+      }
+      return "";
+    }
+    if (prop == "pointer_nullness" || prop == "pointee_initialization") {
+      const llvm::Value *pointer = nullptr;
+      if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(inst))
+        pointer = load->getPointerOperand();
+      else if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(inst))
+        pointer = store->getPointerOperand();
+      if (!pointer)
+        return "";
+      syncSemanticFacts();
+      auto found = stateFacts_.find(inst->getModule());
+      if (found == stateFacts_.end())
+        found = stateFacts_
+                    .emplace(inst->getModule(),
+                             StateQuery().analyze(*inst->getModule()))
+                    .first;
+      if (found->second.convergence_limit_hit)
+        return "";
+      const auto state = found->second.stateBefore(*inst, *pointer);
+      if (prop == "pointer_nullness") {
+        switch (state.nullness) {
+        case PointerNullState::Null:
+          return "null";
+        case PointerNullState::NonNull:
+          return "nonnull";
+        case PointerNullState::Nullable:
+          return "nullable";
+        case PointerNullState::Unknown:
+          return "unknown";
+        }
+      }
+      switch (state.pointee_initialization) {
+      case InitializationState::Uninitialized:
+        return "uninitialized";
+      case InitializationState::Initialized:
+        return "initialized";
+      case InitializationState::MaybeUninitialized:
+        return "maybe-uninitialized";
+      case InitializationState::Unknown:
+        return "unknown";
+      }
+    }
+  }
 
   if (prop == "type" || prop == "type_id" || prop == "node_type" ||
       prop == "node_type_id") {
@@ -1381,13 +1523,163 @@ std::string CypherQueryExecutor::getNodeProperty(Node *node,
   if (prop == "callee") {
     if (auto *v = node->getValue()) {
       if (auto *cb = llvm::dyn_cast<llvm::CallBase>(v)) {
-        if (auto *f = cb->getCalledFunction()) {
+        if (auto *f = ValueFacts::callee(*cb)) {
           return f->getName().str();
         }
         return "<indirect>";
       }
     }
     return "";
+  }
+
+  if (const auto *call =
+          llvm::dyn_cast_or_null<llvm::CallBase>(node->getValue())) {
+    const auto *target = ValueFacts::callee(*call);
+    if (target) {
+      if (prop == "taint_source_kind") {
+        auto model = LibraryModels::taint(*call);
+        if (!model.sources.empty())
+          return "user-input";
+        return "";
+      }
+      if (prop == "taint_source_outputs") {
+        auto model = LibraryModels::taint(*call);
+        std::string outputs;
+        for (const auto &source : model.sources) {
+          if (!outputs.empty())
+            outputs += ",";
+          outputs +=
+              source.argument < 0 ? "return" : std::to_string(source.argument);
+          outputs +=
+              source.channel == TaintChannel::Memory ? ":content" : ":value";
+        }
+        return outputs;
+      }
+      if (prop == "taint_process_args" || prop == "taint_command_args" ||
+          prop == "taint_sql_args" || prop == "taint_path_args" ||
+          prop == "taint_format_args" || prop == "taint_allocation_args") {
+        TaintDomain domain = TaintDomain::Process;
+        if (prop == "taint_command_args")
+          domain = TaintDomain::Command;
+        if (prop == "taint_sql_args")
+          domain = TaintDomain::Sql;
+        if (prop == "taint_path_args")
+          domain = TaintDomain::Path;
+        if (prop == "taint_format_args")
+          domain = TaintDomain::Format;
+        if (prop == "taint_allocation_args")
+          domain = TaintDomain::Allocation;
+        std::string positions;
+        for (unsigned index : LibraryModels::taintSinks(*call, domain)) {
+          if (!positions.empty())
+            positions += ",";
+          positions += std::to_string(index);
+        }
+        return positions;
+      }
+      if (prop == "allocation_kind") {
+        switch (LibraryModels::allocation(*target)) {
+        case AllocationKind::Malloc:
+          return "malloc";
+        case AllocationKind::New:
+          return "new";
+        case AllocationKind::NewArray:
+          return "new[]";
+        case AllocationKind::Unknown:
+          return "";
+        }
+      }
+      if (prop == "release_kind") {
+        switch (LibraryModels::release(*target)) {
+        case ReleaseKind::Free:
+          return "free";
+        case ReleaseKind::Delete:
+          return "delete";
+        case ReleaseKind::DeleteArray:
+          return "delete[]";
+        case ReleaseKind::Unknown:
+          return "";
+        }
+      }
+      auto copy = LibraryModels::copy(*target);
+      if (copy) {
+        if (prop == "copy_destination_arg")
+          return std::to_string(copy->destination);
+        if (prop == "copy_source_arg")
+          return std::to_string(copy->source);
+        if (prop == "copy_size_arg")
+          return std::to_string(copy->size);
+        if (prop == "copy_destination_bytes")
+          if (const auto *argument =
+                  ValueFacts::argument(*call, copy->destination))
+            if (auto bytes = ValueFacts::objectBytes(*argument))
+              return std::to_string(*bytes);
+        if (prop == "copy_size_bytes") {
+          const auto *argument = ValueFacts::argument(*call, copy->size);
+          auto count = argument ? ValueFacts::integer(*argument) : llvm::None;
+          if (count && !count->isNegative() && count->getActiveBits() <= 64 &&
+              target->arg_size() > copy->destination) {
+            auto *param =
+                target->getFunctionType()->getParamType(copy->destination);
+            if (param->isPointerTy() &&
+                param->getPointerElementType()->isIntegerTy()) {
+              uint64_t bytes =
+                  call->getModule()->getDataLayout().getTypeAllocSize(
+                      param->getPointerElementType());
+              if (bytes && count->getZExtValue() <= UINT64_MAX / bytes)
+                return std::to_string(count->getZExtValue() * bytes);
+            }
+          }
+        }
+      }
+      auto model = LibraryModels::format(*target);
+      if (model) {
+        if (prop == "format_arg")
+          return std::to_string(model->format);
+        if (prop == "format_kind")
+          return model->scanf ? "scanf" : "printf";
+        if (prop == "format_given" && call->arg_size() >= model->first_argument)
+          return std::to_string(call->arg_size() - model->first_argument);
+        const auto *argument = ValueFacts::argument(*call, model->format);
+        auto literal =
+            argument ? ValueFacts::constantString(*argument) : llvm::None;
+        auto format =
+            literal ? parseFormat(*literal, model->scanf) : llvm::None;
+        if (format) {
+          if (prop == "format_expected")
+            return std::to_string(format->required_arguments);
+          if (prop == "format_unbounded_string")
+            return format->unbounded_string ? "true" : "false";
+        }
+      }
+    }
+    if (prop == "arg_count")
+      return std::to_string(call->arg_size());
+    if (prop == "callee_param_count") {
+      if (const auto *target = ValueFacts::callee(*call))
+        return std::to_string(target->arg_size());
+      return "";
+    }
+    // Parameterized properties such as arg2_int and arg0_object_bytes.
+    llvm::StringRef suffix(prop);
+    if (suffix.consume_front("arg")) {
+      auto parts = suffix.split('_');
+      unsigned index = 0;
+      if (!parts.first.getAsInteger(10, index)) {
+        if (const auto *argument = ValueFacts::argument(*call, index)) {
+          if (parts.second == "int") {
+            if (auto value = ValueFacts::integer(*argument)) {
+              llvm::SmallString<40> text;
+              value->toString(text, 10, true);
+              return text.str().str();
+            }
+          }
+          if (parts.second == "object_bytes")
+            if (auto bytes = ValueFacts::objectBytes(*argument))
+              return std::to_string(*bytes);
+        }
+      }
+    }
   }
 
   if (prop == "src_file" || prop == "source_file") {

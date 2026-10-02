@@ -1,9 +1,9 @@
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
-#include <gtest/gtest.h>
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/SourceMgr.h>
+#include <gtest/gtest.h>
 
 namespace {
 class AliasWrapperBuildTest : public ::testing::Test {

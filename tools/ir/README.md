@@ -16,10 +16,19 @@ The current IR tool binary is emitted under `build/bin/`.
 
 | Tool | Purpose | Notes |
 | --- | --- | --- |
-| `lotus-ir-pdg-query` | Query the Program Dependence Graph | Implemented by `tools/ir/lotus-ir-pdg-query.cpp`; supports Cypher-style queries, slicing, chopping, shortest paths, summaries, resource-flow queries, and multiple output formats. |
+| `lotus-ir-pdg-query` | Query the Program Dependence Graph | A small entry point with CLI support in `pdg-query/`; supports Cypher queries, slicing, chopping, shortest paths, summaries, resource flow and semantic rules. |
 | `lotus-ir-control-dependence` | Run control-dependence experiments | Separates baseline and compact NTSCD/DOD timing, biclique statistics, exact pair enumeration, closure, and consistency checking; emits text, JSON, or CSV. |
 | `lotus-ir-usetracessa` | Build UseTraceSSA from Lotus SVFG | Emits text, JSON or DOT; queries node reachability and checks double-free, use-after-free, memory-leak, and file-leak candidates. |
 | `lotus-ir-ufg` | Build the object-expanded UFG baseline from the same SVFG facts | Uses the same resource checks and reports physical lane/node/edge counts. |
+
+The PDG query entry point initializes LLVM, loads the module, builds the graph,
+and starts the driver. `pdg-query/Options` owns CLI registration and returns a
+plain configuration snapshot. `pdg-query/Driver` selects modes, resolves criteria
+and invokes PDG analysis services. `pdg-query/Output` renders catalogs, schema,
+text, JSON, DOT and Cypher results. Property-driven mode selection uses local
+state instead of modifying global CLI options. Analysis implementations and
+rule catalogs remain under `lib/IR/PDG/`, so adding a rule does not enlarge the
+entry point.
 
 ### UseTraceSSA
 

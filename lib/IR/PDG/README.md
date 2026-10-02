@@ -33,6 +33,18 @@ The Cypher query-language parser and executor live separately under
 - **`SummaryQuery`**: source/target relationship buckets with witness paths
 - **`ResourceFlowQuery`**: acquire/use/transfer/release events over resource
   families
+- **`RuleQuery`**: semantic CodeQL migrations with IDs, coverage boundaries,
+  findings, CWE tags, and evidence; shared LLVM facts live in **`ValueFacts`**
+- **`BoundsQuery`**: allocation/subobject capacity, access widths and offsets,
+  symbolic end relations, terminator space; uses LLVM AA and MemorySSA
+- **`LifetimeQuery`**: per-object CFG release/escape states with compatible
+  branch predicates; double release, use after release, never/may resource leaks
+- **`StateQuery`**: strong local updates, CFG joins, null guards and direct-call
+  null/dereference summaries; exposes pre-access pointer/initialization facts
+- **`TaintQuery`**: PDG-owned CFG worklist and context-keyed function summaries,
+  matched call/return mappings, field offsets, library transfers,
+  transparent sink wrappers and domain-specific barriers; exposes source and
+  concatenation evidence without interpreting arbitrary PDG edges as taint
 - **`PDGCriteriaResolver`**: criteria resolution from nodes, LLVM values,
   function names, callee names, source locations, property specs, and Cypher
   selections
@@ -118,6 +130,10 @@ Examples:
 
 Analysis mode accepts ``--scope-function``, ``--scope-query``,
 ``--context-sensitive``, ``--thin``, and ``--format text|json|dot``.
+
+Semantic rules use `--analysis rules --rule <CodeQL ID> --format text|json`;
+`--list-rules` lists rules and coverage. Rules use scope/criteria but do
+not infer taint or path feasibility from dependence reachability.
 
 ## See Also
 

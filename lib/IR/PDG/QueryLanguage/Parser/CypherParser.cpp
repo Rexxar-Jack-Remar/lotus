@@ -949,8 +949,21 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
   }
 
   std::string value;
+  std::string rightProperty;
   if (hasMore(tokens, pos)) {
     value = consume(tokens, pos);
+    if (!value.empty() &&
+        (std::isalpha(static_cast<unsigned char>(value.front())) ||
+         value.front() == '_') &&
+        hasMore(tokens, pos) && peek(tokens, pos) == ".") {
+      consume(tokens, pos);
+      if (!hasMore(tokens, pos)) {
+        setError(CypherErrorCode::SYNTAX_ERROR,
+                 "Expected property after RHS '.'", 0, 0);
+        return nullptr;
+      }
+      rightProperty = consume(tokens, pos);
+    }
     if (!value.empty() && value.front() == '$') {
       value = substituteParameter(value.substr(1),
                                   activeParams_ ? *activeParams_
@@ -977,6 +990,9 @@ CypherParser::parseComparison(std::vector<std::string> &tokens, size_t &pos) {
     comparisonOp = CypherComparisonOp::CONTAINS;
   }
 
+  if (!rightProperty.empty())
+    return CypherWhereClause::makePropertyComparison(
+        variable, property, comparisonOp, value, rightProperty);
   return CypherWhereClause::makeComparison(variable, property, comparisonOp,
                                            value);
 }

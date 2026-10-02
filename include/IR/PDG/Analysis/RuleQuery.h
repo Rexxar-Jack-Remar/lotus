@@ -1,0 +1,50 @@
+#pragma once
+
+#include "IR/PDG/Analysis/QueryCore.h"
+#include "IR/PDG/Analysis/TaintQuery.h"
+
+namespace pdg {
+
+struct RuleDescriptor {
+  std::string id;
+  std::string severity;
+  std::string codeql_query;
+  /// Explicit coverage boundary, also included in machine-readable results.
+  std::string coverage;
+  /// Original CodeQL CWE tags; membership does not imply complete CWE coverage.
+  std::vector<unsigned> cwes;
+};
+
+struct RuleFinding {
+  std::string rule_id;
+  std::string message;
+  Node *site = nullptr;
+  std::vector<Node *> evidence;
+  std::vector<TaintOrigin> taint_origins;
+};
+
+struct RuleQueryResult {
+  std::vector<RuleDescriptor> rules;
+  std::vector<RuleFinding> findings;
+  PDGQueryDiagnostics diagnostics;
+};
+
+/// Semantic checks over LLVM values associated with PDG nodes. Dependence
+/// reachability alone is never interpreted as taint, must-flow, or a feasible
+/// execution path. Works with both a full PDG and its structural graph.
+class RuleQuery {
+public:
+  explicit RuleQuery(ProgramGraph &graph) : graph_(graph) {}
+  static const std::vector<RuleDescriptor> &catalog();
+  RuleQueryResult
+  analyze(const std::vector<std::string> &rule_ids = {},
+          const PDGCriteria &criteria = PDGCriteria(),
+          const PDGQueryOptions &options = PDGQueryOptions(),
+          const llvm::Module *module = nullptr,
+          const TaintPolicy &taint_policy = TaintPolicy()) const;
+
+private:
+  ProgramGraph &graph_;
+};
+
+} // namespace pdg

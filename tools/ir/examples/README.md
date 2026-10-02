@@ -49,7 +49,16 @@ This prints all node labels, edge types, node/edge properties, group labels, and
 - `func`, `label`
 - `opcode` (LLVM opcode for instruction nodes)
 - `callee` (for `:INST_FUNCALL`; returns `"<indirect>"` for indirect calls)
+- `arg_count`, `callee_param_count`, `arg<N>_int`, `arg<N>_object_bytes`
+  (argument indices start at zero; unknown facts are empty)
 - `src`, `src_file`, `src_line`, `src_col` (requires debug info in the input bitcode)
+- `known_access_count`, `out_of_bounds_access_count`, `read_out_of_bounds`,
+  `write_out_of_bounds` (known object/subobject accesses; absence of a proven
+  overflow does not prove unknown accesses safe)
+- `access_bytes`, `access_capacity_bytes`, `access_offset_bytes` (exactly one
+  known access; sizes follow the target ABI and offsets can be negative)
+- `pointer_nullness`, `pointee_initialization` (load/store address and pointee
+  immediately before the instruction; applicable unknown facts are `unknown`)
 - `llvm` (LLVM IR string for the underlying value/instruction)
 
 **Common edge properties**
@@ -63,6 +72,13 @@ The `security/` directory contains categorized security analysis patterns.
 
 | File | Patterns | Analysis modes |
 |------|----------|----------------|
+| `security/codeql-taint.cypher` | Shared source/sink roles for PDG-native process, command, SQL, path and format flows | Cypher selections + `--analysis rules`; source/concat evidence in JSON |
+| `security/codeql-memory-access.cypher` | Subobject capacity, access width, negative offsets, read/write overflow | Shared BoundsQuery facts; native rules also check symbolic ends |
+| `security/codeql-memory-state.cypher` | Nullable dereferences, definite/conditional uninitialized loads | Shared StateQuery facts; native lifetime rules retain object/path state |
+| `security/codeql-buffer-bounds.cypher` | Target-ABI copy bounds versus destination capacity | Semantic Cypher predicates; native rules for dynamic lengths |
+| `security/codeql-format-arguments.cypher` | Parsed format counts and unbounded scanf conversions | Semantic Cypher predicates |
+| `security/codeql-resource-origins.cypher` | Allocation/release families and value-flow explanations | Cypher + native family checks/context-sensitive chop |
+| `security/codeql-patterns.cypher` | Semantic call/argument facts for CodeQL migrations | Cypher inspection; `--analysis rules` for supported checks |
 | `security/injection.cypher` | Command injection: system/popen/exec sinks + input source tracing | Cypher API scan + `--analysis chop` |
 | `security/memory.cypher` | Use-after-free, double-free, memory leaks | `--analysis resource-flow`, `--analysis chop`, `--analysis shortest-path` |
 | `security/unsafe-libc.cypher` | strcpy/gets/sprintf, format string, buffer overflow | Cypher API scan + `--analysis chop` + backward slice |
@@ -71,6 +87,22 @@ The `security/` directory contains categorized security analysis patterns.
 | `security/taint.cypher` | Input-to-sink taint tracking, format string, argument tracing | Cypher API scan + `--analysis chop` + `--analysis slice-backward` |
 
 Each file documents the prerequisites and CLI invocation for each pattern.
+
+`--list-rules` lists 48 migrated CodeQL rule IDs and their coverage. Run
+`--analysis rules --rule cpp/bad-strncpy-size --format json` for semantic
+checks. `--list-cwes` groups implemented IDs by original CodeQL CWE tags;
+`--analysis rules --cwe 401,415,416,457,476,775 --format json` selects relevant
+rules. These tags describe partial category coverage, not complete CWE coverage.
+Dependence paths in the examples are
+candidates for inspection, not proofs of taint or feasible resource misuse.
+
+The semantic examples support property-to-property comparisons such as
+`c.copy_size_bytes > c.copy_destination_bytes`. Models supply argument roles,
+target ABI sizes and parsed format facts, so these are checks over program
+semantics rather than spelling or coding style. BoundsQuery, StateQuery and
+LifetimeQuery share reusable analysis services; none depends on IFDS, Saber,
+Pulse or UseTraceSSA. Further work prioritizes interprocedural object identity,
+ownership summaries, relative ranges and C++ library models.
 
 ### Quick-start security triage
 

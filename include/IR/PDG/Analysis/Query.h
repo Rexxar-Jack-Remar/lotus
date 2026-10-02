@@ -19,11 +19,16 @@
 #pragma once
 
 #include "IR/PDG/Analysis/DataFlowQuery.h"
+#include "IR/PDG/Analysis/BoundsQuery.h"
 #include "IR/PDG/Analysis/DependenceQuery.h"
 #include "IR/PDG/Analysis/DiffQuery.h"
 #include "IR/PDG/Analysis/ImpactQuery.h"
+#include "IR/PDG/Analysis/LifetimeQuery.h"
 #include "IR/PDG/Analysis/QueryCore.h"
 #include "IR/PDG/Analysis/ResourceFlowQuery.h"
+#include "IR/PDG/Analysis/RuleQuery.h"
 #include "IR/PDG/Analysis/SliceQuery.h"
+#include "IR/PDG/Analysis/StateQuery.h"
 #include "IR/PDG/Analysis/SummaryQuery.h"
+#include "IR/PDG/Analysis/TaintQuery.h"
 #include "IR/PDG/Analysis/TransformQuery.h"

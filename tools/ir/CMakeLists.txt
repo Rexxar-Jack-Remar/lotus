@@ -1,5 +1,8 @@
 add_executable(lotus-ir-pdg-query
   lotus-ir-pdg-query.cpp
+  pdg-query/Options.cpp
+  pdg-query/Driver.cpp
+  pdg-query/Output.cpp
 )
 
 target_link_libraries(lotus-ir-pdg-query
