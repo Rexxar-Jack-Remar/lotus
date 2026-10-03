@@ -75,7 +75,8 @@ enum class ConcurrencyBugType {
   CUDA_VOLATILE_MISSING,
   CUDA_SYMBOLIC_CONFIG_RISK,
   CUDA_SHARED_GLOBAL_SPACE_MISMATCH,
-  CUDA_PARAMETRIC_RACE_RISK
+  CUDA_PARAMETRIC_RACE_RISK,
+  STARVATION
 };
 
 struct ConcurrencyBugStep {
@@ -153,4 +154,3 @@ struct ConcurrencyBugReport {
 };
 
 } // namespace concurrency
-

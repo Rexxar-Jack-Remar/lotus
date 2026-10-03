@@ -119,6 +119,33 @@ if(LOTUS_BUILD_TESTS AND "checker" IN_LIST LOTUS_SELECTED_TEST_SUBSYSTEMS)
   add_checker_cli_test(checker_cli_concur_rejects_substring_check 2
                        "unknown concur check 'raceXYZ'"
                        --engine=concur --checks=raceXYZ ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test(checker_cli_topl_reports_interprocedural_violation 1
+                       "TOPL Error"
+                       --engine=pulse --checks=topl --fail-on-findings
+                       --pulse.topl-properties=${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/temporal.topl
+                       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/temporal.ll)
+  add_checker_cli_test(checker_cli_topl_requires_property_file 2
+                       "TOPL requires --pulse.topl-properties"
+                       --engine=pulse --checks=topl ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test(checker_cli_topl_rejects_missing_property_file 2
+                       "cannot read TOPL properties"
+                       --engine=pulse --checks=topl
+                       --pulse.topl-properties=${CMAKE_CURRENT_BINARY_DIR}/missing.topl
+                       ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test_without_output(checker_cli_topl_respects_check_selection 0
+                       "No findings" "TOPL Error"
+                       --engine=pulse --checks=null-deref --fail-on-findings
+                       --pulse.topl-properties=${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/temporal.topl
+                       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/temporal.ll)
+  add_checker_cli_test(checker_cli_starvation_reports_blocking_helper 1
+                       "Starvation"
+                       --engine=concur --checks=starvation --fail-on-findings
+                       --report-json=${CMAKE_CURRENT_BINARY_DIR}/starvation-report.json
+                       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/starvation.ll)
+  add_checker_cli_test_without_output(checker_cli_starvation_respects_check_selection 0
+                       "No findings" "Starvation"
+                       --engine=concur --checks=data-race --fail-on-findings
+                       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/starvation.ll)
   add_checker_cli_test(checker_cli_concur_analysis_respects_selection 0
                        "CONCURRENCY ANALYSIS RESULTS"
                        --engine=concur --concur.mode=analysis

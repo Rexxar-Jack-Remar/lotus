@@ -4,6 +4,7 @@ add_library(ConcurrencyChecker STATIC
     ConcurrencyAnalysisDumper.cpp
     DataRaceChecker.cpp
     DeadlockChecker.cpp
+    StarvationChecker.cpp
     AtomicityChecker.cpp
     ConditionVariableChecker.cpp
     LockMismatchChecker.cpp

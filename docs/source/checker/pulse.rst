@@ -164,20 +164,74 @@ Programmatic Usage
    mgr.deduplicate_reports(BugReportMgr::DedupMode::ExactTrace);
    mgr.print_summary(llvm::outs());
 
+TOPL Temporal Properties
+------------------------
+
+TOPL adds user-defined temporal automata to Pulse. Enable it with a property
+file; ``--checks=topl`` selects only temporal findings:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-check --engine=pulse --checks=topl \
+     --pulse.topl-properties=resource.topl --fail-on-findings input.bc
+
+For example, ``resource.topl`` can contain:
+
+.. code-block:: text
+
+   property ResourceProtocol
+     message "resource used after closing"
+     start -> start: *
+     start -> closed: close_resource(X, _) => x := X
+     closed -> error: use_resource(X, _) when x == X
+
+Call bindings contain arguments followed by a return slot, including a slot
+for void returns. Uppercase identifiers bind event values, lowercase registers
+remember values, and ``_`` ignores a slot. Omitting the argument list matches
+any signature. Multiple assignments use semicolons.
+Quoted call patterns are regular expressions matched against LLVM symbols,
+demangled signatures, or qualified function names. ``prefix`` declarations
+prepend regular expressions to the call patterns.
+
+Supported events are direct ``call`` instructions and writes through
+``getelementptr`` instructions, exposed as ``#ArrayWrite(Array, Index)``.
+Guards support integer literals, ``==``, ``!=``, ``<``, ``<=``, ``>``, ``>=``
+and conjunctions with ``&&``. A guard must follow from the current Pulse facts
+or concrete values; monitor paths requiring unresolved guards are dropped.
+Symbolic event
+histories survive callee summaries and are replayed after value substitution,
+allowing caller facts to resolve guards. ``error`` states can have outgoing
+transitions, so a later cleanup event can repair a temporary error. Findings
+are emitted at return boundaries of procedures without direct callers outside
+their call-graph SCC, and at address-taken entry points. Helpers retain their
+histories for checking in caller context. Reports include property names and
+event/call traces through the shared reporting backend.
+
+This is an experimental LLVM adaptation of Infer TOPL. Histories are limited
+to 128 events per Pulse disjunct and evaluation to 64 configurations per
+property. Truncated histories and excess configurations are dropped from
+reporting, reducing recall.
+Existing Pulse loop and recursion limits also apply. Heap-field and
+reachability guards are rejected by the parser; indirect calls, ``invoke``
+events and source-language-specific events are not modeled.
+
+Programmatic clients can parse a ``pulse::ToplProgram`` with ``parse()`` and
+install it using ``PulseChecker::setToplProgram()`` before analysis.
+
 Testing
 -------
 
 The main unit tests live in:
 
-* ``tests/unit/Checker/Pulse/PulseCheckerTest.cpp`` for end-to-end checker
-  behavior and reporting
+* ``tests/unit/Checker/Pulse/Pulse*Test.cpp`` for end-to-end checker
+  behavior, temporal properties, and reporting
 * ``tests/unit/Checker/Pulse/PulseFormulaTest.cpp`` for formula-level reasoning
 
 Run the relevant tests from the build directory with:
 
 .. code-block:: bash
 
-   ctest --output-on-failure -R 'pulse_checker_test|PulseFormulaTest'
+   ./build/bin/tests/checker_tests --gtest_filter='Pulse*'
 
 Limitations
 -----------

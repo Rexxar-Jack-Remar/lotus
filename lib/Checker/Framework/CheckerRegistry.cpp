@@ -22,6 +22,7 @@ constexpr NativeCheckDescriptor SABER_CHECKS[] = {
     {"file-leak", "File descriptor leak"},
 };
 constexpr NativeCheckDescriptor PULSE_CHECKS[] = {
+    {"topl", "User-defined temporal property"},
     {"null-deref", "Null pointer dereference"},
     {"use-after-free", "Use after free"},
     {"out-of-bounds", "Out-of-bounds access"},
@@ -54,6 +55,7 @@ constexpr NativeCheckDescriptor FITX_CHECKS[] = {
     {"ref-uncount", "Reference uncount misuse"},
 };
 constexpr NativeCheckDescriptor CONCURRENCY_CHECKS[] = {
+    {"starvation", "Blocking and arbitrary callbacks under locks"},
     {"data-race", "Data race"},
     {"deadlock", "Deadlock"},
     {"atomicity", "Atomicity violation"},

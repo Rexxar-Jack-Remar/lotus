@@ -4,3 +4,4 @@ lotus_collect_test_sources(checker_tests
   PulseFormulaTest.cpp
   PulseMemoryAndTaintTest.cpp
   PulseSummariesTest.cpp)
+lotus_collect_test_sources(checker_tests PulseToplTest.cpp)

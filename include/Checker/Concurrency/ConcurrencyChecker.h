@@ -11,6 +11,7 @@
 #include "Checker/Concurrency/LockMismatchChecker.h"
 #include "Checker/Concurrency/MPIChecker.h"
 #include "Checker/Concurrency/OpenMPChecker.h"
+#include "Checker/Concurrency/StarvationChecker.h"
 #include "Checker/Framework/BugReport.h"
 #include "Checker/Framework/BugReportMgr.h"
 #include "Concurrency/ConcurrencyFacade.h"
@@ -139,6 +140,11 @@ public:
   void enableOpenMPCheck(bool enable) { m_checkOpenMP = enable; }
   void enableMPICheck(bool enable) { m_checkMPI = enable; }
   void enableCUDACheck(bool enable) { m_checkCUDA = enable; }
+  void enableStarvationCheck(bool enable) { m_checkStarvation = enable; }
+  void addStarvationBlockingFunction(std::string name) {
+    m_starvationBlockingFunctions.push_back(std::move(name));
+  }
+  void checkStarvation();
   void setMHPBackend(MHPBackendKind backend) { m_mhpBackend = backend; }
   void enableSparseFlowSensitiveRefinement(bool enable) {
     m_enableSparseFlowSensitiveRefinement = enable;
@@ -174,6 +180,7 @@ public:
     size_t openMPBugsFound;
     size_t mpiBugsFound;
     size_t cudaBugsFound;
+    size_t starvationBugsFound;
     size_t sparseInterferenceEdges;
     size_t sparsePointsToFacts;
     size_t sparseMemoryRegions;
@@ -234,6 +241,8 @@ private:
   std::unique_ptr<OpenMPChecker> m_openMPChecker;
   std::unique_ptr<MPIChecker> m_mpiChecker;
   std::unique_ptr<CUDAChecker> m_cudaChecker;
+  std::unique_ptr<StarvationChecker> m_starvationChecker;
+  std::vector<std::string> m_starvationBlockingFunctions;
 
   // Configuration
   bool m_checkDataRaces = true;
@@ -244,6 +253,7 @@ private:
   bool m_checkOpenMP = true;
   bool m_checkMPI = true;
   bool m_checkCUDA = true;
+  bool m_checkStarvation = true;
   bool m_enableSparseFlowSensitiveRefinement = false;
   bool m_enableMultiStageSlicing = false;
   lotus::analysis::MemoryRegionPartitionStrategy m_sparseMemoryPartition =
@@ -256,6 +266,7 @@ private:
   // Bug type IDs (registered with BugReportMgr)
   int m_dataRaceTypeId;
   int m_deadlockTypeId;
+  int m_starvationTypeId;
   int m_atomicityViolationTypeId;
   int m_condVarMisuseTypeId;
   int m_lockMismatchTypeId;
@@ -289,4 +300,3 @@ private:
 };
 
 } // namespace concurrency
-

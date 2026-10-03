@@ -6,6 +6,7 @@
 #include "Checker/Pulse/Domain/PulseInvalidation.h"
 #include "Checker/Pulse/Domain/PulseTaint.h"
 #include "Checker/Pulse/Interproc/PulseTransitiveInfo.h"
+#include "Checker/Pulse/Topl/PulseTopl.h"
 
 #include <cstdint>
 #include <map>
@@ -55,6 +56,7 @@ private:
 
   // Taint tracking
   TaintDomain taint_domain_;
+  ToplHistory topl_history_;
 
   // Path condition: formula tracking equalities and constraints
   std::unique_ptr<PulseFormula> path_formula_;
@@ -106,6 +108,9 @@ private:
   std::unique_ptr<LoopInvariantUnderInference> loop_invariant_under_inference_;
 
 public:
+  ToplHistory &getToplHistory() { return topl_history_; }
+  const ToplHistory &getToplHistory() const { return topl_history_; }
+
   // Stack operations
   Stack &getPostStack() { return post_stack_; }
   Stack &getPreStack() { return pre_stack_; }
@@ -289,4 +294,3 @@ public:
 };
 
 } // namespace pulse
-

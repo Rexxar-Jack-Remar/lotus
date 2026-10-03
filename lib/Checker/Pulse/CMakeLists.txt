@@ -7,6 +7,8 @@ set(PulseChecker_SOURCES
   Core/PulseCallState.cpp
   Core/PulseFormula.cpp
   Core/PulseSubstitution.cpp
+  Topl/PulseTopl.cpp
+  Topl/PulseToplIntegration.cpp
 
   Domain/PulseContradiction.cpp
   Domain/PulseDisjunctiveDomain.cpp

@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <queue>
+#include <set>
 #include <tuple>
 #include <unordered_set>
 #include <vector>
@@ -85,6 +86,9 @@ private:
   NonDisjunctiveDomain analysis_non_disj_;
   SummaryManager summary_manager_;
   SpecializationManager specialization_manager_;
+  ToplProgram topl_program_;
+  int toplTypeId_ = -1;
+  std::set<std::pair<std::string, const llvm::Instruction *>> topl_reported_;
 
   // Disjunctive analysis and loop abstraction (optional, can be nullptr)
   std::map<const llvm::Function *, DisjunctiveDomain> disjunctive_domains_;
@@ -101,6 +105,16 @@ private:
   std::unordered_set<const llvm::Function *> current_scc_;
 
 public:
+  void setToplProgram(ToplProgram program) {
+    topl_program_ = std::move(program);
+    topl_reported_.clear();
+  }
+  ToplValue toplValue(AbductiveDomain &state, const llvm::Value *value,
+                      const llvm::Instruction *location,
+                      const llvm::BasicBlock *pred);
+  void recordToplEvent(AbductiveDomain &state, ToplEvent event);
+  void reportTopl(const AbductiveDomain &state);
+
   explicit PulseChecker(llvm::Module *M,
                         lotus::AliasAnalysisWrapper *AA = nullptr);
   ~PulseChecker();
@@ -224,4 +238,3 @@ private:
 };
 
 } // namespace pulse
-

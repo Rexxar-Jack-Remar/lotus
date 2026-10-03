@@ -26,6 +26,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -36,6 +37,9 @@ static cl::opt<std::string>
     InputFile(cl::Positional, cl::desc("<input bitcode>"), cl::Required,
               cl::sub(lotus::checker::tooling::pulseSubCommand()));
 enum class SMTMode { Off, On };
+static cl::opt<std::string> ToplProperties(
+    "pulse.topl-properties", cl::desc("TOPL temporal property file"),
+    cl::init(""), cl::sub(lotus::checker::tooling::pulseSubCommand()));
 static cl::opt<SMTMode>
     SMT("pulse.smt", cl::desc("SMT path-feasibility solving"),
         cl::values(clEnumValN(SMTMode::Off, "off", "Disable SMT solving"),
@@ -52,6 +56,24 @@ int runPulseCheckerTool(const char *argv0) {
     return lotus::checker::tooling::EXIT_ERROR;
   }
   const auto &selected = *selectedOr;
+  std::optional<ToplProgram> topl;
+  if (!ToplProperties.empty()) {
+    auto buffer = MemoryBuffer::getFile(ToplProperties);
+    if (!buffer) {
+      errs() << "error: cannot read TOPL properties: " << buffer.getError().message() << '\n';
+      return lotus::checker::tooling::EXIT_ERROR;
+    }
+    auto parsed = ToplProgram::parse((*buffer)->getBuffer(), ToplProperties);
+    if (!parsed) {
+      logAllUnhandledErrors(parsed.takeError(), errs(), "error: ");
+      return lotus::checker::tooling::EXIT_ERROR;
+    }
+    topl = std::move(*parsed);
+  } else if (lotus::checker::tooling::hasExplicitCheckSelection() &&
+             lotus::checker::tooling::Checks != "all" && selected.count("topl")) {
+    errs() << "error: TOPL requires --pulse.topl-properties\n";
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
 
   // Configure logging
   pulse::LogLevel level =
@@ -91,6 +113,8 @@ int runPulseCheckerTool(const char *argv0) {
   }
 
   PulseChecker checker(M.get(), AA.get());
+  if (topl && selected.count("topl"))
+    checker.setToplProgram(std::move(*topl));
 
   PulseLogger::startTimer("analysis");
   checker.analyze();
@@ -99,6 +123,7 @@ int runPulseCheckerTool(const char *argv0) {
   PulseLogger::endTimer("total_analysis");
 
   const std::pair<StringRef, StringRef> checkBugTypes[] = {
+      {"topl", "TOPL Error"},
       {"null-deref", IssueType::NullDereference},
       {"use-after-free", IssueType::UseAfterFree},
       {"out-of-bounds", IssueType::OutOfBounds},

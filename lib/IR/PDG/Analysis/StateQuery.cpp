@@ -75,6 +75,7 @@ struct PendingOutput {
   bool unknown_status = false;
   bool incorrectly_checked_scanf = false;
   bool output_compared_after_call = false;
+  bool return_count_maps_output = true;
   bool operator==(const PendingOutput &other) const {
     return call == other.call && kind == other.kind &&
            prior_initialization == other.prior_initialization &&
@@ -83,7 +84,8 @@ struct PendingOutput {
            unwritten_statuses == other.unwritten_statuses &&
            unknown_status == other.unknown_status &&
            incorrectly_checked_scanf == other.incorrectly_checked_scanf &&
-           output_compared_after_call == other.output_compared_after_call;
+           output_compared_after_call == other.output_compared_after_call &&
+           return_count_maps_output == other.return_count_maps_output;
   }
 };
 
@@ -351,7 +353,8 @@ void mergeState(State &to, const State &from) {
                         from.reported_outputs.end(),
                         std::inserter(reported, reported.end()));
   to.reported_outputs = std::move(reported);
-  to.aliased_objects.insert(from.aliased_objects.begin(), from.aliased_objects.end());
+  to.aliased_objects.insert(from.aliased_objects.begin(),
+                            from.aliased_objects.end());
   to.unsupported_guard |= from.unsupported_guard;
 }
 
@@ -666,6 +669,8 @@ bool restrictDomain(ScalarDomain &domain, ICmpInst::Predicate predicate,
 bool outputGuaranteed(const PendingOutput &pending,
                       const ScalarDomain &domain) {
   if (pending.kind == ConditionalOutputKind::Scanf) {
+    if (!pending.return_count_maps_output)
+      return false;
     if (domain.lower >= static_cast<int64_t>(pending.minimum_count))
       return true;
     if (domain.finite && !domain.values.empty())
@@ -821,7 +826,24 @@ struct ScanfOutput {
   unsigned minimum_count = 0;
   bool always_written = false;
   uint64_t bytes = 0;
+  bool count_maps_output = true;
 };
+
+Optional<std::string> trackedString(const Value &value, const State &state,
+                                    unsigned depth = 0) {
+  if (depth > 24)
+    return None;
+  if (auto literal = ValueFacts::constantString(value))
+    return literal;
+  auto copy = state.pointer_copies.find(&value);
+  if (copy != state.pointer_copies.end() && copy->second &&
+      copy->second != &value)
+    return trackedString(*copy->second, state, depth + 1);
+  const Value *stripped = value.stripPointerCasts();
+  if (stripped != &value)
+    return trackedString(*stripped, state, depth + 1);
+  return None;
+}
 
 bool scanfWhitespace(char c) { return StringRef(" \t\n\r\v\f").contains(c); }
 
@@ -935,19 +957,23 @@ bool literalPrefixReaches(const CallBase &call, StringRef format,
   return false;
 }
 
-std::vector<ScanfOutput> scanfOutputs(const CallBase &call) {
+std::vector<ScanfOutput> scanfOutputs(const CallBase &call,
+                                      const State &state) {
   const Function *callee = ValueFacts::callee(call);
   if (!callee)
     return {};
   auto model = LibraryModels::format(*callee);
   if (!model || !model->scanf || model->format >= call.arg_size())
     return {};
-  auto format = ValueFacts::constantString(*call.getArgOperand(model->format));
+  auto format = trackedString(*call.getArgOperand(model->format), state);
   std::vector<ScanfOutput> result;
   if (!format) {
     for (unsigned i = model->first_argument; i < call.arg_size(); ++i)
       if (call.getArgOperand(i)->getType()->isPointerTy())
         result.push_back({i, i - model->first_argument + 1});
+    if (result.size() > 1)
+      for (auto &output : result)
+        output.count_maps_output = false;
     return result;
   }
   unsigned argument = 0, count = 0;
@@ -1128,7 +1154,8 @@ Optional<OutputWrite> parameterWrite(const Value *pointer, uint64_t bytes,
   int64_t offset = 0;
   const Value *base = GetPointerBaseWithConstantOffset(
       pointer, offset, function.getParent()->getDataLayout());
-  if (isa<GEPOperator>(base)) return None; // Dynamic offsets are not offset zero.
+  if (isa<GEPOperator>(base))
+    return None; // Dynamic offsets are not offset zero.
   const Argument *argument = parameterOrigin(base, function, dominators);
   if (!argument || offset < 0 || !bytes)
     return None;
@@ -1501,7 +1528,8 @@ Cell memoryCell(const State &state, const MemoryRegion &region) {
     if (entry.first.object == region.object && entry.first.offset >= 0 &&
         static_cast<uint64_t>(std::max(entry.first.offset, region.offset) -
                               std::min(entry.first.offset, region.offset)) <
-            (entry.first.offset <= region.offset ? entry.first.bytes : region.bytes))
+            (entry.first.offset <= region.offset ? entry.first.bytes
+                                                 : region.bytes))
       return cell; // Partly known bytes do not prove a whole-span state.
   cell.initialization = memoryDefault(state, region);
   return cell;
@@ -1549,6 +1577,18 @@ void invalidateMemoryObject(State &state, const Value *object) {
   }
 }
 
+void invalidateAliasedMemory(State &state) {
+  std::set<const Value *> objects = state.aliased_objects;
+  for (const auto &entry : state.cells)
+    if (entry.second.escaped)
+      objects.insert(entry.first);
+  for (const auto &entry : state.memory_cells)
+    if (isa<GlobalVariable>(entry.first.object))
+      objects.insert(entry.first.object);
+  for (const Value *object : objects)
+    invalidateMemoryObject(state, object);
+}
+
 bool comparisonUse(const Value *value, unsigned depth = 0);
 
 bool scanfOutputComparedAfter(const CallBase &call,
@@ -1587,12 +1627,13 @@ bool applyOutputEffects(const CallBase &call, State &state,
   const Function *callee = ValueFacts::callee(call);
   if (!callee)
     return false;
-  auto scanf = scanfOutputs(call);
+  auto scanf = scanfOutputs(call, state);
   if (!scanf.empty()) {
     state.domains[&call] = domainFor(&call, state);
     if (auto model = LibraryModels::format(*callee))
       if (model->format < call.arg_size())
-        if (auto literal = ValueFacts::constantString(*call.getArgOperand(model->format)))
+        if (auto literal =
+                trackedString(*call.getArgOperand(model->format), state))
           if (auto parsed = parseFormat(*literal, true)) {
             int64_t maximum_count = 0;
             for (const auto &conversion : parsed->conversions)
@@ -1626,9 +1667,11 @@ bool applyOutputEffects(const CallBase &call, State &state,
       pending.prior_initialization = cell.initialization;
       pending.incorrectly_checked_scanf = incorrect;
       pending.output_compared_after_call = compared_output;
+      pending.return_count_maps_output = output.count_maps_output;
       auto previous = cell.pending_outputs.find(&call);
       if (previous != cell.pending_outputs.end())
-        pending.minimum_count = std::min(pending.minimum_count, previous->second.minimum_count);
+        pending.minimum_count =
+            std::min(pending.minimum_count, previous->second.minimum_count);
       cell.pending_outputs[&call] = std::move(pending);
       cell.initialization |= Init;
       if (output.always_written) {
@@ -2058,6 +2101,12 @@ FunctionRun analyzeFunction(const Function &function,
           }
         }
       if (const auto *alloca = dyn_cast<AllocaInst>(&instruction)) {
+        for (auto it = state.memory_cells.begin();
+             it != state.memory_cells.end();)
+          if (it->first.object == alloca)
+            it = state.memory_cells.erase(it);
+          else
+            ++it;
         if (scalarCell(alloca, layout))
           state.cells[alloca] = {Uninit, {}, alloca};
         state.pointers[alloca] = {NonNull, alloca, {}};
@@ -2202,10 +2251,7 @@ FunctionRun analyzeFunction(const Function &function,
         } else {
           // An unresolved indirect store may update any cell whose address
           // has been copied into another pointer or escaped the function.
-          for (auto &cell : state.cells)
-            if (cell.second.escaped) {
-              invalidateMemoryObject(state, cell.first);
-            }
+          invalidateAliasedMemory(state);
         }
         if (auto region = memoryRegion(store->getPointerOperand(),
                                        store->getValueOperand()->getType(),
@@ -2250,6 +2296,9 @@ FunctionRun analyzeFunction(const Function &function,
         // An address held in another local pointer also introduces aliases;
         // unresolved writes must not leave a definite uninitialized fact.
         if (store->getValueOperand()->getType()->isPointerTy()) {
+          if (auto region = memoryRegion(store->getValueOperand(), uint64_t(1),
+                                         state, layout))
+            state.aliased_objects.insert(region->object);
           const auto *root = dyn_cast<AllocaInst>(
               getUnderlyingObject(store->getValueOperand()));
           auto found = state.cells.find(root);
@@ -2262,6 +2311,12 @@ FunctionRun analyzeFunction(const Function &function,
         state.domains.erase(call);
         state.checked_statuses.erase(call);
         state.checked_pointers.erase(call);
+        // A lexical call may execute again in a loop. Previous writes from
+        // that dynamic execution cannot be validated by this new return code.
+        for (auto &entry : state.cells)
+          entry.second.pending_outputs.erase(call);
+        for (auto &entry : state.memory_cells)
+          entry.second.pending_outputs.erase(call);
         for (auto it = state.reported_outputs.begin();
              it != state.reported_outputs.end();)
           if (it->first == call)
@@ -2393,10 +2448,7 @@ FunctionRun analyzeFunction(const Function &function,
                    !call->onlyReadsMemory()) {
           // Passing a tracked cell to an unknown writer invalidates it. This
           // suppresses unsupported output-parameter and alias assumptions.
-          for (auto &cell : state.cells)
-            if (cell.second.escaped) {
-              invalidateMemoryObject(state, cell.first);
-            }
+          invalidateAliasedMemory(state);
           for (const Use &argument : call->args())
             if (argument->getType()->isPointerTy()) {
               if (auto region =

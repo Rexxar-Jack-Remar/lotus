@@ -572,6 +572,8 @@ private:
    */
   bool mayAlias(LockID lock1, LockID lock2) const;
 
+public:
+  // Shared identity queries for checker domains that compose lock effects.
   bool locksMustMatch(LockID lock1, LockID lock2) const;
 
   /**
@@ -609,6 +611,12 @@ private:
    */
   LockID getLockValue(const llvm::Instruction *inst) const;
 
+  LockID projectLockAtCall(const llvm::CallBase *call,
+                           const llvm::Function *callee, LockID lock) const {
+    return instantiateSummaryLock(call, callee, lock);
+  }
+
+private:
   /**
    * @brief Compute function summary for interprocedural analysis
    */
@@ -650,4 +658,3 @@ private:
 };
 
 } // namespace mhp
-

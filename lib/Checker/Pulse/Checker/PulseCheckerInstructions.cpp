@@ -163,10 +163,49 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
 
   if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(I))
     return pruneStates({handleLoad(LI, exec_state, pred)});
-  if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(I))
-    return pruneStates({handleStore(SI, exec_state, pred)});
-  if (auto *CI = llvm::dyn_cast<llvm::CallInst>(I))
-    return pruneStates(handleCall(CI, exec_state, pred, call_depth));
+  if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(I)) {
+    auto result = handleStore(SI, exec_state, pred);
+    if (!result.isStopped() && result.getAstate() &&
+        topl_program_.observes(ToplEvent::Kind::ArrayWrite, "#ArrayWrite")) {
+      const auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(
+          SI->getPointerOperand()->stripPointerCasts());
+      if (gep && gep->getNumIndices()) {
+        auto &state = *result.getAstate();
+        ToplEvent event;
+        event.kind = ToplEvent::Kind::ArrayWrite;
+        event.name = "#ArrayWrite";
+        event.location = SI;
+        event.arguments = {toplValue(state, gep->getPointerOperand(), SI, pred),
+                           toplValue(state, gep->getOperand(gep->getNumOperands() - 1), SI, pred)};
+        recordToplEvent(state, std::move(event));
+      }
+    }
+    return pruneStates({std::move(result)});
+  }
+  if (auto *CI = llvm::dyn_cast<llvm::CallInst>(I)) {
+    const auto *callee = llvm::dyn_cast<llvm::Function>(
+        CI->getCalledOperand()->stripPointerCasts());
+    const bool observe = callee &&
+        topl_program_.observes(ToplEvent::Kind::Call, callee->getName());
+    ToplEvent event;
+    if (observe) {
+      event.name = callee->getName().str();
+      event.location = CI;
+      for (const auto &arg : CI->args())
+        event.arguments.push_back(toplValue(*astate, arg.get(), CI, pred));
+    }
+    auto results = handleCall(CI, exec_state, pred, call_depth);
+    if (observe) {
+      for (auto &result : results) {
+        if (result.isStopped() || !result.getAstate())
+          continue;
+        ToplEvent completed = event;
+        completed.arguments.push_back(toplValue(*result.getAstate(), CI, CI, pred));
+        recordToplEvent(*result.getAstate(), std::move(completed));
+      }
+    }
+    return pruneStates(std::move(results));
+  }
   if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(I))
     return pruneStates({handleAlloca(AI, exec_state)});
   if (auto *RI = llvm::dyn_cast<llvm::ReturnInst>(I))
@@ -928,6 +967,31 @@ ExecutionDomain PulseChecker::handleAlloca(const llvm::AllocaInst *AI,
 ExecutionDomain PulseChecker::handleReturn(const llvm::ReturnInst *RI,
                                            ExecutionDomain exec_state) {
   auto *astate = exec_state.getAstate();
+  if (astate && !topl_program_.empty()) {
+    // A helper's temporary error state can be repaired after the call. Keep
+    // its history in the summary, and report at the surrounding entry boundary.
+    // Address-taken functions and SCCs without outside direct callers also
+    // serve as independently analyzable entry points.
+    const auto *function = RI->getFunction();
+    bool hasCaller = false;
+    std::vector<const llvm::User *> uses(function->user_begin(), function->user_end());
+    std::set<const llvm::User *> visited;
+    while (!uses.empty() && !hasCaller) {
+      const auto *user = uses.back();
+      uses.pop_back();
+      if (!visited.insert(user).second)
+        continue;
+      if (const auto *call = llvm::dyn_cast<llvm::CallBase>(user)) {
+        hasCaller = call->getCalledOperand()->stripPointerCasts() == function &&
+                    !current_scc_.count(call->getFunction()) &&
+                    call->getFunction() != function;
+      } else {
+        uses.insert(uses.end(), user->user_begin(), user->user_end());
+      }
+    }
+    if (!hasCaller || function->hasAddressTaken())
+      reportTopl(*astate);
+  }
   std::optional<AbstractValue> returned_value = std::nullopt;
   if (RI && astate && RI->getNumOperands() > 0) {
     const llvm::Value *ret_v = RI->getReturnValue();
