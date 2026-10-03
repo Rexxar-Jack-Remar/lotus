@@ -3,15 +3,11 @@
 // the REAL intraprocedural solver with a distributive reachability client, in
 // the 2x2 {Default, Order} x {no-EAN, EAN} configuration matrix.
 //
-// For every subject and configuration we:
-//   * assert client-fact parity vs Default (pivot order + EAN preserve results
-//     on a distributive client) — the RQ3 correctness net;
-//   * measure final retained-DAG complexity over the summary batch (Table VI);
-//   * measure peak construction nodes (Diagnostics.peak_matrix_nodes) — the
-//     ordering-only metric, plus the combinatorial peakFill proxy.
-// It then reports the Order/EAN/Order+EAN reduction rows, the Default-vs-Order
-// peak reduction per family, and the Spearman correlation between the ordering
-// gain and the EAN gain (complementarity).
+// For every subject and configuration we assert client-fact parity vs Default
+// (pivot order + EAN preserve results on a distributive client) — the RQ3
+// correctness net — and measure final retained-DAG complexity plus peak
+// construction nodes. (CSV export removed: unit tests must not write files;
+// see git history to resurrect the dump.)
 
 #include "Dataflow/APA/EAN/DagStats.h"
 #include "Dataflow/APA/Solver/Ordering/StructuralModel.h"
@@ -20,8 +16,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
-#include <fstream>
 #include <map>
 #include <set>
 #include <string>
@@ -171,12 +165,6 @@ struct GeoMean {
   }
   double value() const { return n ? std::exp(sumLog / static_cast<double>(n)) : 1.0; }
 };
-
-std::string outDir() {
-  const char *d = std::getenv("EAN_EVAL_OUT");
-  return d && *d ? std::string(d) : std::string(".");
-}
-std::ofstream open(const std::string &name) { return std::ofstream(outDir() + "/" + name); }
 
 EliminationOptions mkOpts(OrderingPolicy ord, bool enableEAN) {
   EliminationOptions o;
@@ -328,52 +316,9 @@ TEST(EanEvalRq3, ComplementarityWithOrdering) {
     gOEVsOrd.add(O.stats.uniqueNodes, OE.stats.uniqueNodes);
   }
 
-  // ---- Table VI Order/EAN/Order+EAN rows ----
-  {
-    auto os = open("table6_order_rows.csv");
-    os << "configuration,unique_nodes,dag_edges,tree_size,sequence,stars,"
-          "sharing_before,sharing_after\n";
-    auto row = [&](const char *name, GeoMean &n, GeoMean &e, GeoMean &t,
-                   GeoMean &sq, GeoMean &st, double shareAfter) {
-      os << name << "," << n.value() << "," << e.value() << "," << t.value()
-         << "," << sq.value() << "," << st.value() << ","
-         << (shareN ? shareDef / shareN : 0.0) << ","
-         << (shareN ? shareAfter / shareN : 0.0) << "\n";
-    };
-    row("Order", gO_n, gO_e, gO_t, gO_s, gO_st, shareO);
-    row("EAN", gE_n, gE_e, gE_t, gE_s, gE_st, shareE);
-    row("Order+EAN", gOE_n, gOE_e, gOE_t, gOE_s, gOE_st, shareOE);
-  }
-
-  // ---- RQ3 peak (Default vs Order) ----
-  {
-    auto os = open("rq3_peak.csv");
-    os << "family,subjects,default_peak_nodes,order_peak_nodes,peak_ratio,"
-          "default_peakfill,order_peakfill\n";
-    for (const auto &f : famOrder) {
-      const PeakAgg &a = peak[f];
-      const double dn = static_cast<double>(a.defPeak) / a.subjects;
-      const double on = static_cast<double>(a.ordPeak) / a.subjects;
-      os << f << "," << a.subjects << "," << dn << "," << on << ","
-         << (dn > 0 ? on / dn : 1.0) << ","
-         << static_cast<double>(a.defFill) / a.subjects << ","
-         << static_cast<double>(a.ordFill) / a.subjects << "\n";
-    }
-  }
-
-  // ---- RQ3 complementarity ----
-  {
-    auto os = open("rq3_complementarity.csv");
-    os << "metric,value\n";
-    os << "n_subjects," << corpus.size() << "\n";
-    os << "spearman_ordering_vs_ean_gain," << spearman(orderingGain, eanGain) << "\n";
-    os << "order_vs_default_final," << gOrdVsDef.value() << "\n";
-    os << "ean_vs_default_final," << gEanVsDef.value() << "\n";
-    os << "orderEAN_vs_default_final," << gOEVsDef.value() << "\n";
-    os << "orderEAN_vs_order_final," << gOEVsOrd.value() << "\n";
-    os << "parity_checks," << parityChecks << "\n";
-    os << "parity_failures," << parityFail << "\n";
-  }
+  // Table VI rows / peak / complementarity aggregates are accumulated above;
+  // with CSV export removed they are intentionally not written out. The
+  // correctness signal is the parity gate below.
 
   EXPECT_EQ(parityFail, 0u);
   std::printf("[RQ3] %zu subjects, parity %zu/%zu ok, Order/Def=%.3f EAN/Def=%.3f "

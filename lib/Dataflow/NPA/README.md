@@ -143,8 +143,8 @@ indexing, round construction, and inner solves.
 For unbounded ordinary linear backends, idempotent Newton rounds initialize the
 inner solve from the current approximant, which is a pre-fixpoint of both the
 dense residual and fixed-seed operators. Tensor regularization retains its zero
-start so that its Tarjan path remains available; bounded solvers also keep the
-old zero-start behavior for explicit approximation reporting.
+start so that its Tarjan path remains available; bounded solvers also start
+from zero so that they can report an explicit approximation.
 
 The forward interprocedural engine caches solved block-entry, block-exit, and
 call-prefix summaries before fact propagation. Worklist iterations apply those

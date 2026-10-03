@@ -1,6 +1,7 @@
 # IFDS/IDE Unit Tests
 
 lotus_collect_test_sources(dataflow_tests
+  AnalysisSessionTest.cpp
   IFDSFrameworkCoreTest.cpp
   IFDSSolverTest.cpp
   TaintAnalysisTest.cpp

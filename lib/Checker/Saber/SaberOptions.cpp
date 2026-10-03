@@ -55,6 +55,13 @@ cl::opt<unsigned> SaberZ3Timeout(
     cl::init(10000u), cl::cat(SaberCategory),
     cl::sub(lotus::checker::tooling::saberSubCommand()));
 
+cl::opt<bool> SaberNoSMT(
+    "saber.no-smt",
+    cl::desc("Skip SMT path-condition solving for all Saber checks; report "
+             "conservative value-flow candidates"),
+    cl::init(false), cl::cat(SaberCategory),
+    cl::sub(lotus::checker::tooling::saberSubCommand()));
+
 cl::opt<bool>
     SaberDumpSlice("saber.dump-slice",
                    cl::desc("Dump slice (annotate and dump SVFG)"),

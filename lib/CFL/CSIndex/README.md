@@ -48,6 +48,5 @@ graph transformation and GRAIL index; FLARE has no SCS dependency.
 | `CanaryCSIndexFLARE` | FLARE, GRAIL, PathTree, and tabulation |
 | `CanaryCSIndexSCS` | SCS, linking `CanaryCSIndexFLARE` |
 
-The optional `csr` command links only `CanaryCSIndexFLARE`. The former
-`CFLCallingContextSolver` and duplicate `CSProgressBar` were unused and are not
-part of the reorganized API; FLARE uses `Utils/Platform/ProgressBar`.
+The optional `csr` command links only `CanaryCSIndexFLARE`. FLARE uses
+`Utils/Platform/ProgressBar` for progress reporting.

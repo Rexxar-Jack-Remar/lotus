@@ -73,7 +73,7 @@ Key API surface
    * - ``RegularSet``
      - Explicit state/transition/final construction for regular seeds.
    * - ``BooleanSemiring`` / ``RelationSemiring``
-     - Boolean weights and finite binary-relation typestate weights.
+     - Boolean weights and finite binary-relation weights.
    * - ``SynchronizedSystem<Domain>``
      - Front-end-neutral data-flow builder over variable/statement controls
        with ``postStar``/``preStar``.
@@ -100,9 +100,9 @@ Command line
 
 .. code-block:: console
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-spds
-   build/bin/lotus-cfl-interleaved-dyck-spds --query 0 4 input.dot
-   build/bin/lotus-cfl-interleaved-dyck-spds --all-pairs --pairs input.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck spds --query 0 4 input.dot
+   build/bin/lotus-cfl-interleaved-dyck spds --all-pairs --pairs input.dot
 
 The tool requires exactly one query scope: ``--all-pairs``,
 ``--query SOURCE TARGET``, ``--source V``, ``--target V``, or

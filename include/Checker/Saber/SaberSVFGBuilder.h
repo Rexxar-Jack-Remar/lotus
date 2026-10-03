@@ -52,7 +52,10 @@ public:
     recursiveFunctionsCache_.clear();
   }
 
-  void setCurrentSVFG(SVFG *g) { currentSVFG_ = g; }
+  void setCurrentSVFG(SVFG *g) {
+    currentSVFG_ = g;
+    setActiveSVFG(g);
+  }
 
   void collectGlobals();
   void recomputeGlobalSVFGNodes();
@@ -88,4 +91,3 @@ protected:
 
 } // namespace analysis
 } // namespace lotus
-

@@ -158,10 +158,6 @@ The SeaHorn framework is organized into the following subdirectories:
     Declared but unimplemented. Intended for module-level pruning by root
     reachability.
 
-  .. note::
-
-     Added in commit 909d6e9c.
-
 * **Transforms/** – LLVM IR transformations for verification
 
   * **Instrumentation/** – Property instrumentation

@@ -35,37 +35,51 @@ std::string strip_signature(const std::string &demangled) {
 
 TaintAnalysis::TaintAnalysis() : TaintAnalysis(Config{}) {}
 
-TaintAnalysis::TaintAnalysis(const Config &config) : m_config(config) {
-  if (!taint_config::load_default_config()) {
+TaintAnalysis::TaintAnalysis(const Config &config)
+    : TaintAnalysis(config, TaintConfig{}) {
+  auto model = TaintConfigParser::parse_default();
+  if (!model) {
     llvm::errs() << "Error: Could not load taint configuration\n";
     return;
   }
+  model->sanitizers = {"strlen",  "strcmp",  "strncmp", "isdigit",
+                       "isalpha", "isalnum", "isspace", "atoi",
+                       "atol",    "strtol",  "strtoul"};
+  m_taint_config = std::move(model);
+}
 
-  auto &taint_cfg = TaintConfigManager::getInstance();
-  auto sources = taint_cfg.get_all_source_functions();
-  auto sinks = taint_cfg.get_all_sink_functions();
+TaintAnalysis::TaintAnalysis(const Config &config, const TaintConfig &model)
+    : m_config(config),
+      m_taint_config(std::make_shared<const TaintConfig>(model)) {}
 
-  m_source_functions.insert(sources.begin(), sources.end());
-  m_sink_functions.insert(sinks.begin(), sinks.end());
+const TaintConfig *TaintAnalysis::taint_model() const {
+  auto session = analysis_session();
+  if (session && session->taint_config())
+    return session->taint_config().get();
+  return m_taint_config.get();
+}
 
-  // Default sanitizers (can be extended via config file)
-  if (m_config.use_sanitizers) {
-    m_sanitizer_functions.insert("strlen");
-    m_sanitizer_functions.insert("strcmp");
-    m_sanitizer_functions.insert("strncmp");
-    m_sanitizer_functions.insert("isdigit");
-    m_sanitizer_functions.insert("isalpha");
-    m_sanitizer_functions.insert("isalnum");
-    m_sanitizer_functions.insert("isspace");
-    m_sanitizer_functions.insert(
-        "atoi"); // Partial sanitizer (validates numeric)
-    m_sanitizer_functions.insert("atol");
-    m_sanitizer_functions.insert("strtol");
-    m_sanitizer_functions.insert("strtoul");
-  }
+const llvm::Value *
+TaintAnalysis::sparse_fact_value(const TaintFact &fact) const {
+  if (!m_config.track_implicit_flows && fact.is_tainted_var() &&
+      fact.get_value() && !fact.get_value()->getType()->isPointerTy())
+    return fact.get_value();
+  return nullptr;
+}
 
-  llvm::outs() << "Loaded " << sources.size() << " sources and " << sinks.size()
-               << " sinks from configuration\n";
+bool TaintAnalysis::is_identity_flow(const llvm::Instruction *inst,
+                                     const llvm::Instruction *,
+                                     const TaintFact &fact) const {
+  if (!sparse_fact_value(fact))
+    return false;
+  if (!llvm::isa<llvm::BinaryOperator>(inst) &&
+      !llvm::isa<llvm::CmpInst>(inst) && !llvm::isa<llvm::CastInst>(inst) &&
+      !llvm::isa<llvm::SelectInst>(inst))
+    return false;
+  for (const auto &operand : inst->operands())
+    if (operand.get() == fact.get_value())
+      return false;
+  return true;
 }
 
 bool TaintAnalysis::taint_may_alias(const llvm::Value *v1,
@@ -449,67 +463,41 @@ TaintAnalysis::FactSet TaintAnalysis::call_to_return_flow(
     llvm::ArrayRef<const llvm::Function *> callees, const TaintFact &fact) {
   FactSet result;
 
-  const llvm::Function *callee = call->getCalledFunction();
-
-  // Handle sources independently of incoming facts.
-  // BUG (fixed): the old code called both is_source() and
-  // handle_source_function_specs() unconditionally, which caused duplicate
-  // taint facts to be inserted for functions that are both in the source set
-  // AND have explicit source specs in the config.  We now use a single path:
-  // if the function has explicit config specs, use those (they are more
-  // precise); otherwise fall back to the generic is_source() treatment.
-  if (callee) {
-    // Try config-driven source specs first.
+  std::vector<const llvm::Function *> targets(callees.begin(), callees.end());
+  if (targets.empty())
+    targets.push_back(llvm::dyn_cast<llvm::Function>(
+        call->getCalledOperand()->stripPointerCastsAndAliases()));
+  auto *model = taint_model();
+  for (const auto *callee : targets) {
+    if (!callee)
+      continue;
     FactSet source_facts;
-    handle_source_function_specs(call, source_facts);
-    if (!source_facts.empty()) {
-      result.insert(source_facts.begin(), source_facts.end());
-    } else if (is_source(call)) {
-      // No explicit spec — use the generic treatment.
-      if (!call->getType()->isVoidTy()) {
-        result.insert(TaintFact::tainted_var(call, call));
-        if (call->getType()->isPointerTy()) {
-          result.insert(TaintFact::tainted_memory(call, call));
-        }
-      }
-    }
-  } else if (is_source(call)) {
-    if (!call->getType()->isVoidTy()) {
+    handle_source_function_specs(call, callee, source_facts);
+    result.insert(source_facts.begin(), source_facts.end());
+    bool source = false;
+    for (const auto &name : m_source_functions)
+      source |= matches_callee_name(callee, name);
+    if (model)
+      for (const auto &name : model->sources)
+        source |= matches_callee_name(callee, name);
+    if (source_facts.empty() && source && !call->getType()->isVoidTy()) {
       result.insert(TaintFact::tainted_var(call, call));
-      if (call->getType()->isPointerTy()) {
+      if (call->getType()->isPointerTy())
         result.insert(TaintFact::tainted_memory(call, call));
-      }
     }
+    if (!fact.is_zero())
+      handle_pipe_specifications(call, callee, fact, result);
   }
-
-  if (!callee) {
-    flow::map_facts_alongside_callsite_with_policies(
-        call, fact, result,
-        [this, call](const llvm::Value * /*arg*/, const TaintFact &source) {
-          return kills_fact(call, source);
-        },
-        [](const TaintFact &source) { return source.is_zero(); },
-        [](const TaintFact &source) { return source.is_tainted_global(); },
-        /*PropagateGlobals=*/true,
-        /*PropagateZero=*/true);
-    return result;
-  }
-
-  // Handle PIPE specifications for taint propagation
-  if (!fact.is_zero()) {
-    handle_pipe_specifications(call, fact, result);
-  }
-
-  // Propagate facts that are not killed by the call (policy-based helper).
+  // A may-analysis can kill a fact only when every possible target kills it.
+  bool killed = !targets.empty();
+  for (const auto *callee : targets)
+    killed &= kills_fact(call, fact, callee);
   flow::map_facts_alongside_callsite_with_policies(
       call, fact, result,
-      [this, call](const llvm::Value * /*arg*/, const TaintFact &source) {
-        return kills_fact(call, source);
-      },
+      [killed](const llvm::Value *, const TaintFact &) { return killed; },
       [](const TaintFact &source) { return source.is_zero(); },
       [](const TaintFact &source) { return source.is_tainted_global(); },
-      /*PropagateGlobals=*/true,
-      /*PropagateZero=*/true);
+      /*PropagateGlobals=*/true, /*PropagateZero=*/true);
 
   return result;
 }
@@ -529,43 +517,64 @@ TaintAnalysis::initial_facts(const llvm::Function *main) {
   return result;
 }
 
-bool TaintAnalysis::is_source(const llvm::Instruction *inst) const {
-  for (const auto &source : m_source_functions) {
-    if (matches_function_name(inst, source)) {
-      return true;
-    }
+bool TaintAnalysis::matches_model_function(
+    const llvm::Instruction *inst,
+    const std::unordered_set<std::string> &names) const {
+  const auto *call = llvm::dyn_cast_or_null<llvm::CallBase>(inst);
+  if (!call)
+    return false;
+  std::vector<const llvm::Function *> targets;
+  if (auto session = analysis_session()) {
+    const auto &callees = session->graph()->callees();
+    auto found = callees.find(call);
+    if (found != callees.end())
+      targets = found->second;
+  } else {
+    targets.push_back(llvm::dyn_cast<llvm::Function>(
+        call->getCalledOperand()->stripPointerCastsAndAliases()));
   }
-
+  for (const auto *callee : targets)
+    for (const auto &name : names)
+      if (matches_callee_name(callee, name))
+        return true;
   return false;
 }
 
-bool TaintAnalysis::is_sink(const llvm::Instruction *inst) const {
-  for (const auto &sink : m_sink_functions) {
-    if (matches_function_name(inst, sink)) {
-      return true;
-    }
-  }
+bool TaintAnalysis::is_source(const llvm::Instruction *inst) const {
+  const auto *model = taint_model();
+  return matches_model_function(inst, m_source_functions) ||
+         (model && matches_model_function(inst, model->sources));
+}
 
-  return false;
+bool TaintAnalysis::is_sink(const llvm::Instruction *inst) const {
+  const auto *model = taint_model();
+  return matches_model_function(inst, m_sink_functions) ||
+         (model && matches_model_function(inst, model->sinks));
 }
 
 bool TaintAnalysis::matches_function_name(const llvm::Instruction *inst,
                                           llvm::StringRef configured_name) {
-  auto *call = llvm::dyn_cast<llvm::CallBase>(inst);
-  if (!call || !call->getCalledFunction())
+  auto *call = llvm::dyn_cast_or_null<llvm::CallBase>(inst);
+  return call &&
+         matches_callee_name(
+             llvm::dyn_cast<llvm::Function>(
+                 call->getCalledOperand()->stripPointerCastsAndAliases()),
+             configured_name);
+}
+
+bool TaintAnalysis::matches_callee_name(const llvm::Function *callee,
+                                        llvm::StringRef configured_name) {
+  if (!callee)
     return false;
-
-  auto raw_name = call->getCalledFunction()->getName().str();
-  std::string func_name = taint_config::normalize_name(raw_name);
-  if (llvm::StringRef(func_name) == configured_name) {
+  auto raw_name = callee->getName().str();
+  auto normalized_name =
+      TaintConfigManager::get_normalized_name(configured_name.str());
+  auto func_name = TaintConfigManager::get_normalized_name(raw_name);
+  if (func_name == normalized_name)
     return true;
-  }
-
-  // Demangle C++ names and match by suffix (e.g., "::source").
-  std::string demangled_name = DemangleUtils::demangle(raw_name);
-  std::string normalized_demangled =
-      taint_config::normalize_name(strip_signature(demangled_name));
-  return llvm::StringRef(normalized_demangled).endswith(configured_name);
+  auto demangled = TaintConfigManager::get_normalized_name(
+      strip_signature(DemangleUtils::demangle(raw_name)));
+  return llvm::StringRef(demangled).endswith(normalized_name);
 }
 
 void TaintAnalysis::add_source_function(const std::string &func_name) {
@@ -591,12 +600,14 @@ bool TaintAnalysis::is_sanitizer(const llvm::Instruction *inst) const {
   auto raw_name = call->getCalledFunction()->getName().str();
   std::string func_name = taint_config::normalize_name(raw_name);
 
-  return m_sanitizer_functions.count(func_name) > 0;
+  auto *model = taint_model();
+  return m_sanitizer_functions.count(func_name) > 0 ||
+         (model && model->sanitizers.count(func_name) > 0);
 }
 
 bool TaintAnalysis::kills_fact(const llvm::CallBase *call,
-                               const TaintFact &fact) const {
-  const llvm::Function *callee = call->getCalledFunction();
+                               const TaintFact &fact,
+                               const llvm::Function *callee) const {
   if (!callee)
     return false;
 
@@ -607,7 +618,9 @@ bool TaintAnalysis::kills_fact(const llvm::CallBase *call,
   std::string func_name = taint_config::normalize_name(callee->getName().str());
 
   // Only kill if this is a recognized sanitizer
-  if (m_sanitizer_functions.count(func_name) == 0)
+  auto *model = taint_model();
+  if (m_sanitizer_functions.count(func_name) == 0 &&
+      (!model || model->sanitizers.count(func_name) == 0))
     return false;
 
   // For strict sanitization, only kill facts that directly match operands
@@ -635,11 +648,11 @@ bool TaintAnalysis::kills_fact(const llvm::CallBase *call,
 
 // Helper function to handle source function specifications from config
 void TaintAnalysis::handle_source_function_specs(const llvm::CallBase *call,
+                                                 const llvm::Function *callee,
                                                  FactSet &result) const {
-  std::string func_name =
-      taint_config::normalize_name(call->getCalledFunction()->getName().str());
+  std::string func_name = taint_config::normalize_name(callee->getName().str());
   const FunctionTaintConfig *func_config =
-      taint_config::get_function_config(func_name);
+      taint_model() ? taint_model()->get_function_config(func_name) : nullptr;
 
   if (func_config && func_config->has_source_specs()) {
     for (const auto &spec : func_config->source_specs) {
@@ -673,12 +686,12 @@ void TaintAnalysis::handle_source_function_specs(const llvm::CallBase *call,
 
 // Helper function to handle PIPE specifications for taint propagation
 void TaintAnalysis::handle_pipe_specifications(const llvm::CallBase *call,
+                                               const llvm::Function *callee,
                                                const TaintFact &fact,
                                                FactSet &result) const {
-  std::string func_name =
-      taint_config::normalize_name(call->getCalledFunction()->getName().str());
+  std::string func_name = taint_config::normalize_name(callee->getName().str());
   const FunctionTaintConfig *func_config =
-      taint_config::get_function_config(func_name);
+      taint_model() ? taint_model()->get_function_config(func_name) : nullptr;
 
   if (func_config && func_config->has_pipe_specs()) {
     for (const auto &pipe_spec : func_config->pipe_specs) {

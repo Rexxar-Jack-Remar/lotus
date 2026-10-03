@@ -17,5 +17,5 @@ Core analyses built on LLVM IR.
 | **SCCP** | Sparse conditional constant propagation analysis and related support. |
 | **TypeHierarchy** | C++ class hierarchy, vtable reconstruction, virtual-call resolution. |
 
-Security-oriented side-channel analyses and transformations now live under
+Security-oriented side-channel analyses and transformations live under
 `lib/Security`.

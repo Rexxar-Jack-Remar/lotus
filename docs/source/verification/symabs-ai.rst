@@ -1,7 +1,9 @@
 SymAbsAI – Symbolic Abstraction + Abstract Interpretation
 ==========================================================
 
-A framework for static program analysis using symbolic abstraction on LLVM IR.
+An abstract interpretation framework for LLVM IR: it decomposes each function
+into acyclic fragments, computes abstract transformers over them (using SMT
+where a domain needs strongest post-conditions), and iterates to a fixpoint.
 
 **Headers**: ``include/Verification/SymAbsAI``
 
@@ -18,7 +20,7 @@ A framework for static program analysis using symbolic abstraction on LLVM IR.
 - **AbstractValue** – Base interface for abstract domain values
 - **InstructionSemantics** – Converts LLVM instructions to SMT expressions
 
-**Abstract Domains** (in ``domains/``):
+**Abstract Domains** (in ``include/Verification/SymAbsAI/Domains/``):
 
 - **NumRels** – Numerical relations (e.g., ``x <= y + 5``)
 - **Intervals** – Value range analysis (e.g., ``x ∈ [0, 100]``)
@@ -33,21 +35,22 @@ A framework for static program analysis using symbolic abstraction on LLVM IR.
 
 **Typical use cases**:
 
-- Constant propagation and dead code elimination
-- Bounds checking and array access verification
-- Bit-level analysis and alignment tracking
-- Numerical invariant discovery
-- Memory safety analysis
-- Custom abstract interpretation passes
+- Constant propagation (``SimpleConstProp``) and dead-branch detection
+- Bounds checking and array access verification (``Intervals``, ``MemRange``)
+- Bit-level and alignment tracking (``BitMask``)
+- Numerical invariant discovery (``NumRels``, ``Zones``, ``Congruence``)
+- Memory region and pointer reasoning (``MemRegions``)
+- Adding a new abstract domain via ``DomainConstructor``
 
 **Basic usage (C\+\+)**:
 
 .. code-block:: cpp
 
-   #include <Verification/SymAbsAI/Core/SymAbsAIPass.h>
-   #include <Verification/SymAbsAI/Analyzers/Analyzer.h>
-   #include <Verification/SymAbsAI/Core/FragmentDecomposition.h>
-   #include <Verification/SymAbsAI/Core/DomainConstructor.h>
+   #include <Verification/SymAbsAI/Core/Integration/SymAbsAIPass.h>
+   #include <Verification/SymAbsAI/Core/Integration/ModuleContext.h>
+   #include <Verification/SymAbsAI/Core/Engine/Analyzer.h>
+   #include <Verification/SymAbsAI/Core/Foundation/FragmentDecomposition.h>
+   #include <Verification/SymAbsAI/Core/Foundation/DomainConstructor.h>
 
    // Using SymAbsAIPass as an LLVM pass
    llvm::Function &F = ...;
@@ -57,13 +60,12 @@ A framework for static program analysis using symbolic abstraction on LLVM IR.
    // Or using the Analyzer directly
    auto mctx = std::make_unique<symabs_ai::ModuleContext>(F.getParent(), config);
    auto fctx = mctx->createFunctionContext(&F);
-   auto fragments = symabs_ai::FragmentDecomposition::For(*fctx, 
-       symabs_ai::FragmentDecomposition::Headers);
+   auto fragments = symabs_ai::FragmentDecomposition::For(
+       *fctx, symabs_ai::FragmentDecomposition::Headers);
    symabs_ai::DomainConstructor domain = /* construct domain */;
    auto analyzer = symabs_ai::Analyzer::New(*fctx, fragments, domain);
-   analyzer->run();
 
-   // Query results
+   // Query results; at()/after() drive the fixpoint lazily on first use
    llvm::BasicBlock *BB = ...;
    const symabs_ai::AbstractValue *state = analyzer->at(BB);
 

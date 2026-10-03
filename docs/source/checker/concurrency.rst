@@ -24,7 +24,8 @@ The concurrency checker analyzes LLVM IR to detect thread safety issues using:
 * **OpenMP Task Analysis** – Tracks task creation, taskgroup/taskwait boundaries, and ``depend`` relations
 * **MPI Communication Analysis** – Tracks point-to-point operations, collectives, requests, and RMA synchronization
 
-All detected bugs are reported through the centralized ``BugReportMgr`` system, enabling unified JSON and SARIF output.
+Concurrency findings go through the shared ``BugReportMgr``, so they land in
+the same JSON and SARIF reports as other engines.
 
 Components
 ----------
@@ -116,7 +117,7 @@ Command-Line Options
 --------------------
 
 * ``--checks=<id[,id...]>`` – Select ``data-race``, ``deadlock``, ``atomicity``,
-  ``condvar``, ``lock-mismatch``, ``openmp``, ``mpi``, or ``cuda``. Omitting
+  ``condvar``, ``lock-mismatch``, ``starvation``, ``openmp``, ``mpi``, or ``cuda``. Omitting
   this option, or passing ``--checks=all``, enables all checks.
 * ``--concur.mode=analysis`` – Run analyses and dump facts without emitting bug reports
 * ``--concur.output=<file>`` – Write analysis facts to a file in analysis mode
@@ -124,6 +125,50 @@ Command-Line Options
 * ``--report-json=<file>`` – Output JSON report to file
 * ``--report-sarif=<file>`` – Output SARIF report to file
 * ``--report-min-score=<n>`` – Minimum confidence score for reporting (0-100)
+
+Starvation
+----------
+
+The Infer-inspired Starvation checker summarizes critical pairs: a potentially
+blocking operation, arbitrary callback, or lock acquisition together with the
+locks held at that event. Summaries propagate events, lock acquisitions and
+definite releases through direct calls, with formal-to-actual lock projection
+and call traces. It reports blocking calls and unresolved indirect callbacks
+while locks may be held. Condition-variable waits release their associated
+mutex during the wait, so holding only that mutex does not produce a finding.
+Recognized RAII destructors release their underlying locks, and local try-lock
+failure paths use the lockset service's branch refinement. Try-lock acquisition
+itself is treated as nonblocking on UI-thread entry points.
+
+.. code-block:: bash
+
+   ./build/bin/lotus-check --engine=concur --checks=starvation input.bc
+   ./build/bin/lotus-check --engine=concur --checks=starvation,deadlock \
+     --concur.starvation-blocking-functions=wait_for_reply,blocking_io input.bc
+
+Built-in blocking models include sleep, socket receive/accept, read, polling,
+semaphore wait and thread join APIs. Clients may add models through
+``ConcurrencyChecker::addStarvationBlockingFunction()``. LLVM function
+attributes provide additional contracts:
+
+* ``"lotus.may-block"`` marks a blocking callee.
+* ``"lotus.arbitrary-code"`` marks a callee that may execute callbacks.
+* ``"lotus.ui-thread"`` marks a UI-thread entry point, where blocking calls
+  and blocking lock acquisitions are reported.
+* ``"lotus.lockless"`` marks an entry point that must not acquire locks.
+
+UI-thread and lockless contracts propagate into callee events. Source-level
+annotations need a frontend to preserve these contracts as LLVM attributes.
+Deadlock cycles remain available through the existing ``deadlock`` check.
+
+This is an experimental LLVM adaptation. Summary construction uses at most
+32 whole-module iterations and retains call traces of up to 16 frames.
+Branch joins approximate possible held locks, so reports are potential
+violations. Lock recursion, arbitrary executor scheduling, Android strict-mode
+semantics and unresolved indirect-callee summaries are not modeled. Exceptional
+lock effects are approximated using the same summary as normal return. Custom
+blocking models should describe operations that can actually wait; calls known
+to be nonblocking can otherwise produce unnecessary findings.
 
 Scope
 -----
@@ -233,6 +278,7 @@ The checker provides detailed analysis statistics:
 * ``lockMismatchesFound`` – Number of lock mismatch bugs detected
 * ``openMPBugsFound`` – Number of OpenMP bugs detected
 * ``mpiBugsFound`` – Number of MPI bugs detected
+* ``starvationBugsFound`` – Number of blocking/context violations detected
 
 Limitations
 -----------
@@ -245,10 +291,12 @@ Limitations
 Performance
 -----------
 
-* Handles multiple threads efficiently using graph-based algorithms
-* MHP analysis scales with the number of threads and instructions
-* Lock set analysis is efficient for typical lock usage patterns
-* Conservative analysis may have false positives but ensures soundness
+* Cost is dominated by MHP graph construction, which grows with the number of
+  threads and of shared-memory accesses
+* Lock-set analysis carries the set of locks held at each access, so deeply
+  nested locking increases the per-access state
+* ``--concur.mode=analysis`` with ``--concur.output`` dumps the analysis facts
+  without running the report path
 
 Integration
 -----------

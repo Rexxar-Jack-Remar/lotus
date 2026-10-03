@@ -523,6 +523,9 @@ TEST(GPGAnalysis, RefinesRecursiveSummaryToAFixedPoint) {
 }
 
 TEST(GPGAnalysis, IntegratesWithAliasAnalysisWrapper) {
+#if !LOTUS_AA_WRAPPER_ENABLE_GPG
+  GTEST_SKIP() << "GPG wrapper backend is disabled in this build";
+#endif
   const char *ir = R"(
     define i32 @foo(i32 %x) {
     entry:

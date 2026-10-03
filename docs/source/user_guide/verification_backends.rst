@@ -1,7 +1,8 @@
 Verification Driver Abstraction
 ================================
 
-Lotus provides a unified driver interface to multiple verification backends, allowing you to switch between different tools seamlessly.
+Lotus provides a unified driver interface to multiple verification backends,
+allowing you to switch between different tools.
 
 Overview
 --------

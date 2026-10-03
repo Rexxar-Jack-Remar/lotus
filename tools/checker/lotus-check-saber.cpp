@@ -1,6 +1,7 @@
 //===- lotus-check-saber.cpp -- Source-sink bug checker (Saber) ------------//
 //
-// Lotus tool for memory leak, double-free, and file descriptor checks.
+// Lotus tool for memory leak, double-free, use-after-free candidates, and
+// file descriptor checks.
 // Mirrors SVF's saber tool; uses Saber engine on Lotus SVFG.
 //
 //===----------------------------------------------------------------------===//
@@ -13,6 +14,7 @@
 #include "Checker/Saber/FileChecker.h"
 #include "Checker/Saber/LeakChecker.h"
 #include "Checker/Saber/SaberOptions.h"
+#include "Checker/Saber/UseAfterFreeChecker.h"
 #include "Checker/Tooling/CheckerOptions.h"
 #include "Checker/Tooling/CheckerReport.h"
 #include "Utils/LLVM/RecursiveTimer.h"
@@ -24,6 +26,14 @@
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
+
+namespace {
+class SaberGraphOnlyBuilder final : public lotus::analysis::LeakChecker {
+public:
+  void initSrcs() override {}
+  void initSnks() override {}
+};
+} // namespace
 
 static cl::opt<std::string>
     InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
@@ -49,6 +59,7 @@ int runSaberCheckerTool(const char *argv0) {
   (void)&lotus::analysis::SaberCxtLimit;
   (void)&lotus::analysis::SaberMaxStepInWrapper;
   (void)&lotus::analysis::SaberDumpSlice;
+  (void)&lotus::analysis::SaberNoSMT;
   (void)&lotus::analysis::SaberValidateTests;
   (void)&lotus::analysis::SaberCollectExtRetGlobals;
 
@@ -64,13 +75,19 @@ int runSaberCheckerTool(const char *argv0) {
 
   const bool runLeak = selected.count("memory-leak");
   const bool runDoubleFree = selected.count("double-free");
+  const bool runUAF = selected.count("use-after-free");
   const bool runFile = selected.count("file-leak");
+  if (lotus::analysis::SaberNoSMT)
+    outs() << "Saber no-SMT mode: reporting conservative value-flow "
+              "candidates without path-feasibility filtering\n";
 
   // Count how many checkers will run
   int checkerCount = 0;
   if (runLeak)
     checkerCount++;
   if (runDoubleFree)
+    checkerCount++;
+  if (runUAF)
     checkerCount++;
   if (runFile)
     checkerCount++;
@@ -80,10 +97,10 @@ int runSaberCheckerTool(const char *argv0) {
   std::unique_ptr<::ICFG> shared_icfg;
   lotus::analysis::SrcSnkDDA::RemovedSUVFEdges shared_removed_su_vfg_edges;
 
-  if (checkerCount > 1) {
+  if (checkerCount > 1 || runUAF) {
     // Build SVFG/ICFG once using a temporary checker
     outs() << "\n=== Building SVFG (shared across checkers) ===\n";
-    lotus::analysis::LeakChecker builderChecker;
+    SaberGraphOnlyBuilder builderChecker;
     builderChecker.setModule(M.get());
     builderChecker.initialize();
     builderChecker.exportRemovedSUVFEdges(shared_removed_su_vfg_edges);
@@ -95,6 +112,13 @@ int runSaberCheckerTool(const char *argv0) {
   }
 
   // Run each checker
+  if (runUAF) {
+    outs() << "Running Use After Free candidate checker "
+              "(context-bounded ICFG order; no SMT path feasibility)...\n";
+    lotus::analysis::UseAfterFreeChecker uafChecker;
+    uafChecker.runOnModule(*M, *shared_svfg, *shared_icfg);
+  }
+
   if (runLeak) {
     if (checkerCount > 1) {
       outs() << "\n=== Running Memory Leak Checker ===\n";

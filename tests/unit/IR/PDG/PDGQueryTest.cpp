@@ -6,8 +6,10 @@
 #include "TestUtils/LLVMHelpers.h"
 
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IRReader/IRReader.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/PassRegistry.h"
+#include "llvm/Support/SourceMgr.h"
 
 #include <array>
 #include <cstdio>

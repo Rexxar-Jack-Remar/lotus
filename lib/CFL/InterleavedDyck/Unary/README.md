@@ -148,10 +148,10 @@ auto fixed = interleaved_dyck::unary::FixedCounterSolver{}.solve(graph);
 One tool selects either algorithm:
 
 ```sh
-cmake --build build --target lotus-cfl-interleaved-dyck-unary
-build/bin/lotus-cfl-interleaved-dyck-unary \
+cmake --build build --target lotus-cfl-interleaved-dyck
+build/bin/lotus-cfl-interleaved-dyck unary \
   --algorithm adaptive --stats bidirected.dot
-build/bin/lotus-cfl-interleaved-dyck-unary \
+build/bin/lotus-cfl-interleaved-dyck unary \
   --algorithm fixed-counter --stats bidirected.dot
 ```
 

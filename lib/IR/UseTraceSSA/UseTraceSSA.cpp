@@ -1,0 +1,710 @@
+#include "IR/UseTraceSSA/UseTraceSSA.h"
+
+#include <algorithm>
+#include <deque>
+#include <map>
+#include <ostream>
+#include <queue>
+#include <set>
+#include <sstream>
+#include <stdexcept>
+#include <unordered_set>
+#include <utility>
+
+namespace lotus {
+namespace usetracessa {
+namespace {
+
+ID nextID(std::size_t size) {
+  if (size >= InvalidID)
+    throw std::length_error("UseTraceSSA: identifier space exhausted");
+  return static_cast<ID>(size);
+}
+
+std::vector<ValueID> uniqueValues(const std::vector<ValueID> &values) {
+  std::vector<ValueID> result;
+  result.reserve(values.size());
+  if (values.size() > 8) {
+    std::unordered_set<ValueID> seen;
+    seen.reserve(values.size());
+    for (auto value : values)
+      if (seen.insert(value).second)
+        result.push_back(value);
+    return result;
+  }
+  for (ValueID v : values) {
+    bool found = false;
+    for (ValueID r : result) {
+      if (r == v) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) result.push_back(v);
+  }
+  return result;
+}
+
+std::string escape(const std::string &text) {
+  std::string result;
+  for (unsigned char ch : text) {
+    switch (ch) {
+    case '"': result += "\\\""; break;
+    case '\\': result += "\\\\"; break;
+    case '\n': result += "\\n"; break;
+    case '\r': result += "\\r"; break;
+    case '\t': result += "\\t"; break;
+    default: result += ch >= 32 ? static_cast<char>(ch) : '?'; break;
+    }
+  }
+  return result;
+}
+
+const char *kindName(NodeKind kind) {
+  switch (kind) {
+  case NodeKind::Definition: return "def";
+  case NodeKind::Psi: return "psi";
+  case NodeKind::Phi: return "phi";
+  }
+  return "?";
+}
+
+} // namespace
+
+ValueID Program::addValue(std::string name) {
+  ValueID id = nextID(Values.size());
+  Values.push_back(std::move(name));
+  return id;
+}
+
+BlockID Program::addBlock(std::string name) {
+  BlockID id = nextID(Blocks.size());
+  Blocks.push_back({std::move(name), {}});
+  if (Entry == InvalidID)
+    Entry = id;
+  return id;
+}
+
+void Program::setEntry(BlockID block) {
+  if (block >= Blocks.size())
+    throw std::out_of_range("UseTraceSSA: invalid entry block");
+  Entry = block;
+}
+
+EdgeID Program::addEdge(BlockID from, BlockID to, std::string label) {
+  if (from >= Blocks.size() || to >= Blocks.size())
+    throw std::out_of_range("UseTraceSSA: invalid CFG edge endpoint");
+  EdgeID id = nextID(Edges.size());
+  Edges.push_back({from, to, std::move(label), {}});
+  return id;
+}
+
+SiteID Program::makeOperation(std::string label, std::vector<ValueID> uses,
+                             std::vector<ValueID> definitions) {
+  for (ValueID v : uses)
+    if (v >= Values.size())
+      throw std::out_of_range("UseTraceSSA: invalid used value");
+  for (ValueID v : definitions)
+    if (v >= Values.size())
+      throw std::out_of_range("UseTraceSSA: invalid defined value");
+  if (uniqueValues(definitions).size() != definitions.size())
+    throw std::invalid_argument("UseTraceSSA: duplicate definition in an operation");
+  SiteID id = nextID(Operations.size());
+  Operations.push_back({id, std::move(label), uniqueValues(uses),
+                        std::move(definitions)});
+  return id;
+}
+
+SiteID Program::addOperation(BlockID block, std::string label,
+                            std::vector<ValueID> uses,
+                            std::vector<ValueID> definitions) {
+  if (block >= Blocks.size())
+    throw std::out_of_range("UseTraceSSA: invalid block");
+  SiteID id = makeOperation(std::move(label), std::move(uses),
+                           std::move(definitions));
+  Blocks[block].operations.push_back(id);
+  return id;
+}
+
+SiteID Program::addEdgeOperation(EdgeID edge, std::string label,
+                                std::vector<ValueID> uses,
+                                std::vector<ValueID> definitions) {
+  if (edge >= Edges.size())
+    throw std::out_of_range("UseTraceSSA: invalid edge");
+  SiteID id = makeOperation(std::move(label), std::move(uses),
+                           std::move(definitions));
+  Edges[edge].operations.push_back(id);
+  return id;
+}
+
+VersionID Graph::addNode(NodeKind kind, ValueID value, RegionID region,
+                        SiteID site) {
+  VersionID id = nextID(Nodes.size());
+  Nodes.push_back({id, kind, value, region, site, {}});
+  return id;
+}
+
+bool Graph::dominates(RegionID a, RegionID b) const {
+  return a < Regions.size() && b < Regions.size() &&
+         Regions[a].reachable && Regions[b].reachable &&
+         DomIn[a] <= DomIn[b] && DomOut[b] <= DomOut[a];
+}
+
+/// Pruned SSA construction applied to the history variable for each original
+/// SSA value. A real definition and every psi are definitions of that history
+/// variable. PHIs are placed in their live iterated dominance frontier.
+class Constructor {
+public:
+  explicit Constructor(Graph &graph) : G(graph), P(graph.Input) {}
+  void run() {
+    expandEdges();
+    if (G.Regions.empty()) {
+      if (!P.values().empty())
+        throw std::invalid_argument("UseTraceSSA: values in an empty function");
+      return;
+    }
+    computeDominators();
+    collectDefinitionsAndLivenessSeeds();
+    checkOriginalSSA();
+    placePhis();
+    rename();
+    G.Users.resize(G.Nodes.size());
+    for (const Node &node : G.Nodes)
+      for (const Incoming &input : node.incoming)
+        G.Users.at(input.version).push_back(node.id);
+    // A repeated phi input needs only one reachability adjacency entry.
+    for (auto &users : G.Users) {
+      std::sort(users.begin(), users.end());
+      users.erase(std::unique(users.begin(), users.end()), users.end());
+    }
+    for (SiteID site = 0; site < G.Uses.size(); ++site) {
+      if (G.Uses[site].size() <= 8)
+        continue;
+      auto &index = G.WideUses[site];
+      for (ID i = 0; i < G.Uses[site].size(); ++i)
+        index.push_back({G.Uses[site][i].value, i});
+      std::sort(index.begin(), index.end());
+    }
+  }
+
+private:
+  Graph &G;
+  const Program &P;
+  std::vector<RegionID> RPO;
+  std::vector<ID> RPOIndex;
+  std::vector<std::vector<RegionID>> DomChildren;
+  std::vector<ID> DomDepth;
+  std::vector<std::vector<RegionID>> DefBlocks, LiveSeeds;
+  std::vector<std::vector<std::pair<ValueID, VersionID>>> Phis;
+  std::vector<std::vector<std::pair<ValueID, VersionID>>> Psis;
+  std::vector<SiteID> OriginalDefs;
+
+  void expandEdges() {
+    nextID(P.blocks().size() + P.edges().size());
+    G.Regions.resize(P.blocks().size() + P.edges().size());
+    G.Uses.resize(P.operations().size());
+    G.Definitions.assign(P.values().size(), InvalidID);
+    G.SiteRegion.assign(P.operations().size(), InvalidID);
+    G.SitePosition.assign(P.operations().size(), InvalidID);
+    for (BlockID b = 0; b < P.blocks().size(); ++b) {
+      G.Regions[b].block = b;
+      G.Regions[b].operations = P.blocks()[b].operations;
+    }
+    for (EdgeID e = 0; e < P.edges().size(); ++e) {
+      const Edge &edge = P.edges()[e];
+      RegionID r = static_cast<RegionID>(P.blocks().size()) + e;
+      G.Regions[r].edge = e;
+      G.Regions[r].operations = edge.operations;
+      G.Regions[edge.from].successors.push_back(r);
+      G.Regions[r].predecessors.push_back(edge.from);
+      G.Regions[r].successors.push_back(edge.to);
+      G.Regions[edge.to].predecessors.push_back(r);
+    }
+    for (RegionID r = 0; r < G.Regions.size(); ++r)
+      for (ID pos = 0; pos < G.Regions[r].operations.size(); ++pos) {
+        SiteID s = G.Regions[r].operations[pos];
+        G.SiteRegion[s] = r;
+        G.SitePosition[s] = pos;
+      }
+    if (!G.Regions.empty() && P.entry() >= P.blocks().size())
+      throw std::invalid_argument("UseTraceSSA: missing entry block");
+  }
+
+  void computeDominators() {
+    // Nonrecursive DFS: very deep generated CFGs must not exhaust the stack.
+    std::vector<std::pair<RegionID, std::size_t>> stack;
+    RegionID entry = P.entry();
+    G.Regions[entry].reachable = true;
+    stack.push_back({entry, 0});
+    std::vector<RegionID> postorder;
+    while (!stack.empty()) {
+      auto &frame = stack.back();
+      Region &r = G.Regions[frame.first];
+      if (frame.second < r.successors.size()) {
+        RegionID child = r.successors[frame.second++];
+        if (!G.Regions[child].reachable) {
+          G.Regions[child].reachable = true;
+          stack.push_back({child, 0});
+        }
+      } else {
+        postorder.push_back(frame.first);
+        stack.pop_back();
+      }
+    }
+    // Like an LLVM function entry, the external entry is not a loop header.
+    for (RegionID pred : G.Regions[entry].predecessors)
+      if (G.Regions[pred].reachable)
+        throw std::invalid_argument("UseTraceSSA: entry has a reachable predecessor; "
+                                    "add a pre-entry block");
+    RPO.assign(postorder.rbegin(), postorder.rend());
+    RPOIndex.assign(G.Regions.size(), InvalidID);
+    for (ID i = 0; i < RPO.size(); ++i)
+      RPOIndex[RPO[i]] = i;
+    G.IDom.assign(G.Regions.size(), InvalidID);
+    G.IDom[entry] = entry;
+    auto intersect = [&](RegionID a, RegionID b) {
+      while (a != b) {
+        while (RPOIndex[a] > RPOIndex[b]) a = G.IDom[a];
+        while (RPOIndex[b] > RPOIndex[a]) b = G.IDom[b];
+      }
+      return a;
+    };
+    // Cooper-style immediate dominators. No claim of linear worst-case time.
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (std::size_t i = 1; i < RPO.size(); ++i) {
+        RegionID r = RPO[i], newIDom = InvalidID;
+        for (RegionID pred : G.Regions[r].predecessors)
+          if (G.IDom[pred] != InvalidID)
+            newIDom = newIDom == InvalidID ? pred : intersect(pred, newIDom);
+        if (G.IDom[r] != newIDom) {
+          G.IDom[r] = newIDom;
+          changed = true;
+        }
+      }
+    }
+    DomChildren.resize(G.Regions.size());
+    DomDepth.resize(G.Regions.size());
+    for (RegionID r : RPO)
+      if (r != entry) {
+        DomChildren[G.IDom[r]].push_back(r);
+        DomDepth[r] = DomDepth[G.IDom[r]] + 1;
+      }
+    G.DomIn.assign(G.Regions.size(), InvalidID);
+    G.DomOut.assign(G.Regions.size(), InvalidID);
+    ID clock = 0;
+    stack.push_back({entry, 0});
+    G.DomIn[entry] = clock++;
+    while (!stack.empty()) {
+      auto &f = stack.back();
+      if (f.second < DomChildren[f.first].size()) {
+        RegionID child = DomChildren[f.first][f.second++];
+        G.DomIn[child] = clock++;
+        stack.push_back({child, 0});
+      } else {
+        // Half-open DFS intervals need only one tick per region.
+        G.DomOut[f.first] = clock;
+        stack.pop_back();
+      }
+    }
+  }
+
+  void collectDefinitionsAndLivenessSeeds() {
+    DefBlocks.resize(P.values().size());
+    LiveSeeds.resize(P.values().size());
+    OriginalDefs.assign(P.values().size(), InvalidID);
+    Psis.resize(P.operations().size());
+    Phis.resize(G.Regions.size());
+    // Region order, not hash iteration order, controls all generated IDs.
+    std::vector<bool> defined(P.values().size(), false);
+    std::vector<ValueID> reset_defined;
+    for (RegionID r = 0; r < G.Regions.size(); ++r) {
+      if (!G.Regions[r].reachable) continue;
+      for (SiteID s : G.Regions[r].operations) {
+        const Operation &op = P.operations()[s];
+        for (ValueID v : op.uses) {
+          if (!defined[v]) {
+            if (LiveSeeds[v].empty() || LiveSeeds[v].back() != r) LiveSeeds[v].push_back(r);
+          }
+          if (DefBlocks[v].empty() || DefBlocks[v].back() != r) DefBlocks[v].push_back(r);
+          if (!defined[v]) { defined[v] = true; reset_defined.push_back(v); }
+        }
+        for (ValueID v : op.definitions) {
+          if (OriginalDefs[v] != InvalidID)
+            throw std::invalid_argument("UseTraceSSA: multiple SSA definitions of " +
+                                        P.values()[v]);
+          OriginalDefs[v] = s;
+          if (DefBlocks[v].empty() || DefBlocks[v].back() != r) DefBlocks[v].push_back(r);
+          if (!defined[v]) { defined[v] = true; reset_defined.push_back(v); }
+        }
+      }
+      for (ValueID v : reset_defined) defined[v] = false;
+      reset_defined.clear();
+    }
+  }
+
+  void checkOriginalSSA() {
+    for (RegionID r : RPO)
+      for (SiteID s : G.Regions[r].operations)
+        for (ValueID v : P.operations()[s].uses) {
+          SiteID def = OriginalDefs[v];
+          if (def == InvalidID || !G.dominates(G.SiteRegion[def], r) ||
+              (G.SiteRegion[def] == r &&
+               G.SitePosition[def] >= G.SitePosition[s]))
+            throw std::invalid_argument("UseTraceSSA: definition does not dominate use "
+                                        "of " + P.values()[v] + " at " +
+                                        P.operations()[s].label);
+        }
+    for (ValueID v = 0; v < P.values().size(); ++v) {
+      SiteID s = OriginalDefs[v];
+      if (s != InvalidID)
+        G.Definitions[v] =
+            G.addNode(NodeKind::Definition, v, G.SiteRegion[s], s);
+    }
+  }
+
+  void placePhis() {
+    std::vector<bool> isDef(G.Regions.size(), false);
+    std::vector<bool> isLive(G.Regions.size(), false);
+    std::vector<bool> visitedTree(G.Regions.size(), false);
+    std::vector<bool> hasPhi(G.Regions.size(), false);
+
+    for (ValueID v = 0; v < P.values().size(); ++v) {
+      // Sparse backward liveness, killed by original definitions and psis.
+      for (RegionID r : DefBlocks[v]) isDef[r] = true;
+      for (RegionID r : LiveSeeds[v]) isLive[r] = true;
+
+      std::vector<RegionID> liveWork = LiveSeeds[v];
+      for (std::size_t i = 0; i < liveWork.size(); ++i) {
+        for (RegionID pred : G.Regions[liveWork[i]].predecessors)
+          if (G.Regions[pred].reachable && !isDef[pred] && !isLive[pred]) {
+            isLive[pred] = true;
+            liveWork.push_back(pred);
+          }
+      }
+
+      // Compute the live iterated frontier directly, bottom-up on the
+      // dominator tree. Materializing every block's full frontier is costly
+      // for large CFGs even when there is only one execution-token variable.
+      using Priority = std::pair<ID, RegionID>;
+      std::priority_queue<Priority> pending;
+      std::vector<RegionID> touchedTree, touchedPhi, work;
+      for (auto r : DefBlocks[v]) {
+        pending.push({DomDepth[r], r});
+        visitedTree[r] = true;
+        touchedTree.push_back(r);
+      }
+      while (!pending.empty()) {
+        auto root = pending.top();
+        pending.pop();
+        work.push_back(root.second);
+        while (!work.empty()) {
+          auto current = work.back();
+          work.pop_back();
+          for (auto join : G.Regions[current].successors) {
+            if (!G.Regions[join].reachable || DomDepth[join] > root.first ||
+                hasPhi[join])
+              continue;
+            hasPhi[join] = true;
+            touchedPhi.push_back(join);
+            if (!isLive[join])
+              continue;
+            VersionID phi = G.addNode(NodeKind::Phi, v, join, InvalidID);
+            Phis[join].push_back({v, phi});
+            if (!isDef[join])
+              pending.push({DomDepth[join], join});
+          }
+          for (auto child : DomChildren[current])
+            if (!visitedTree[child]) {
+              visitedTree[child] = true;
+              touchedTree.push_back(child);
+              work.push_back(child);
+            }
+        }
+      }
+
+      for (RegionID r : DefBlocks[v]) isDef[r] = false;
+      for (RegionID r : liveWork) isLive[r] = false;
+      for (auto r : touchedTree)
+        visitedTree[r] = false;
+      for (auto r : touchedPhi)
+        hasPhi[r] = false;
+    }
+    // Preallocate psis; renaming fills operands, including backedge operands.
+    for (RegionID r = 0; r < G.Regions.size(); ++r)
+      if (G.Regions[r].reachable)
+        for (SiteID s : G.Regions[r].operations)
+          for (ValueID v : P.operations()[s].uses)
+            Psis[s].push_back({v, G.addNode(NodeKind::Psi, v, r, s)});
+  }
+
+  void rename() {
+    std::vector<std::vector<VersionID>> versions(P.values().size());
+    struct Frame {
+      RegionID region;
+      std::size_t child = 0;
+      bool entered = false;
+      std::vector<ValueID> pushed;
+    };
+    std::vector<Frame> stack;
+    stack.push_back({P.entry(), 0, false, {}});
+    while (!stack.empty()) {
+      Frame &frame = stack.back();
+      RegionID r = frame.region;
+      if (!frame.entered) {
+        frame.entered = true;
+        auto push = [&](ValueID v, VersionID n) {
+          versions[v].push_back(n);
+          frame.pushed.push_back(v);
+        };
+        for (const auto &phi : Phis[r]) push(phi.first, phi.second);
+        for (SiteID s : G.Regions[r].operations) {
+          const Operation &op = P.operations()[s];
+          for (std::size_t index = 0; index < op.uses.size(); ++index) {
+            ValueID v = op.uses[index];
+            if (versions[v].empty())
+              throw std::logic_error("UseTraceSSA: missing history during renaming");
+            VersionID before = versions[v].back(),
+                      after = Psis[s][index].second;
+            G.Nodes[after].incoming.push_back({before, InvalidID});
+            G.Uses[s].push_back({s, v, before, after});
+            push(v, after);
+          }
+          for (ValueID v : op.definitions) push(v, G.Definitions[v]);
+        }
+        for (RegionID succ : G.Regions[r].successors)
+          for (const auto &phi : Phis[succ]) {
+            ValueID v = phi.first;
+            if (versions[v].empty())
+              throw std::logic_error("UseTraceSSA: undefined phi incoming history");
+            G.Nodes[phi.second].incoming.push_back({versions[v].back(), r});
+          }
+      }
+      if (frame.child < DomChildren[r].size()) {
+        RegionID child = DomChildren[r][frame.child++];
+        stack.push_back({child, 0, false, {}});
+      } else {
+        for (auto it = frame.pushed.rbegin(); it != frame.pushed.rend(); ++it)
+          versions[*it].pop_back();
+        stack.pop_back();
+      }
+    }
+    for (Node &node : G.Nodes)
+      if (node.kind == NodeKind::Phi)
+        std::sort(node.incoming.begin(), node.incoming.end(),
+                  [](const Incoming &a, const Incoming &b) {
+                    return a.predecessor < b.predecessor;
+                  });
+  }
+};
+
+Graph Graph::build(Program program) {
+  Graph graph;
+  graph.Input = std::move(program);
+  Constructor(graph).run();
+  std::string error;
+  if (!graph.verify(&error))
+    throw std::logic_error("UseTraceSSA construction invariant: " + error);
+  return graph;
+}
+
+const UseVersion *Graph::use(SiteID site, ValueID value) const {
+  if (site >= Uses.size()) return nullptr;
+  if (Uses[site].size() > 8) {
+    const auto &index = WideUses.at(site);
+    auto found = std::lower_bound(index.begin(), index.end(),
+                                  std::make_pair(value, ID(0)));
+    return found != index.end() && found->first == value
+               ? &Uses[site][found->second]
+               : nullptr;
+  }
+  for (const UseVersion &u : Uses[site])
+    if (u.value == value) return &u;
+  return nullptr;
+}
+
+RegionID Graph::blockRegion(BlockID block) const {
+  if (block >= Input.blocks().size())
+    throw std::out_of_range("UseTraceSSA: invalid block");
+  return block;
+}
+
+RegionID Graph::edgeRegion(EdgeID edge) const {
+  if (edge >= Input.edges().size())
+    throw std::out_of_range("UseTraceSSA: invalid edge");
+  return static_cast<RegionID>(Input.blocks().size()) + edge;
+}
+
+std::vector<VersionID>
+Graph::findPath(VersionID source, VersionID sink,
+                const std::vector<VersionID> &traps) const {
+  if (source >= Nodes.size() || sink >= Nodes.size())
+    throw std::out_of_range("UseTraceSSA: invalid reachability endpoint");
+  std::vector<bool> blocked(Nodes.size(), false);
+  for (VersionID t : traps) {
+    if (t >= Nodes.size()) throw std::out_of_range("UseTraceSSA: invalid trap");
+    blocked[t] = true;
+  }
+  if (blocked[source] || blocked[sink]) return {};
+  std::vector<VersionID> parent(Nodes.size(), InvalidID), queue{source};
+  parent[source] = source;
+  for (std::size_t i = 0; i < queue.size(); ++i) {
+    VersionID current = queue[i];
+    if (current == sink) {
+      std::vector<VersionID> path{sink};
+      while (path.back() != source) path.push_back(parent[path.back()]);
+      std::reverse(path.begin(), path.end());
+      return path;
+    }
+    for (VersionID next : Users[current])
+      if (!blocked[next] && parent[next] == InvalidID) {
+        parent[next] = current;
+        queue.push_back(next);
+      }
+  }
+  return {};
+}
+
+bool Graph::verify(std::string *error) const {
+  if (error) error->clear();
+  auto fail = [&](const std::string &message) {
+    if (error) *error = message;
+    return false;
+  };
+  if (Nodes.size() != Users.size() || Uses.size() != Input.operations().size() ||
+      Definitions.size() != Input.values().size())
+    return fail("inconsistent graph tables");
+  std::vector<unsigned> psiBindings(Nodes.size(), 0);
+  std::vector<std::vector<VersionID>> expectedUsers(Nodes.size());
+  for (VersionID id = 0; id < Nodes.size(); ++id) {
+    const Node &n = Nodes[id];
+    if (n.id != id || n.value >= Input.values().size() ||
+        n.region >= Regions.size() || !Regions[n.region].reachable)
+      return fail("invalid node identity or location");
+    if (n.kind != NodeKind::Phi &&
+        (n.site >= Input.operations().size() || SiteRegion[n.site] != n.region))
+      return fail("invalid definition/use site");
+    if (n.kind == NodeKind::Definition &&
+        (!n.incoming.empty() || Definitions[n.value] != id))
+      return fail("definition must be the unique root");
+    if (n.kind == NodeKind::Psi && n.incoming.size() != 1)
+      return fail("psi must have one input");
+    if (n.kind == NodeKind::Phi) {
+      if (n.site != InvalidID) return fail("history phi has an original site");
+      std::vector<RegionID> expected, actual;
+      for (RegionID p : Regions[n.region].predecessors)
+        if (Regions[p].reachable) expected.push_back(p);
+      for (const Incoming &in : n.incoming) actual.push_back(in.predecessor);
+      std::sort(expected.begin(), expected.end());
+      std::sort(actual.begin(), actual.end());
+      if (expected != actual || expected.size() < 2)
+        return fail("phi does not cover the reachable predecessor edges");
+    }
+    for (const Incoming &in : n.incoming) {
+      if (in.version >= Nodes.size() || Nodes[in.version].value != n.value)
+        return fail("invalid input or cross-value history edge");
+      const Node &src = Nodes[in.version];
+      RegionID target = n.kind == NodeKind::Phi ? in.predecessor : n.region;
+      if (!dominates(src.region, target))
+        return fail("version does not dominate its input use");
+      if (n.kind == NodeKind::Psi) {
+        if (in.predecessor != InvalidID)
+          return fail("psi has an edge predecessor");
+        if (src.region == target && src.kind != NodeKind::Phi &&
+            SitePosition[src.site] >= SitePosition[n.site])
+          return fail("psi reads a future version");
+      }
+      auto &users = expectedUsers[in.version];
+      if (users.empty() || users.back() != id)
+        users.push_back(id);
+    }
+  }
+  if (expectedUsers != Users)
+    return fail("reverse adjacency mismatch");
+  for (SiteID s = 0; s < Uses.size(); ++s) {
+    if (!Regions[SiteRegion[s]].reachable) {
+      if (!Uses[s].empty()) return fail("analyzed an unreachable use");
+      continue;
+    }
+    const auto &expected = Input.operations()[s].uses;
+    if (Uses[s].size() != expected.size()) return fail("missing use binding");
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+      ValueID v = expected[index];
+      const UseVersion *u = &Uses[s][index];
+      if (u->value != v || u->site != s || u->before >= Nodes.size() ||
+          u->after >= Nodes.size())
+        return fail("invalid use binding");
+      const Node &psi = Nodes[u->after];
+      if (psi.kind != NodeKind::Psi || psi.site != s || psi.value != v ||
+          psi.incoming[0].version != u->before)
+        return fail("binding does not name its psi");
+      ++psiBindings[u->after];
+    }
+  }
+  for (const Node &n : Nodes)
+    if (n.kind == NodeKind::Psi && psiBindings[n.id] != 1)
+      return fail("psi has no unique use binding");
+  return true;
+}
+
+void Graph::print(std::ostream &out) const {
+  out << "UseTraceSSA: " << Input.values().size() << " values, " << Nodes.size()
+      << " versions\n";
+  for (RegionID r = 0; r < Regions.size(); ++r) {
+    const Region &region = Regions[r];
+    out << "region r" << r << " ";
+    if (region.block != InvalidID)
+      out << "block \"" << escape(Input.blocks()[region.block].name) << "\"";
+    else {
+      const Edge &e = Input.edges()[region.edge];
+      out << "edge e" << region.edge << " (b" << e.from << " -> b" << e.to
+          << ") \"" << escape(e.label) << "\"";
+    }
+    if (!region.reachable) out << " [unreachable]";
+    out << '\n';
+  }
+  for (const Node &n : Nodes) {
+    out << "n" << n.id << " [\"" << escape(Input.values()[n.value]) << "\"] = "
+        << kindName(n.kind) << "(";
+    for (std::size_t i = 0; i < n.incoming.size(); ++i) {
+      if (i) out << ", ";
+      out << "n" << n.incoming[i].version;
+      if (n.kind == NodeKind::Phi)
+        out << " @r" << n.incoming[i].predecessor;
+    }
+    out << ") @r" << n.region;
+    if (n.site != InvalidID)
+      out << " s" << n.site << " \"" << escape(Input.operations()[n.site].label)
+          << "\"";
+    out << '\n';
+  }
+}
+
+void Graph::printDOT(std::ostream &out) const {
+  out << "digraph UseTraceSSA {\n  rankdir=LR;\n";
+  for (const Node &n : Nodes) {
+    std::ostringstream label;
+    label << 'n' << n.id << ' ' << Input.values()[n.value] << "\n"
+          << kindName(n.kind) << " @r" << n.region;
+    if (n.site != InvalidID) label << "\n" << Input.operations()[n.site].label;
+    out << "  n" << n.id << " [shape="
+        << (n.kind == NodeKind::Phi ? "diamond" : "box") << ",label=\""
+        << escape(label.str()) << "\"];\n";
+    for (const Incoming &in : n.incoming) {
+      out << "  n" << in.version << " -> n" << n.id;
+      if (n.kind == NodeKind::Phi) {
+        out << " [label=\"r" << in.predecessor;
+        const Region &pred = Regions[in.predecessor];
+        if (pred.edge != InvalidID)
+          out << ' ' << escape(Input.edges()[pred.edge].label);
+        out << "\"]";
+      }
+      out << ";\n";
+    }
+  }
+  out << "}\n";
+}
+
+} // namespace usetracessa
+} // namespace lotus

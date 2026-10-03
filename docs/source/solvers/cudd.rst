@@ -6,18 +6,18 @@ BDD-based symbolic manipulation and decision procedures for Boolean problems.
 Overview
 --------
 
-The CUDD backend provides a high-performance implementation of Binary Decision
-Diagrams (BDDs) that can be used to encode and manipulate Boolean functions and
-symbolic sets.
+The CUDD backend provides Binary Decision Diagrams (BDDs) to encode and
+manipulate Boolean functions and symbolic sets.
 
 **Location**: ``third-party/CUDD/``
 
-**Main capabilities**:
+Features
+--------
 
 - Canonical representation of Boolean functions.
-- Efficient Boolean operations (AND, OR, NOT, implication, equivalence, etc.).
-- Symbolic sets and relations represented as BDDs.
-- Support for fixed-point style computations over BDDs.
+- Efficient Boolean operations (AND, OR, NOT, implication, equivalence).
+- Symbolic sets and relations represented as BDDs with projection, union, and intersection.
+- Fixed-point iteration over BDDs for reachability and invariance problems.
 
 Typical Use Cases
 -----------------
@@ -37,20 +37,9 @@ Basic Usage (C\+\+)
    DdNode *X = Cudd_bddIthVar(Manager, 0);
    Cudd_Quit(Manager);
 
-Features
---------
-
-- **BDD operations** – Canonical representation and manipulation of Boolean
-  functions.
-- **Symbolic sets** – Encoding of sets as BDDs with efficient union,
-  intersection, and projection.
-- **Fixed-point computation** – Iterative algorithms over BDDs for reachability
-  and invariance problems.
-
 Integration Notes
 -----------------
 
-The CUDD backend is typically not used directly by end users. Instead, it is
-used by higher-level applications and analyses that require symbolic Boolean
-reasoning. See :doc:`index` for an overview of where CUDD fits in the solver
-stack.
+CUDD is used by higher-level applications and analyses that require symbolic
+Boolean reasoning (such as predicate relations in NPA and BDD-based points-to
+sets). See :doc:`index` for an overview of where CUDD fits in the solver stack.

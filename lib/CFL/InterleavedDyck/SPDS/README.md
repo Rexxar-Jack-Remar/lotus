@@ -14,7 +14,7 @@ the authors' Java implementation or reproduce their entire experimental artifact
 
 Public namespace: `lotus::cfl::interleaved_dyck::spds`.
 Library target: `CanaryInterleavedDyckSPDS`.
-Executable: `lotus-cfl-interleaved-dyck-spds`.
+Executable: `lotus-cfl-interleaved-dyck spds`.
 
 ## Guarantees and scope
 
@@ -35,8 +35,8 @@ upper_bound = R_call intersection R_field
 A true interleaved-Dyck path witnesses both projections and is never discarded.
 A missing pair certifies absence of such a path. A present pair need not have a
 single balanced witness. The implementation deliberately does not intersect
-path witnesses, iteratively prune one PDS with the other, or substitute the
-previous LCL engine. Such changes would not be Definition 4's construction.
+path witnesses or iteratively prune one PDS with the other; those changes
+would not be Definition 4's construction.
 
 The paper also queries nonempty field stacks (access paths) and pending calling
 contexts. Its Figure 7 contains an outstanding outer call. Use a precise stack
@@ -309,10 +309,10 @@ and options, then build:
 ```sh
 cmake -S . -B build -DLOTUS_BUILD_TESTS=ON
 cmake --build build --target CanaryInterleavedDyckSPDS \
-  lotus-cfl-interleaved-dyck-spds interleaved_dyck_spds_test
+  lotus-cfl-interleaved-dyck spds interleaved_dyck_spds_test
 ctest --test-dir build -R interleaved_dyck_spds --output-on-failure
 
-build/bin/lotus-cfl-interleaved-dyck-spds --query 0 4 \
+build/bin/lotus-cfl-interleaved-dyck spds --query 0 4 \
   tests/regress/CFL/InterleavedDyck/SPDS/crossing.dot
 ```
 

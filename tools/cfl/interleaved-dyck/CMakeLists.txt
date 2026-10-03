@@ -1,7 +1,28 @@
-add_subdirectory(affine-spds)
-add_subdirectory(spds)
-add_subdirectory(unary)
-add_subdirectory(staged-bounds)
-add_subdirectory(mcfl)
-add_subdirectory(graph-reduction)
-add_subdirectory(lcl)
+add_executable(lotus-cfl-interleaved-dyck
+    main.cpp
+    affine-spds/lotus-cfl-interleaved-dyck-affine-spds.cpp
+    spds/lotus-cfl-interleaved-dyck-spds.cpp
+    unary/lotus-cfl-interleaved-dyck-unary.cpp
+    staged-bounds/lotus-cfl-interleaved-dyck-staged-bounds.cpp
+    mcfl/lotus-cfl-interleaved-dyck-mcfl.cpp
+    lcl/lotus-cfl-interleaved-dyck-lcl.cpp
+    ${CMAKE_SOURCE_DIR}/lib/CFL/InterleavedDyck/GraphReduction/GraphAux.cpp
+    ${CMAKE_SOURCE_DIR}/lib/CFL/InterleavedDyck/GraphReduction/DkMerge.cpp)
+
+target_link_libraries(lotus-cfl-interleaved-dyck PRIVATE
+    CanaryInterleavedDyckAffineSPDS
+    CanaryInterleavedDyckSPDS
+    CanaryInterleavedDyckUnary
+    CanaryInterleavedDyckStagedBounds
+    CanaryInterleavedDyckMCFL
+    CanaryInterleavedDyckLCL
+    CanaryInterleavedDyckGraphReduction
+    CanaryADT)
+
+configure_file(
+    ${CMAKE_SOURCE_DIR}/lib/CFL/InterleavedDyck/GraphReduction/graph_simp.py
+    ${CMAKE_BINARY_DIR}/bin/lotus-cfl-interleaved-dyck-graph-reduction.py
+    COPYONLY)
+
+add_custom_target(lotus-cfl-interleaved-dyck-graph-reduction
+    DEPENDS lotus-cfl-interleaved-dyck)

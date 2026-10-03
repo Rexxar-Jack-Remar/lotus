@@ -1,3 +1,5 @@
 lotus_collect_test_sources(analysis_tests
   CFGUtilitiesTest.cpp
-  ICFGTest.cpp)
+  ICFGCallsAndExceptionsTest.cpp
+  ICFGConstructionTest.cpp
+  ICFGMutationAndLifecycleTest.cpp)

@@ -11,11 +11,13 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "Dataflow/IFDS/Analyses/IFDSReachingDefinitions.h"
+#include "Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h"
 #include "Dataflow/IFDS/Analyses/IFDSUninitializedVariables.h"
 #include "Dataflow/IFDS/Solver/IFDSSolver.h"
 #include "Dataflow/Tooling/ToolSupport.h"
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -32,15 +34,46 @@ static cl::opt<bool> StdoutOpt(
     "stdout",
     cl::desc("Write analysis results to stdout when --out-dir is not set"),
     cl::init(false));
+static cl::opt<std::string> AnalysisOpt(
+    "analysis",
+    cl::desc("Analysis: reaching_defs (default), uninitialized, taint"),
+    cl::init("reaching_defs"));
+static cl::opt<bool> SparseOpt("sparse",
+                               cl::desc("Skip certified identity transfers"));
+static cl::opt<bool>
+    StatisticsOpt("statistics",
+                  cl::desc("Print solver work and timing to stderr"));
 static cl::opt<std::string>
-    AnalysisOpt("analysis",
-                cl::desc("Analysis: reaching_defs (default), uninitialized"),
-                cl::init("reaching_defs"));
+    CallGraphOpt("call-graph",
+                 cl::desc("Call graph: noresolve, cha, rta, vta, otf"),
+                 cl::init("otf"));
+static cl::opt<std::string> TaintModelOpt("taint-config",
+                                          cl::desc("Taint specification file"),
+                                          cl::init(""));
+static cl::list<std::string>
+    EntryPointsOpt("entry-point",
+                   cl::desc("Analysis root (repeatable; default main)"));
 
 namespace {
 
 using lotus::dataflow_tool::FunctionView;
 using lotus::dataflow_tool::ValueIdMap;
+
+template <typename Problem>
+void solve(ifds::IFDSSolver<Problem> &solver, Module &module,
+           const std::shared_ptr<ifds::AnalysisSession> &session) {
+  solver.set_analysis_session(session);
+  solver.get_solver_config().set_sparse_execution(SparseOpt);
+  auto start = std::chrono::steady_clock::now();
+  solver.solve(module);
+  auto elapsed =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+          .count();
+  if (StatisticsOpt)
+    errs() << "processed_edges=" << solver.get_steps_performed()
+           << " sparse_transfers=" << solver.get_sparse_transfers()
+           << " solve_seconds=" << elapsed << "\n";
+}
 
 std::string formatIFDSFact(const ifds::DefinitionFact &Fact,
                            const ValueIdMap &ValueToId) {
@@ -104,10 +137,12 @@ void printIFDSResults(raw_ostream &OS, const FunctionView &View,
   });
 }
 
-void runReachingDefinitions(raw_ostream &OS, Module &M) {
+void runReachingDefinitions(
+    raw_ostream &OS, Module &M,
+    const std::shared_ptr<ifds::AnalysisSession> &session) {
   ifds::ReachingDefinitionsAnalysis Problem;
   ifds::IFDSSolver<ifds::ReachingDefinitionsAnalysis> Solver(Problem);
-  Solver.solve(M);
+  solve(Solver, M, session);
   const auto AllResults = Solver.get_all_results();
   for (auto &F : M) {
     if (F.isDeclaration())
@@ -118,10 +153,11 @@ void runReachingDefinitions(raw_ostream &OS, Module &M) {
   }
 }
 
-void runUninitialized(raw_ostream &OS, Module &M) {
+void runUninitialized(raw_ostream &OS, Module &M,
+                      const std::shared_ptr<ifds::AnalysisSession> &session) {
   ifds::UninitializedVariablesAnalysis Problem;
   ifds::IFDSSolver<ifds::UninitializedVariablesAnalysis> Solver(Problem);
-  Solver.solve(M);
+  solve(Solver, M, session);
   const auto AllResults = Solver.get_all_results();
   for (auto &F : M) {
     if (F.isDeclaration())
@@ -132,14 +168,25 @@ void runUninitialized(raw_ostream &OS, Module &M) {
   }
 }
 
+void runTaint(raw_ostream &OS, Module &M,
+              const std::shared_ptr<ifds::AnalysisSession> &session) {
+  TaintConfig empty;
+  ifds::TaintAnalysis Problem({}, empty);
+  ifds::IFDSSolver<ifds::TaintAnalysis> Solver(Problem);
+  solve(Solver, M, session);
+  Problem.report_vulnerabilities(Solver, OS);
+}
+
 struct AnalysisHandler final {
   StringRef Name;
-  void (*Run)(raw_ostream &, Module &);
+  void (*Run)(raw_ostream &, Module &,
+              const std::shared_ptr<ifds::AnalysisSession> &);
 };
 
 const AnalysisHandler Handlers[] = {
     {"reaching_defs", &runReachingDefinitions},
     {"uninitialized", &runUninitialized},
+    {"taint", &runTaint},
 };
 
 } // namespace
@@ -156,6 +203,31 @@ int main(int argc, char **argv) {
     return 1;
 
   lotus::dataflow_tool::prepareModule(*M);
+
+  ifds::AnalysisSession::Options options;
+  options.call_graph = lotus::toCallGraphAnalysisType(CallGraphOpt);
+  if (options.call_graph == lotus::CallGraphAnalysisType::Invalid) {
+    errs() << "error: unknown call graph analysis '" << CallGraphOpt << "'\n";
+    return 1;
+  }
+  if (!EntryPointsOpt.empty())
+    options.entry_points.assign(EntryPointsOpt.begin(), EntryPointsOpt.end());
+  std::unique_ptr<TaintConfig> model;
+  if (!TaintModelOpt.empty())
+    model = TaintConfigParser::parse_file(TaintModelOpt);
+  else if (AnalysisOpt == "taint")
+    model = TaintConfigParser::parse_default();
+  if ((!TaintModelOpt.empty() || AnalysisOpt == "taint") && !model) {
+    errs() << "error: could not load taint model\n";
+    return 1;
+  }
+  std::shared_ptr<ifds::AnalysisSession> session;
+  try {
+    session = std::make_shared<ifds::AnalysisSession>(*M, options, model.get());
+  } catch (const std::invalid_argument &error) {
+    errs() << "error: " << error.what() << "\n";
+    return 1;
+  }
 
   raw_null_ostream NullOS;
   std::unique_ptr<raw_fd_ostream> FileOS;
@@ -176,6 +248,6 @@ int main(int argc, char **argv) {
   }
 
   OS << "[ifds:" << AnalysisOpt << "]\n";
-  Handler->Run(OS, *M);
+  Handler->Run(OS, *M, session);
   return 0;
 }

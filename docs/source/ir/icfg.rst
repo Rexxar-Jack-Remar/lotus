@@ -24,7 +24,7 @@ Key Features
 * **Cycle Removal**: Optional removal of intraprocedural and interprocedural cycles for acyclic analysis
 * **Call Graph Integration**: Built-in support for call graph construction and traversal
 * **Context-Aware Traversals**: Support for context-sensitive traversals used by dataflow and reachability engines
-* **Integration**: Seamless integration with higher-level analyses such as IFDS/IDE, WPDS, and PDG construction
+* **Analysis Substrates**: Used by higher-level analyses such as IFDS/IDE, WPDS, and PDG construction
 
 Components
 ==========
@@ -40,22 +40,28 @@ The main graph class that extends ``GenericGraph<ICFGNode, ICFGEdge>``. It provi
 
 **ICFGNode** (``ICFGNode.h``):
 
-Base class for ICFG nodes with three types:
+Base class for ICFG nodes representing basic blocks and boundary points:
 
-* ``IntraBlock`` – Represents a basic block within a function
-* ``FunEntryBlock`` – Represents a function entry point (currently unused)
-* ``FunRetBlock`` – Represents a function return point (currently unused)
+* ``IntraBlock`` – Intraprocedural basic block
+* ``GlobalInitBlock`` – Global initialization block
+* ``FunEntryBlock`` – Function entry point
+* ``FunExitBlock`` – Function exit point
+* ``FunUnwindExitBlock`` – Function unwind/exception exit point
+* ``CallRetBlock`` – Return point following a call
+* ``CallUnwindBlock`` – Unwind landing point following a call
 
 Each node maintains references to its parent function and basic block, and provides
 string representation for debugging.
 
 **ICFGEdge** (``ICFGEdge.h``):
 
-Represents control flow connections between ICFG nodes with three edge kinds:
+Represents control-flow connections between ICFG nodes:
 
-* ``IntraCF`` – Intraprocedural control flow (within a single function)
-* ``CallCF`` – Call edge (from caller to callee entry)
-* ``RetCF`` – Return edge (from callee exit back to caller)
+* ``IntraCF`` – Intraprocedural control flow within a function
+* ``CallCF`` – Call edge from caller to callee entry
+* ``RetCF`` – Normal return edge from callee exit back to caller
+* ``ExcRetCF`` – Exceptional return edge from callee unwind to caller
+* ``CallToRetCF`` – Summary edge bridging call site to return site within caller
 
 **ICFGBuilder** (``ICFGBuilder.h``, ``ICFGBuilder.cpp``):
 
@@ -185,8 +191,4 @@ The ICFG is used as the foundation for many analyses in Lotus:
 
 * **CFL-Reachability**: Context-free language reachability analyses operate
   over the ICFG structure to handle matching parentheses (call/return pairs).
-
-The ICFG's design allows analyses to seamlessly traverse both intraprocedural
-and interprocedural control flow without needing to manually handle function
-boundaries, making it an essential component of Lotus's analysis infrastructure.
 

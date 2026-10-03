@@ -1,9 +1,9 @@
 Major Components Overview
 ==========================
 
-This page consolidates the high-level component inventory that used to live
-in ``README.md``. Each section links to the dedicated documentation page where
-you can find deeper usage guides and configuration details.
+This page provides a high-level component inventory across Lotus. Each
+section links to the dedicated documentation page for deeper usage guides and
+configuration details.
 
 Alias Analysis
 --------------

@@ -29,11 +29,12 @@ template <typename Fact> struct IFDSRunState {
     worklist.clear();
   }
 
-  bool add_path_edge(const PathEdgeType &edge) {
+  bool add_path_edge(const PathEdgeType &edge, bool enqueue = true) {
     if (!path_edges.insert(edge).second) {
       return false;
     }
-    worklist.push_back(edge);
+    if (enqueue)
+      worklist.push_back(edge);
     return true;
   }
 
@@ -43,4 +44,3 @@ template <typename Fact> struct IFDSRunState {
 };
 
 } // namespace ifds
-

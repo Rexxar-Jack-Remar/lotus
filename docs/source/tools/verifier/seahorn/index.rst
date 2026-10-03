@@ -23,40 +23,39 @@ Command-Line Tools
 SeaHorn Verification (seahorn)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Main verification tool for C programs.
+Main verification tool for LLVM bitcode programs.
 
 **Basic usage**:
 
 .. code-block:: bash
 
-   ./build/bin/seahorn [options] <input.c>
+   ./build/bin/seahorn [options] <input.bc>
 
 **Common modes**:
 
-- ``--bmc=<N>`` – Bounded model checking up to ``N`` steps.
-- ``--horn`` – CHC-based (unbounded) verification.
-- ``--abstractor=clam`` – Use CLAM-based abstract interpretation as an
-  abstractor.
+- ``--horn-bmc`` – Bounded model checking.
+- ``--horn-solve`` – CHC-based (unbounded) verification.
+- ``--horn-crab`` – Use Crab/CLAM invariants during verification.
 
 **Frequently used options**:
 
-- ``--cex=<file>`` – Dump a counterexample harness to ``<file>``.
-- ``--track=mem`` – Track memory (heap/stack) explicitly.
-- ``--horn-solver=spacer|ice`` – Select CHC solving engine.
+- ``--horn-cex=<file>`` – Dump counterexample to ``<file>``.
+- ``--horn-sem-lvl=reg|ptr|mem`` – Track level for symbolic execution.
+- ``--horn-format=smt2|clp|pure-smt2|mcmt`` – Format for Horn clauses.
+- ``--horn-stats`` – Print verification statistics.
 
 **Example**:
 
 .. code-block:: bash
 
-   # Bounded model checking with 10 steps
-   ./build/bin/seahorn --bmc=10 program.c
+   # Bounded model checking
+   ./build/bin/seahorn --horn-bmc program.bc
 
    # CHC-based verification
-   ./build/bin/seahorn --horn program.c
+   ./build/bin/seahorn --horn-solve program.bc
 
-   # Generate counterexample
-   ./build/bin/seahorn --cex=harness.ll program.c
-   clang -m64 -g program.c harness.ll -o counterexample
+   # Verification with Crab invariants
+   ./build/bin/seahorn --horn-solve --horn-crab program.bc
 
 SeaHorn Preprocessor (seapp)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -73,7 +72,8 @@ LLVM bitcode preprocessing tool for SeaHorn.
 
 - ``--horn-make-undef-warning-error`` – Treat undefined value warnings as errors
 - ``--strip-extern`` – Strip external function declarations
-- ``--simplify-cfg`` – Simplify control flow graph
+- ``--horn-inline-all`` – Inline all functions
+- ``--horn-cut-loops`` – Cut loops to make CFG acyclic
 
 SeaHorn Inspector (seainspect)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -89,22 +89,19 @@ Tool for inspecting and analyzing SeaHorn verification results.
 Counterexample Analysis
 -----------------------
 
-Generate executable counterexamples:
+Generate counterexamples:
 
 .. code-block:: bash
 
-   ./build/bin/seahorn --cex=harness.ll program.c
-   clang -m64 -g program.c harness.ll -o counterexample
-   ./counterexample
+   ./build/bin/seahorn --horn-solve --horn-cex=cex.smt2 program.bc
 
 Integration with Other Tools
 ----------------------------
 
-SeaHorn can be integrated with:
+SeaHorn integrates with other verifier components:
 
-- **CLAM** – Use ``--abstractor=clam`` to use CLAM abstract interpretation
-- **Horn-ICE** – Use ``--horn-solver=ice`` for CHC solving with learning
-- **Z3/Spacer** – Default CHC solver (``--horn-solver=spacer``)
+- **CLAM** – Use ``--horn-crab`` to attach Crab numerical invariants
+- **Horn-ICE** – SeaHorn can emit CHC problems in SMT-LIB2 format (``--horn-format=smt2``) for verification with ``chc_verifier`` or ``hice-dt``
 
 For more details on the SeaHorn framework architecture and components, see
 :doc:`../../../verification/seahorn`.

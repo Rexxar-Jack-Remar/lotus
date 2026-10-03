@@ -19,7 +19,15 @@
 
 using namespace llvm;
 
+#include <mutex>
+
 namespace context {
+namespace {
+std::mutex &contextRegistryMutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+} // namespace
 
 // Pushes a new context frame onto the current context stack.
 // This version takes a ProgramPoint, extracting the context and instruction
@@ -36,6 +44,7 @@ const Context *Context::pushContext(const ProgramPoint &pp) {
 // state.
 const Context *Context::pushContext(const Context *ctx,
                                     const Instruction *inst) {
+  std::lock_guard<std::mutex> lock(contextRegistryMutex());
   // Create a temporary context object
   auto newCtx = Context(inst, ctx);
   // Insert into the set. If it exists, 'itr' points to the existing one.
@@ -54,6 +63,7 @@ const Context *Context::popContext(const Context *ctx) {
 // Retrieves the singleton Global Context.
 // Used for global variables and the entry point of the analysis.
 const Context *Context::getGlobalContext() {
+  std::lock_guard<std::mutex> lock(contextRegistryMutex());
   auto itr = ctxSet.insert(Context()).first;
   return &(*itr);
 }
@@ -61,6 +71,7 @@ const Context *Context::getGlobalContext() {
 // Helper to retrieve all created contexts.
 // Useful for debugging or statistics.
 std::vector<const Context *> Context::getAllContexts() {
+  std::lock_guard<std::mutex> lock(contextRegistryMutex());
   std::vector<const Context *> ret;
   ret.reserve(ctxSet.size());
 

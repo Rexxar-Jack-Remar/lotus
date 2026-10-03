@@ -58,6 +58,26 @@ public:
     bool has_alias_analysis_configured() const {
       return m_ifds_problem.has_alias_analysis_configured();
     }
+    std::shared_ptr<AnalysisSession> analysis_session() const {
+      return m_ifds_problem.analysis_session();
+    }
+    void
+    set_analysis_session(std::shared_ptr<AnalysisSession> session) override {
+      IDEProblem<Fact, BinaryValue>::set_analysis_session(session);
+      m_ifds_problem.set_analysis_session(std::move(session));
+    }
+    const llvm::Value *sparse_fact_value(const Fact &fact) const override {
+      return m_ifds_problem.sparse_fact_value(fact);
+    }
+    bool is_identity_flow(const llvm::Instruction *inst,
+                          const llvm::Instruction *succ,
+                          const Fact &fact) const override {
+      return m_ifds_problem.is_identity_flow(inst, succ, fact);
+    }
+    bool is_identity_edge(const llvm::Instruction *, const llvm::Instruction *,
+                          const Fact &) const override {
+      return true;
+    }
     bool is_source(const llvm::Instruction *inst) const override {
       return m_ifds_problem.is_source(inst);
     }
@@ -91,6 +111,11 @@ public:
                                 const Fact &fact) override {
       return m_ifds_problem.call_to_return_flow(call, return_site, callees,
                                                 fact);
+    }
+    FactSet summary_flow(const llvm::CallBase *call,
+                         const llvm::Function *callee,
+                         const Fact &fact) override {
+      return m_ifds_problem.summary_flow(call, callee, fact);
     }
 
     FactSet initial_facts(const llvm::Function *main) override {
@@ -150,6 +175,19 @@ public:
       : m_wrapper(problem), m_solver(m_wrapper) {}
 
   void solve(const llvm::Module &module) { m_solver.solve(module); }
+  void set_analysis_session(std::shared_ptr<AnalysisSession> session) {
+    m_solver.set_analysis_session(std::move(session));
+  }
+  void set_icfg(std::shared_ptr<dataflow::controlflow::InterCFG> icfg) {
+    m_solver.set_icfg(std::move(icfg));
+  }
+  void set_callee_provider(CalleeProvider provider) {
+    m_solver.set_callee_provider(std::move(provider));
+  }
+  size_t get_steps_performed() const { return m_solver.get_steps_performed(); }
+  size_t get_sparse_transfers() const {
+    return m_solver.get_sparse_transfers();
+  }
 
   // Query interface (IFDS style)
   FactSet get_facts_at_entry(const llvm::Instruction *inst) const {

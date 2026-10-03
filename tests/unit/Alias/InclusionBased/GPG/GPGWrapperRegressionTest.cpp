@@ -14,6 +14,9 @@ using namespace lotus::gpg;
 using namespace lotus::unittest;
 
 TEST(GPGWrapperRegression, AbstractPointeesDoNotProduceStrongAliasAnswers) {
+#if !LOTUS_AA_WRAPPER_ENABLE_GPG
+  GTEST_SKIP() << "GPG wrapper backend is disabled in this build";
+#endif
   const char *ir = R"(
     @a = global i8 0
     @b = global i8 0

@@ -87,9 +87,9 @@ Sources are grouped by architectural responsibility, under both
 - `gvfg_utility` is the glue layer between the symbolic executor and other Lotus
   infrastructure. It hides module-global setup, graph lookup, library matching,
   and shared layout queries behind a narrow interface.
-- `TaintModel` is not the whole analysis by itself. Instead, it supplies one
-  source of facts that the executor can mix with symbolic constraints and memory
-  modeling when checking bug-specific conditions.
+- `TaintModel` supplies one source of facts that the executor combines with
+  symbolic constraints and memory modeling when checking bug-specific
+  conditions.
 
 ## Relation to the BOF Paper
 

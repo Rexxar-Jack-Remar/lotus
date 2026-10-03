@@ -2,7 +2,7 @@
 
 ## Overview
 
-`AliasAnalysisWrapper` uses a **configuration-based** approach (not a flat enum): explicit implementation choice, context-sensitivity settings, type safety, and extensibility.
+`AliasAnalysisWrapper` uses a **configuration-based** design: the config records the chosen implementation, context-sensitivity settings, and solver options, so the request is explicit and type-checked.
 
 ## Architecture
 
@@ -24,11 +24,13 @@ struct AAConfig {
 - **AserPTA**: High-performance (multiple solvers)
 - **TPA**: Flow- and context-sensitive semi-sparse
 - **DyckAA**, **CFLAnders/CFLSteens**: CFL-reachability
-- **SeaDsa**: Unification-based | **AllocAA**: Allocation heuristic | **UnderApprox** | **Combined**
+- **SeaDsa**: Unification-based | **AllocAA**: Allocation heuristic | **UnderApprox**: must-alias only | **Combined**: several backends
 
 ## Usage
 
-**IMPORTANT**: Users MUST explicitly specify which analysis to use. There are no default parameters - this ensures users are aware of what analysis is running and its performance/precision implications.
+An analysis must always be selected explicitly: there is no default config, so
+callers state which analysis they want and take its performance/precision
+trade-off knowingly.
 
 ### Basic / TPA / AserPTA
 
@@ -75,17 +77,9 @@ auto aa = AliasAnalysisFactory::create(M, c);
 - **Debugging**: Makes it easier to understand results and debug issues
 - **Reproducibility**: Explicit configs make results reproducible and documentable
 
-## Migration
-
-| Old (deprecated) | New |
-|------------------|-----|
-| `AAType::Andersen` | `AAConfig::SparrowAA_NoCtx()` |
-| `AAType::Andersen1CFA` | `AAConfig::SparrowAA_1CFA()` |
-| `AAType::TPA` | `AAConfig::TPA_2CFA()` (or other TPA preset) |
-
 ## Benefits
 
-- **Clarity**: `SparrowAA_1CFA()` vs `Andersen1CFA`
+- **Clarity**: config names state the implementation, e.g. `SparrowAA_1CFA()`
 - **Distinction**: `SparrowAA_1CFA()` vs `AserPTA_1CFA()` – implementation is explicit
 - **Flexibility**: Add parameters (field sensitivity, solver) without enum bloat
 - **Type safety**: Valid configs checked at compile time
@@ -99,6 +93,6 @@ auto aa = AliasAnalysisFactory::create(M, c);
 
 ## Current Limitations
 
-- **AserPTA**: The API accepts `AserPTA_*` configs, but the wrapper backend does not execute a fallback analysis anymore. It now fails initialization explicitly until full AserPTA integration is implemented.
+- **AserPTA**: The API accepts `AserPTA_*` configs, but the wrapper backend fails initialization explicitly instead of running another analysis. Native AserPTA integration in the wrapper is pending.
 - Field-sensitivity toggles, adaptive context sensitivity (TPA)
 - More AserPTA solver options, config validation

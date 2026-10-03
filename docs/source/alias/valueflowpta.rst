@@ -10,7 +10,7 @@ Flow-sensitive Points-to Analysis using Value Flow*, ESEC/FSE 2011. It is a
 context-insensitive, field-insensitive, module-level analysis alongside
 ``FlowSensitivePTA`` and ``VersionedFlowSensitivePTA``.
 
-Unlike the other two solvers in this directory, ``ValueFlowPTA`` builds its
+Unlike the other two solvers in this module, ``ValueFlowPTA`` builds its
 own value-flow and interprocedural control graphs from LLVM IR. It does not
 consume SVFG indirect edges, require MemorySSA, or run a flow-insensitive
 pre-analysis.
@@ -18,7 +18,7 @@ pre-analysis.
 Public API
 ==========
 
-Include ``Alias/InclusionBased/FlowSensitive/ValueFlowPTA.h``, construct the
+Include ``Alias/InclusionBased/FlowSensitive/ValueFlow/ValueFlowPTA.h``, construct the
 analysis with a module that remains alive and unchanged, and call
 ``analyze()`` before querying it:
 

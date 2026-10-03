@@ -22,7 +22,7 @@ template <class T> T number(std::string_view text) {
 }
 void usage() {
   std::cout
-      << "Usage: lotus-cfl-interleaved-dyck-spds [options] graph.dot\n"
+      << "Usage: lotus-cfl-interleaved-dyck spds [options] graph.dot\n"
          "  --all-pairs             analyze every source/target pair\n"
          "  --query SOURCE TARGET   one balanced reachability query\n"
          "  --source V              candidate successors of V (post*)\n"
@@ -103,7 +103,7 @@ void printPairs(const dyck::PairSet &pairs) {
     std::cout << "pair: " << p.source << ' ' << p.target << '\n';
 }
 } // namespace
-int main(int argc, char **argv) {
+int runInterleavedDyckSPDS(int argc, char **argv) {
   try {
     spds::Options options;
     std::optional<dyck::Vertex> source, target;

@@ -23,6 +23,7 @@ k-CFA at all calls; selective = 0-CFA at direct calls, k-CFA at indirect
 #include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Utils/LLVM/IO/WriteIR.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <sstream>
 #include <string>
@@ -38,6 +39,24 @@ k-CFA at all calls; selective = 0-CFA at direct calls, k-CFA at indirect
 
 using namespace llvm;
 using namespace lotus::alias::tools;
+
+static cl::opt<bool> Parallel("parallel",
+                              cl::desc("Evaluate TPA transfers in parallel"),
+                              cl::init(false));
+static cl::opt<unsigned>
+    Threads("threads", cl::desc("TPA workers including caller (0: automatic)"),
+            cl::init(0));
+static cl::opt<unsigned>
+    Lookahead("parallel-lookahead",
+              cl::desc("Predicted TPA transfers per worker"), cl::init(4));
+static cl::opt<bool>
+    VerifyParallel("verify-parallel",
+                   cl::desc("Compare complete Env and Memo with serial TPA"),
+                   cl::init(false));
+static cl::opt<bool>
+    DumpStats("dump-stats",
+              cl::desc("Print TPA phase timings and execution counters"),
+              cl::init(false));
 
 // Command line options
 static cl::opt<std::string> InputFile(cl::Positional,
@@ -141,6 +160,14 @@ int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(
       argc, argv,
       "TPA (flow-/context-sensitive semi-sparse pointer analysis) tool\n");
+  if ((!Parallel && (Threads.getNumOccurrences() ||
+                     Lookahead.getNumOccurrences() || VerifyParallel)) ||
+      !Lookahead) {
+    errs() << "TPA parallel options require --parallel and positive "
+              "--parallel-lookahead\n";
+    return 1;
+  }
+  const auto frontendStarted = std::chrono::steady_clock::now();
 
   // Initialize spdlog with default pattern
   spdlog::set_pattern("%^[%l]%$ %v");
@@ -196,7 +223,34 @@ int main(int argc, char **argv) {
   LOG_INFO("Building semi-sparse program representation...");
   tpa::SemiSparseProgramBuilder builder;
   tpa::SemiSparseProgram ssProg = builder.runOnModule(*M);
-  // LOG_INFO("Semi-sparse program built: {} CFGs", ssProg.cfgMap.size());
+  const double frontendSeconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                    frontendStarted)
+          .count();
+  if (DumpStats) {
+    std::size_t definitions = 0, instructions = 0, cfgs = 0, nodes = 0;
+    for (const auto &function : *M) {
+      if (!function.isDeclaration())
+        ++definitions;
+      for (const auto &block : function)
+        instructions += block.size();
+    }
+    for (const auto &cfg : ssProg) {
+      ++cfgs;
+      nodes += cfg.getNumNodes();
+    }
+    // Publish front-end progress even if a later solve or verification times
+    // out.
+    outs() << "tpa.frontend-seconds=" << frontendSeconds << "\n"
+           << "tpa.ir-functions=" << M->size() << "\n"
+           << "tpa.defined-functions=" << definitions << "\n"
+           << "tpa.ir-instructions=" << instructions << "\n"
+           << "tpa.cfg-functions=" << cfgs << "\n"
+           << "tpa.cfg-nodes=" << nodes << "\n"
+           << "tpa.entry-present=" << (ssProg.getEntryCFG() ? "true" : "false")
+           << "\n";
+    outs().flush();
+  }
 
   tpa::SemiSparsePointerAnalysis analysis;
   std::string pointerSpecPath = ExtPointerTableFile.empty()
@@ -210,7 +264,42 @@ int main(int argc, char **argv) {
   analysis.loadExternalPointerTable(pointerSpecPath.c_str());
 
   LOG_INFO("Starting TPA pointer analysis...");
-  analysis.runOnProgram(ssProg);
+  tpa::SemiSparsePointerAnalysis::Config config;
+  config.parallel = Parallel;
+  config.threads = Threads;
+  config.lookahead = Lookahead;
+  try {
+    analysis.runOnProgram(ssProg, config);
+    if (VerifyParallel) {
+      tpa::SemiSparsePointerAnalysis reference;
+      reference.loadExternalPointerTable(pointerSpecPath.c_str());
+      reference.runOnProgram(ssProg);
+      std::string difference;
+      const bool equal = analysis.hasSameSolution(reference, &difference);
+      outs() << "tpa.parallel-equivalent=" << (equal ? "true" : "false")
+             << "\n";
+      if (!equal) {
+        errs() << "Parallel/serial TPA differ: " << difference << "\n";
+        return 3;
+      }
+    }
+  } catch (const std::exception &error) {
+    errs() << "TPA failed: " << error.what() << "\n";
+    return 1;
+  }
+  if (DumpStats) {
+    const auto &stats = analysis.getStatistics();
+    outs() << "tpa.initialization-seconds=" << stats.initializationSeconds
+           << "\n"
+           << "tpa.solve-seconds=" << stats.solveSeconds << "\n"
+           << "tpa.transfers=" << stats.transfers << "\n"
+           << "tpa.evaluations=" << stats.evaluations << "\n"
+           << "tpa.retries=" << stats.retries << "\n"
+           << "tpa.discarded=" << stats.discarded << "\n"
+           << "tpa.batches=" << stats.batches << "\n"
+           << "tpa.threads=" << stats.threads << "\n"
+           << "tpa.peak-workers=" << stats.peakWorkers << "\n";
+  }
   LOG_INFO("TPA analysis completed successfully");
 
   if (!CFGDotOutDir.empty()) {

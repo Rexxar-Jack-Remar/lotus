@@ -48,7 +48,7 @@ view.
 | `concur` | Concurrency checker | Detects races, deadlocks, atomicity issues, condvar misuse, lock mismatches, and OpenMP/MPI bugs. |
 | `pulse` | Pulse-inspired bug finder | Biabductive analysis with optional SMT disabling via `--pulse.smt=off`; can emit JSON findings. |
 | `fitx` | FiTx multi-checker driver | Runs typestate checks such as `double-free`, `double-lock`, `memory-leak`, `null-deref`, and `use-after-free`. |
-| `saber` | Source-sink bug checker | Runs memory leak, double-free, and file-descriptor leak checks. Implemented by `tools/checker/lotus-check-saber.cpp`. |
+| `saber` | Source-sink bug checker | Runs memory leak, double-free, file-descriptor leak, and use-after-free candidate checks. Implemented by `tools/checker/lotus-check-saber.cpp`. |
 | `ae` | Abstract-execution checker | Covers overflow, null dereference, use-after-free, invalid free, and memory leak detection. Implemented by `tools/checker/lotus-check-ae.cpp`. |
 | `symex` | Symbolic-execution checker | Runs the `lib/SymbolicExecution` engine on GVFG/LotusAA and emits path-sensitive bug reports. Implemented by `tools/checker/lotus-check-symex.cpp`. |
 
@@ -100,6 +100,7 @@ build/bin/lotus-check --engine=taint test.bc \
 
 ```bash
 build/bin/lotus-check --engine=saber test.bc --checks=all
+build/bin/lotus-check --engine=saber test.bc --checks=all --saber.no-smt
 build/bin/lotus-check --engine=ae test.bc --checks=all
 build/bin/lotus-check --engine=symex test.bc --checks=null-deref,use-after-free
 build/bin/lotus-check --engine=fitx test.bc --checks=use-after-free

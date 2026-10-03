@@ -10,8 +10,8 @@
 #include <signal.h>
 #include <sstream>
 #include <stdlib.h>
-#include <string.h>
 #include <string>
+#include <string.h>
 #ifdef PARALLELIZE
 #include <atomic>
 #include <omp.h>

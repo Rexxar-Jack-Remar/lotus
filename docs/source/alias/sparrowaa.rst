@@ -43,11 +43,7 @@ The implementation supports several optional optimizations (see the README in
 * **HCD / LCD** – Hybrid and lazy cycle detection to identify strongly
   connected components and speed up convergence.
 
-**Optimizations** (optional, disabled by default):
-* **HVN / HU** – Hash-based value numbering and Heintze–Ullman style equivalence
-* **HCD / LCD** – Hybrid and lazy cycle detection for SCC identification
-
-All optimizations are disabled by default and can be enabled via
+All optimizations are optional, disabled by default, and can be enabled via
 tool-specific command-line flags.
 
 Features
@@ -100,4 +96,5 @@ via a standalone tool:
 In integrated settings (e.g., Clam or LotusAA), it can be selected through
 the corresponding configuration files or command-line switches.
 
-Note: this module have some redundancies with aserpta, and reuses some header files from it (from context abstraction).
+Implementation note: this module shares some infrastructure with AserPTA and
+reuses several of its headers (notably the context abstraction).

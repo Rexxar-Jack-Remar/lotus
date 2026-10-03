@@ -1,7 +1,7 @@
 # Partial Evaluation (PE) – LLPE for Lotus
 
-This directory contains the **LLPE** (LLVM Partial Evaluator) engine, upgraded
-from LLVM 5.0 to **LLVM 14.x** and integrated into Lotus.
+This directory contains the **LLPE** (LLVM Partial Evaluator) engine, ported
+from LLVM 5.0 to LLVM 14 and integrated into Lotus.
 
 The integration pass driver is at `Commit/Integrator.cpp`; the analysis pass
 entry point is at `Engine/TopLevel.cpp`.

@@ -138,7 +138,7 @@ void SrcSnkDDA::initialize() {
   if (SaberDumpSlice)
     sliceStats_ = std::make_unique<SVFGStats>(svfg);
 
-  {
+  if (!SaberNoSMT) {
     RecursiveTimer timer("Dominator/Loop analysis");
     getSaberCondAllocator()->setModule(module_);
     for (auto &func : *module_) {
@@ -241,7 +241,7 @@ void SrcSnkDDA::analyze() {
       if (SaberDumpSlice)
         annotateSlice(getCurSlice());
 
-      {
+      if (!SaberNoSMT) {
         RecursiveTimer timer("Path condition solve");
         if (getCurSlice()->AllPathReachableSolve())
           getCurSlice()->setAllReachable();

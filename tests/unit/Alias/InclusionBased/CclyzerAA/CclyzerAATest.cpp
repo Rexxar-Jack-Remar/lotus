@@ -100,7 +100,7 @@ TEST_F(CclyzerAATest, WrapperIntegration) {
   EXPECT_EQ(cfg1CFA.impl, AAConfig::Implementation::CclyzerAA);
   EXPECT_EQ(cfg1CFA.getName(), "CclyzerAA(1-CFA)");
 
-  if (CclyzerAA::isAvailable()) {
+  if (CclyzerAA::isAvailable() && LOTUS_AA_WRAPPER_ENABLE_CCLYZER) {
     AliasAnalysisWrapper wrapper(*module, cfgDefault);
     EXPECT_TRUE(wrapper.isInitialized());
   } else {

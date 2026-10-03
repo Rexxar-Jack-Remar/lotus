@@ -11,7 +11,8 @@ Top-level test buckets:
 - `Alias/` for alias-analysis and pointer-analysis tests
 - `Analysis/` for general analyses, with subdirectories such as `CFG/`,
   `DebugInfo/`, `Loop/`, `NullPointer/`, `Profile/`, and `Purity/`
-- `CFL/`
+- `CFL/` with subdirectories `Classical/`, `CSIndex/`, `DynamicDyck/`, and
+  `InterleavedDyck/` mirroring `lib/CFL`
 - `Checker/`
 - `Concurrency/` with subdirectories such as `MHP/`, `OpenMP/`, `MPI/`,
   `CUDA/`, `LinuxKernel/`, and `Utils/`
@@ -35,9 +36,14 @@ When adding tests, mirror the source tree where practical:
 
 ```bash
 cmake -S . -B build
-cmake --build build --target <test_target>
+cmake --build build
+cmake --build build --target lotus_unit_tests
 ctest --test-dir build --output-on-failure
 ```
+
+Test executables are part of the default build; `lotus_unit_tests` builds
+all of them at once and `run_unit_tests` builds them before running
+`ctest -L unit`.
 
 Examples:
 
@@ -62,15 +68,16 @@ once. A child directory can declare sources with
 binary with `add_lotus_collected_test_suite(<suite> ...)`. GTest discovery
 still registers every case independently.
 
-Each subsystem therefore builds one merged gtest binary: `alias_tests`,
-`analysis_tests`, `cfl_tests`, `concurrency_tests`, `dataflow_tests`,
-`ir_tests`, `solvers_tests`, `utils_tests`, `verification_tests`, plus the
-already merged `checker_tests`. Integration suites that need generated fixtures
-(`loop_analysis_tests`, `type_hierarchy_tests`) and standalone harness binaries
-with their own `main` remain separate. `concurrency_core_tests` and
-`solver_tests` are kept as aggregate build entry points. When adding tests,
-prefer collecting them into the matching subsystem binary instead of creating a
-new executable.
+Each subsystem builds one merged gtest binary: `alias_tests`, `analysis_tests`,
+`cfl_tests`, `checker_tests`, `concurrency_tests`, `dataflow_tests`, `ir_tests`,
+`solvers_tests`, `symbolic_execution_tests`, `utils_tests`, and
+`verification_tests`. Fuzzing currently has one test source in
+`fuzz_target_generation_test`. Loop and TypeHierarchy fixtures feed
+`analysis_tests`; PrimaryComponent cases feed `cfl_tests`; parallel utility
+harnesses feed `utils_tests`. The utility and dataflow harnesses also have CTest
+runs with two workers. `concurrency_core_tests` and `solver_tests` are aggregate
+build entry points. When adding tests, collect them into the matching subsystem
+binary.
 
 ## Adding Tests
 

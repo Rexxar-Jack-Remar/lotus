@@ -393,7 +393,8 @@ public:
   //===------------------------------------------------------------------===
 
   inline SVFGNode *getValueNode(const llvm::Value *val) const {
-    if (const auto *instruction = llvm::dyn_cast_or_null<llvm::Instruction>(val)) {
+    if (const auto *instruction =
+            llvm::dyn_cast_or_null<llvm::Instruction>(val)) {
       auto def = instToDefMap.find(instruction);
       if (def != instToDefMap.end())
         return getNode(def->second);
@@ -601,8 +602,7 @@ public:
     if (gep)
       gepAccessInfo[gep] = {relativeOffset, traversesArray, true};
   }
-  inline GepAccessInfo
-  getGepAccess(const llvm::GetElementPtrInst *gep) const {
+  inline GepAccessInfo getGepAccess(const llvm::GetElementPtrInst *gep) const {
     auto it = gepAccessInfo.find(gep);
     return it == gepAccessInfo.end() ? GepAccessInfo{} : it->second;
   }
@@ -812,6 +812,15 @@ public:
     if (const ObjectInfo *info = getObjectInfo(objId))
       return info->isUnknown;
     return false;
+  }
+  /// Enumerate unknown objects even when they have no debug/value mapping.
+  /// Refresh cached results after object metadata changes.
+  inline SVFGNodeBS getUnknownObjects() const {
+    SVFGNodeBS result;
+    for (const auto &entry : objIdToInfo)
+      if (entry.second.isUnknown)
+        result.insert(entry.first);
+    return result;
   }
   inline bool isSingletonObject(uint32_t objId) const {
     if (const ObjectInfo *info = getObjectInfo(objId))

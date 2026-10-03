@@ -59,5 +59,5 @@ Use cases
 See Also
 --------
 
-- :doc:`../optimization/scalar` — Individual scalar optimisation passes
-- :doc:`../optimization/ip` — Interprocedural optimisation passes
+- :doc:`scalar` — Individual scalar optimisation passes
+- :doc:`ip` — Interprocedural optimisation passes

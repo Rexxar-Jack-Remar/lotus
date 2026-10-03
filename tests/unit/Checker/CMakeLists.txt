@@ -1,23 +1,20 @@
-add_subdirectory(AE)
-add_subdirectory(Concurrency)
-add_subdirectory(Framework)
-add_subdirectory(KINT)
-add_subdirectory(Pulse)
-add_subdirectory(Saber)
+lotus_add_test_group(checker ae AE checker_tests LINK_LIBS AE ${Z3_LIBRARIES})
+lotus_add_test_group(checker concurrency Concurrency checker_tests
+  LINK_LIBS ConcurrencyChecker)
+lotus_add_test_group(checker framework Framework checker_tests LINK_LIBS CheckerFramework)
+lotus_add_test_group(checker kint KINT checker_tests
+  LINK_LIBS CanaryKint CheckerFramework CanaryDebugInfo CanaryFormats
+    CanaryLLVMUtils LLVMPasses ${Z3_LIBRARIES})
+lotus_add_test_group(checker pulse Pulse checker_tests LINK_LIBS PulseChecker ${Z3_LIBRARIES})
+lotus_add_test_group(checker saber Saber checker_tests LINK_LIBS Saber ${Z3_LIBRARIES})
 
-lotus_collect_test_sources(checker_tests ReportFormattingTest.cpp)
+lotus_test_group_enabled(checker reports reports_selected)
+if(reports_selected)
+  lotus_collect_test_sources(checker_tests ReportFormattingTest.cpp)
+  set_property(GLOBAL APPEND PROPERTY LOTUS_TEST_SUITE_checker_tests_LINK_LIBS CheckerFramework)
+endif()
 
+get_property(checker_test_libs GLOBAL PROPERTY LOTUS_TEST_SUITE_checker_tests_LINK_LIBS)
+list(REMOVE_DUPLICATES checker_test_libs)
 add_lotus_collected_test_suite(checker_tests
-  LINK_LIBS
-    AE
-    CanaryAliasAnalysisWrapper
-    PulseChecker
-    ConcurrencyChecker
-    CanaryKint
-    Saber
-    CheckerFramework
-    CanaryDebugInfo
-    CanaryFormats
-    CanaryLLVMUtils
-    ${Z3_LIBRARIES}
-  COMPILE_DEFINITIONS USE_Z3)
+  LINK_LIBS ${checker_test_libs} COMPILE_DEFINITIONS USE_Z3)

@@ -437,6 +437,22 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
       }
     }
 
+    // Retain temporal object identity, including event-only values pruned from
+    // the heap. Each application gets fresh callee-local identities.
+    for (const auto &event : post->getToplHistory().events) {
+      for (const auto &argument : event.arguments) {
+        if (!argument.value)
+          continue;
+        AbstractValue formal = pre->getCanonical(*argument.value);
+        if (!substitution.substitute(formal)) {
+          const auto *origin = formal.getValue();
+          AbstractValue actual = origin && llvm::isa<llvm::GlobalValue>(origin)
+                                     ? factory_.getOrCreate(origin)
+                                     : factory_.createFresh(CI);
+          substitution.add(formal, actual);
+        }
+      }
+    }
     PulseFormula caller_formula = new_astate->getPathFormula().clone();
     PulseFormula callee_pre_formula =
         entry.getPreFormula().applySubstitution(substitution);
@@ -544,6 +560,17 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
           std::make_unique<PulseFormula>(std::move(merged_post)));
     }
 
+    for (auto event : post->getToplHistory().events) {
+      for (auto &argument : event.arguments) {
+        if (argument.value)
+          argument.value = substitution.substituteOrIdentity(
+              pre->getCanonical(*argument.value));
+      }
+      if (event.callingContext.size() < 8)
+        event.callingContext.insert(event.callingContext.begin(), CI);
+      new_astate->getToplHistory().append(std::move(event));
+    }
+    new_astate->getToplHistory().truncated |= post->getToplHistory().truncated;
     if (entry.getLatentIssue()) {
       const auto &latent = *entry.getLatentIssue();
       AbstractValue formal_addr = post->getCanonical(latent.address);

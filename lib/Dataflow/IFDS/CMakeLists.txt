@@ -5,6 +5,7 @@
 
 # Framework core
 set(IFDS_FRAMEWORK_SOURCES
+  AnalysisSession.cpp
   Debug/IFDSDebugUtils.cpp
 )
 
@@ -33,4 +34,5 @@ set(IFDS_SOURCES ${IFDS_FRAMEWORK_SOURCES} ${IFDS_CLIENT_SOURCES})
 
 add_library(IFDS STATIC ${IFDS_SOURCES})
 
-target_link_libraries(IFDS PUBLIC Annotation CanaryPlatform)
+target_link_libraries(IFDS PUBLIC Annotation CanaryPlatform
+  CanaryAliasAnalysisWrapper CanaryTypeHierarchy CanaryCFG)

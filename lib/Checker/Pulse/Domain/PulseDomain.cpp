@@ -181,6 +181,7 @@ AbductiveDomain AbductiveDomain::clone() const {
   cloned.allocation_sizes_ = allocation_sizes_;
   cloned.allocation_roots_ = allocation_roots_;
   cloned.taint_domain_.join(taint_domain_);
+  cloned.topl_history_ = topl_history_;
 
   // Clone new fields
   cloned.skipped_calls_ = skipped_calls_;
@@ -348,6 +349,9 @@ void AbductiveDomain::canonicalize() {
 
 std::optional<AbductiveDomain>
 AbductiveDomain::merge(const AbductiveDomain &d1, const AbductiveDomain &d2) {
+  // Temporal histories from distinct paths must never be concatenated.
+  if (!(d1.topl_history_ == d2.topl_history_))
+    return std::nullopt;
   // Merge path formulas first to check for contradictions
   PulseFormula merged_formula;
   if (d1.path_formula_ && d2.path_formula_) {
@@ -365,6 +369,7 @@ AbductiveDomain::merge(const AbductiveDomain &d1, const AbductiveDomain &d2) {
   }
 
   AbductiveDomain merged;
+  merged.topl_history_ = d1.topl_history_;
   merged.path_formula_ =
       std::make_unique<PulseFormula>(std::move(merged_formula));
 

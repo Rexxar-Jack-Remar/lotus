@@ -1,6 +1,6 @@
 # BootstrapAA
 
-A new, independent inclusion-based analysis for LOTUS, with an LLVM 14 adapter,
+An independent inclusion-based analysis for Lotus, with an LLVM 14 adapter,
 flow-sensitive memory states, and context-sensitive interprocedural summaries.
 The public C++ namespace is `lotus::bootstrap`.
 
@@ -29,11 +29,9 @@ The summary representation is a deliberate engineering adaptation, not a claim
 that it has the succinctness or performance reported for the paper's summaries.
 Points-to sets use a dependency-free sparse word-bitset; maps remain for summary
 keys and caches. No scalability benchmark or proof of LLVM-level soundness
-accompanies this delivery.
+accompanies this implementation.
 
-### Implemented fidelity and engineering improvements
-
-The integrated version addresses the initial, contained gaps as follows:
+### Implementation choices and engineering details
 
 1. The unification phase retains a cycle-collapsed Steensgaard hierarchy DAG,
    component membership, predecessor/successor edges, depths, and cyclic flags.
@@ -59,9 +57,9 @@ The integrated version addresses the initial, contained gaps as follows:
    independent overlapping clusters are evaluated in parallel with deterministic
    aggregation.
 
-### Remaining paper-fidelity roadmap
+### Remaining differences from the paper
 
-The largest remaining differences are:
+The largest gaps are:
 
 1. Algorithms 2 and 3 are absent. FSCI facts are obtained from the active
    flow/context-sensitive state instead of being computed by hierarchy-ordered
@@ -70,9 +68,9 @@ The largest remaining differences are:
    These summaries are semantically useful, but can enumerate many projected
    memory states and do not carry guarded positive/negative points-to and alias
    constraints.
-3. No paper-benchmark reproduction currently measures summary size, speedup,
-   or peak memory, although the required structural and timing counters are now
-   exposed.
+3. Summary size, speedup, and peak memory are not yet measured on the paper's
+   benchmarks; the structural and timing counters needed for that measurement
+   are exposed.
 
 A paper-faithful implementation should proceed in dependency order:
 
@@ -283,7 +281,7 @@ standard error.
 
 ## Validation
 
-The integrated LLVM-independent engine and LLVM 14 adapter build in Lotus. The
+The LLVM-independent engine and LLVM 14 adapter build in Lotus. The
 GTest suite contains 27 engine groups and eleven LLVM-facing groups; all pass. One
 engine group compares sliced/clustered and monolithic configurations on 200
 deterministically generated programs. The CLI smoke test also passes on the

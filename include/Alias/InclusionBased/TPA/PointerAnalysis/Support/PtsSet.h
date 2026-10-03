@@ -3,6 +3,8 @@
 #include "Alias/InclusionBased/TPA/Util/DataStructure/VectorSet.h"
 #include "Alias/InclusionBased/TPA/Util/Hashing.h"
 
+#include <array>
+#include <mutex>
 #include <unordered_set>
 
 namespace tpa {
@@ -39,7 +41,11 @@ private:
 
   // Flyweight pattern: all equal sets are deduplicated
   using PtsSetSet = std::unordered_set<SetType, util::ContainerHasher<SetType>>;
-  static PtsSetSet existingSet;
+  struct Shard {
+    std::mutex mutex;
+    PtsSetSet sets;
+  };
+  static std::array<Shard, 32> existingSets;
   static const SetType *emptySet;
 
   // Private constructor - use factory methods
@@ -53,10 +59,10 @@ public:
 
   // Add a memory object to this set
   // Returns a new set (immutable design)
-  PtsSet insert(const MemoryObject *);
+  PtsSet insert(const MemoryObject *) const;
   // Union with another set
   // Returns a new set representing the union
-  PtsSet merge(const PtsSet &);
+  PtsSet merge(const PtsSet &) const;
 
   // Check if a memory object is in the set
   bool has(const MemoryObject *obj) const { return pSet->count(obj); }

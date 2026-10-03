@@ -82,9 +82,9 @@ Command line
 
 .. code-block:: console
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-lcl
-   build/bin/lotus-cfl-interleaved-dyck-lcl --query 0 4 input.dot
-   build/bin/lotus-cfl-interleaved-dyck-lcl --print-upper input.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck lcl --query 0 4 input.dot
+   build/bin/lotus-cfl-interleaved-dyck lcl --print-upper input.dot
 
 ``--baseline`` selects Algorithm 1's white-node baseline. ``--no-feasibility``
 disables the Section 5.3 endpoint filters. ``--query SOURCE TARGET`` reports

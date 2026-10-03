@@ -1,0 +1,5 @@
+property ResourceProtocol
+  message "resource used after closing"
+  start -> start: *
+  start -> closed: close_resource(X, _) => x := X
+  closed -> error: use_resource(X, _) when x == X

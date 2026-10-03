@@ -42,7 +42,7 @@ struct CommandLine {
 
 void usage(std::ostream &output) {
   output
-      << "usage: lotus-cfl-interleaved-dyck-unary [options] <graph.dot>\n"
+      << "usage: lotus-cfl-interleaved-dyck unary [options] <graph.dot>\n"
          "\n"
          "Compute exact bidirected unary D1-interleaved-D1 reachability.\n"
          "\n"
@@ -363,7 +363,7 @@ void printFixedCounterResult(std::ostream &output,
 
 } // namespace
 
-int main(int argc, char **argv) {
+int runInterleavedDyckUnary(int argc, char **argv) {
   try {
     const CommandLine command_line = parseCommandLine(argc, argv);
     const interleaved_dyck::Graph graph =
@@ -420,7 +420,7 @@ int main(int argc, char **argv) {
     }
     return 0;
   } catch (const std::exception &error) {
-    std::cerr << "lotus-cfl-interleaved-dyck-unary: " << error.what() << '\n';
+    std::cerr << "lotus-cfl-interleaved-dyck unary: " << error.what() << '\n';
     return 1;
   }
 }

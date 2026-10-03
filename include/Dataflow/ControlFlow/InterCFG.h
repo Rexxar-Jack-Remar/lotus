@@ -111,7 +111,8 @@ inline LLVMInterCFG::LLVMInterCFG(m_t M, GetCalleesFn GetCallees)
       if (Call == nullptr) {
         return Callees;
       }
-      if (auto *Callee = Call->getCalledFunction()) {
+      if (auto *Callee = llvm::dyn_cast<llvm::Function>(
+              Call->getCalledOperand()->stripPointerCastsAndAliases())) {
         Callees.push_back(Callee);
       }
       return Callees;

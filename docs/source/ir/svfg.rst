@@ -78,8 +78,8 @@ Memory PHI Nodes
 ~~~~~~~~~~~~~~~~
 
 * **IntraMSSAPhiSVFGNode**: Intra-procedural memory PHI for merging memory states.
-* **InterMSSAPhiSVFGNode**: Inter-procedural memory PHI node kind (currently not
-  materialized by default builder construction).
+* **InterMSSAPhiSVFGNode**: Inter-procedural memory PHI node kind for merged
+  interprocedural memory states.
 
 Parameter Nodes
 ---------------
@@ -228,14 +228,14 @@ Memory SSA Queries
 
    #include "IR/SVFG/SVFG.h"
    
-   // Get LoadMu nodes for a load instruction
-   const SVFGNodeSet& mus = svfg->getLoadMus(loadInst);
+   // Get formal-in and formal-out memory nodes for a function
+   const SVFGNodeSet& formalIns = svfg->getFormalIns(func);
+   const SVFGNodeSet& formalOuts = svfg->getFormalOuts(func);
    
-   // Get StoreChi nodes for a store instruction
-   const SVFGNodeSet& chis = svfg->getStoreChis(storeInst);
-   
-   // Get points-to set for a memory node
+   // Query memory node properties
    const SVFGNodeBS* pts = memNode->getPointsTo();
+   uint32_t memReg = memNode->getMemReg();
+   uint32_t version = memNode->getSSAVersion();
 
 Interprocedural Queries
 -----------------------

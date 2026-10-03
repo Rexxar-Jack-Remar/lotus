@@ -19,6 +19,7 @@
 #include "Alias/InclusionBased/TPA/PointerAnalysis/MemoryModel/Type/ArrayLayout.h"
 
 #include <limits>
+#include <mutex>
 
 namespace tpa {
 
@@ -48,6 +49,8 @@ static bool validateTripleList(const ArrayLayout::ArrayTripleList &list) {
 }
 
 const ArrayLayout *ArrayLayout::getLayout(ArrayTripleList &&list) {
+  static std::mutex mutex;
+  std::lock_guard<std::mutex> lock(mutex);
   assert(validateTripleList(list));
   auto itr = layoutSet.insert(ArrayLayout(std::move(list))).first;
   return &(*itr);

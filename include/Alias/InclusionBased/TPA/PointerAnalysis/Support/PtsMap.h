@@ -37,18 +37,70 @@ private:
 public:
   using const_iterator = typename MapType::const_iterator;
 
+  struct Binding {
+    bool present;
+    PtsSet value;
+  };
+  using ReadMap = std::unordered_map<T, Binding>;
+
+private:
+  // Used only by parallel transfer views. The base remains immutable while
+  // the worker batch executes; writes stay in mapping until retirement.
+  const PtsMap *base = nullptr;
+  mutable ReadMap reads;
+
+  Binding binding(T key) const {
+    const auto found = mapping.find(key);
+    if (found != mapping.end())
+      return {true, found->second};
+    if (base) {
+      const auto observed = base->binding(key);
+      reads.emplace(key, observed);
+      return observed;
+    }
+    return {false, PtsSet::getEmptySet()};
+  }
+
+public:
+  PtsMap makeOverlay() const {
+    PtsMap result;
+    result.base = this;
+    return result;
+  }
+  bool validateOverlay(const PtsMap &current) const {
+    for (const auto &read : reads) {
+      const auto actual = current.binding(read.first);
+      if (actual.present != read.second.present ||
+          actual.value != read.second.value)
+        return false;
+    }
+    return true;
+  }
+  void commitOverlayTo(PtsMap &destination) const {
+    for (const auto &write : mapping)
+      destination.strongUpdate(write.first, write.second);
+  }
+  bool sameBindings(const PtsMap &other) const {
+    if (mapping.size() != other.mapping.size())
+      return false;
+    for (const auto &entry : mapping) {
+      const auto found = other.mapping.find(entry.first);
+      if (found == other.mapping.end() || entry.second != found->second)
+        return false;
+    }
+    return true;
+  }
+
   // Lookup the points-to set for a key
   // Returns empty set if key not present
   PtsSet lookup(T key) const {
     assert(key != nullptr);
-    auto itr = mapping.find(key);
-    if (itr == mapping.end())
-      return PtsSet::getEmptySet();
-    else
-      return itr->second;
+    return binding(key).value;
   }
   // Check if a key exists in the map
   bool contains(T key) const { return !lookup(key).empty(); }
+  // Presence matters even for an empty set: first insertion can enqueue uses.
+  bool hasBinding(T key) const { return binding(key).present; }
 
   // Insert a single memory object into a key's points-to set
   // Creates the key with empty set if not present
@@ -56,6 +108,12 @@ public:
   bool insert(T key, const MemoryObject *obj) {
     assert(key != nullptr && obj != nullptr);
 
+    if (base) {
+      const auto old = binding(key);
+      const auto value = old.value.insert(obj);
+      mapping.insert_or_assign(key, value);
+      return value != old.value;
+    }
     auto itr = mapping.find(key);
     if (itr == mapping.end())
       itr = mapping.insert(std::make_pair(key, PtsSet::getEmptySet())).first;
@@ -76,6 +134,12 @@ public:
   bool weakUpdate(T key, PtsSet pSet) {
     assert(key != nullptr);
 
+    if (base) {
+      const auto old = binding(key);
+      const auto value = old.value.merge(pSet);
+      mapping.insert_or_assign(key, value);
+      return !old.present || value != old.value;
+    }
     auto itr = mapping.find(key);
     if (itr == mapping.end()) {
       mapping.insert(std::make_pair(key, pSet));
@@ -98,6 +162,11 @@ public:
   bool strongUpdate(T key, PtsSet pSet) {
     assert(key != nullptr);
 
+    if (base) {
+      const auto old = binding(key);
+      mapping.insert_or_assign(key, pSet);
+      return !old.present || old.value != pSet;
+    }
     auto itr = mapping.find(key);
     if (itr == mapping.end()) {
       mapping.insert(std::make_pair(key, pSet));

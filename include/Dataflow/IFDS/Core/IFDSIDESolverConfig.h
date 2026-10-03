@@ -179,7 +179,11 @@ struct IFDSIDESolverConfig {
     return lotus::AAConfig::SparrowAA_NoCtx();
   }
 
+  bool sparse_execution() const { return m_sparse_execution; }
+  void set_sparse_execution(bool enable = true) { m_sparse_execution = enable; }
+
 private:
+  bool m_sparse_execution = false;
   // Default: ComputeValues + caching enabled
   uint32_t m_options =
       static_cast<uint32_t>(SolverConfigOptions::ComputeValues) |

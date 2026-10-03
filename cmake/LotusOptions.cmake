@@ -1,6 +1,26 @@
 # Core build surfaces
 option(LOTUS_BUILD_EXAMPLES "Build examples" OFF)
 option(LOTUS_BUILD_TESTS "Build tests" OFF)
+option(LOTUS_BUILD_ALL_LIBRARIES
+       "Include all libraries in the default build, even if no selected consumer needs them" ON)
+set(LOTUS_TOOL_FAMILIES "all" CACHE STRING
+    "Semicolon-separated tool families: all, alias, checker, dataflow, optimization, solver, verifier, ir, cfl; empty builds no tools")
+set(LOTUS_TEST_SUBSYSTEMS "all" CACHE STRING
+    "Semicolon-separated test subsystems or groups, e.g. concurrency/cuda;dataflow/vasco;analysis/cfg; all selects everything")
+option(LOTUS_ENABLE_TIME_TRACE "Emit Clang compilation time traces for Lotus C++ targets" OFF)
+set(LOTUS_PCH_TARGETS "" CACHE STRING
+    "Semicolon-separated Lotus targets using private LLVM/STL precompiled headers")
+set(LOTUS_UNITY_TARGETS "" CACHE STRING
+    "Semicolon-separated Lotus targets using experimental unity builds")
+set(LOTUS_UNITY_BATCH_SIZE 4 CACHE STRING "Maximum sources per selected unity batch")
+
+# SparrowAA, DyckAA, UnderApprox and LLVM's CFL analyses remain available.
+# These switches affect the wrapper only; standalone backend libraries/tools
+# are still available and can be built explicitly.
+foreach(backend DDA TPA GPG CCLYZER)
+  option(LOTUS_AA_WRAPPER_ENABLE_${backend}
+         "Include ${backend} in the unified alias-analysis wrapper" ON)
+endforeach()
 option(LOTUS_ENABLE_COVERAGE
        "Instrument Lotus and its tests for LLVM source coverage" OFF)
 set(LOTUS_COVERAGE_MINIMUM 0 CACHE STRING
@@ -67,6 +87,92 @@ set(LOTUS_CUSTOM_BOOST_ROOT "" CACHE PATH
 set(LOTUS_CUSTOM_CRAB_ROOT "" CACHE PATH
     "Path to a custom CRAB installation")
 
+# Validate selections here with the options they control.
+function(lotus_resolve_selection option_name available out_var)
+  string(TOLOWER "${${option_name}}" selected)
+  if(selected STREQUAL "all")
+    if(ARGN)
+      set(selected ${ARGN})
+    else()
+      set(selected ${available})
+    endif()
+  else()
+    foreach(component IN LISTS selected)
+      if(NOT component IN_LIST available)
+        message(FATAL_ERROR
+          "Unknown component '${component}' in ${option_name}. "
+          "Choose from: all;${available}")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES selected)
+  endif()
+  set(${out_var} "${selected}" PARENT_SCOPE)
+endfunction()
+
+set(_lotus_test_roots
+  alias alias-wrapper analysis checker cfl concurrency dataflow fuzzing ir
+  solvers symbolicexecution utils verification)
+set(_lotus_test_choices ${_lotus_test_roots})
+foreach(group gpg dda aserpta bootstrapaa flowsensitive lotusaa sparrowaa tpa
+              cclyzeraa dyckaa seadsa allocaa typequalifier underapproxaa ptsset)
+  list(APPEND _lotus_test_choices "alias/${group}")
+endforeach()
+foreach(group cfg controldependence debuginfo general multiplicity nullpointer
+              parametersummary profile purity sccp typehierarchy loop)
+  list(APPEND _lotus_test_choices "analysis/${group}")
+endforeach()
+foreach(group mhp lockset valueflow thread clocks threadapi threadlocal openmp
+              mpi cuda linuxkernel)
+  list(APPEND _lotus_test_choices "concurrency/${group}")
+endforeach()
+foreach(group ae concurrency framework kint pulse saber reports)
+  list(APPEND _lotus_test_choices "checker/${group}")
+endforeach()
+foreach(group ifdside mono wpds apa npa vasco)
+  list(APPEND _lotus_test_choices "dataflow/${group}")
+endforeach()
+
+lotus_resolve_selection(LOTUS_TOOL_FAMILIES
+  "alias;checker;dataflow;optimization;solver;verifier;ir;cfl"
+  LOTUS_SELECTED_TOOL_FAMILIES)
+lotus_resolve_selection(LOTUS_TEST_SUBSYSTEMS "${_lotus_test_choices}"
+  LOTUS_SELECTED_TEST_SUBSYSTEMS ${_lotus_test_roots})
+
+if(NOT LOTUS_ENABLE_CFL)
+  string(TOLOWER "${LOTUS_TOOL_FAMILIES}" requested_tools)
+  string(TOLOWER "${LOTUS_TEST_SUBSYSTEMS}" requested_tests)
+  if("cfl" IN_LIST LOTUS_SELECTED_TOOL_FAMILIES AND
+     NOT requested_tools STREQUAL "all")
+    message(FATAL_ERROR "Selecting cfl tools requires LOTUS_ENABLE_CFL=ON")
+  endif()
+  if(LOTUS_BUILD_TESTS AND "cfl" IN_LIST LOTUS_SELECTED_TEST_SUBSYSTEMS AND
+     NOT requested_tests STREQUAL "all")
+    message(FATAL_ERROR "Selecting cfl tests requires LOTUS_ENABLE_CFL=ON")
+  endif()
+  list(REMOVE_ITEM LOTUS_SELECTED_TOOL_FAMILIES cfl)
+  list(REMOVE_ITEM LOTUS_SELECTED_TEST_SUBSYSTEMS cfl)
+endif()
+if(LOTUS_BUILD_TESTS AND "alias/typequalifier" IN_LIST LOTUS_SELECTED_TEST_SUBSYSTEMS
+   AND NOT LOTUS_ENABLE_TYPE_QUALIFIER)
+  message(FATAL_ERROR "Selecting alias/typequalifier requires LOTUS_ENABLE_TYPE_QUALIFIER=ON")
+endif()
+
+set(LOTUS_SELECTED_TEST_ROOTS)
+foreach(selection IN LISTS LOTUS_SELECTED_TEST_SUBSYSTEMS)
+  string(REGEX REPLACE "/.*$" "" subsystem "${selection}")
+  list(APPEND LOTUS_SELECTED_TEST_ROOTS "${subsystem}")
+endforeach()
+list(REMOVE_DUPLICATES LOTUS_SELECTED_TEST_ROOTS)
+
+function(lotus_test_group_enabled subsystem group out_var)
+  if(subsystem IN_LIST LOTUS_SELECTED_TEST_SUBSYSTEMS OR
+     "${subsystem}/${group}" IN_LIST LOTUS_SELECTED_TEST_SUBSYSTEMS)
+    set(${out_var} TRUE PARENT_SCOPE)
+  else()
+    set(${out_var} FALSE PARENT_SCOPE)
+  endif()
+endfunction()
+
 function(_lotus_summary_bool label value)
   if(${value})
     message(STATUS "  ${label}: ON")
@@ -85,8 +191,17 @@ function(lotus_print_build_summary)
   _lotus_summary_bool("Build tests" LOTUS_BUILD_TESTS)
   _lotus_summary_bool("Coverage instrumentation" LOTUS_ENABLE_COVERAGE)
   _lotus_summary_bool("Build examples" LOTUS_BUILD_EXAMPLES)
+  _lotus_summary_bool("Build all libraries" LOTUS_BUILD_ALL_LIBRARIES)
+  message(STATUS "  Tool families: ${LOTUS_TOOL_FAMILIES}")
+  message(STATUS "  Test subsystems: ${LOTUS_TEST_SUBSYSTEMS}")
+  _lotus_summary_bool("Compilation time traces" LOTUS_ENABLE_TIME_TRACE)
+  message(STATUS "  PCH targets: ${LOTUS_PCH_TARGETS}")
+  message(STATUS "  Unity targets: ${LOTUS_UNITY_TARGETS}")
+  foreach(backend DDA TPA GPG CCLYZER)
+    _lotus_summary_bool("Alias wrapper ${backend}" LOTUS_AA_WRAPPER_ENABLE_${backend})
+  endforeach()
   message(STATUS "  Optional tool families:")
-  _lotus_summary_bool("CFL tools" LOTUS_ENABLE_CFL)
+  _lotus_summary_bool("CFL libraries and tools" LOTUS_ENABLE_CFL)
   _lotus_summary_bool("CSR tool" LOTUS_ENABLE_CSR)
   _lotus_summary_bool("Owl SMT tool" LOTUS_ENABLE_OWL)
   _lotus_summary_bool("SMTStabilizer" LOTUS_ENABLE_SMT_STABILIZER)

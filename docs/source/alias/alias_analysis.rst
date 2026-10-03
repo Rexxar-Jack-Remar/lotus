@@ -1,7 +1,8 @@
 Alias Analysis Components
 ==========================
 
-Lotus provides several alias analysis algorithms with different precision/performance trade-offs. Each analysis makes different trade-offs between precision, scalability, and analysis cost.
+Lotus provides several alias analysis algorithms that trade precision against
+scalability and analysis cost.
 
 Reusable support modules are documented separately:
 
@@ -48,8 +49,8 @@ For detailed information about each analysis, see the corresponding documentatio
 * :doc:`sparrowaa` - Inclusion-based points-to analysis
 * :doc:`fpa` - Function pointer analysis with multiple algorithms
 * :doc:`lotusaa` - Lotus-specific alias analysis framework
-* :doc:`underapproxaa` - Under-approximate alias analysis for conservative results
+* :doc:`underapproxaa` - Under-approximate must-alias analysis with no false positives
 * :doc:`dynaa` - Dynamic validation of static alias analysis results
-* :doc:`sraa` - Strict Relation Alias Analysis built on interprocedural range analysis
+* :doc:`sraa` - Strict Relations Alias Analysis built on interprocedural range analysis
 * :doc:`flowsensitive` - Sparse flow-sensitive inclusion-based pointer analysis
 * :doc:`valueflowpta` - Direct value-flow-based flow-sensitive pointer analysis

@@ -7,6 +7,23 @@
 #include <fstream>
 #include <sstream>
 
+std::unique_ptr<TaintConfig>
+TaintConfigParser::parse_default(const std::string &install_prefix) {
+  std::vector<std::string> candidates;
+  if (!install_prefix.empty())
+    candidates.push_back(install_prefix + "/share/lotus/config/taint.spec");
+  if (!install_prefix.empty())
+    candidates.push_back(install_prefix + "/config/taint.spec");
+  for (const auto &path :
+       {"config/taint.spec", "../config/taint.spec", "../../config/taint.spec",
+        "../../../config/taint.spec"})
+    candidates.emplace_back(path);
+  for (const auto &path : candidates)
+    if (auto config = parse_file_quiet(path))
+      return config;
+  return nullptr;
+}
+
 #include <llvm/Support/raw_ostream.h>
 
 void TaintConfig::dump(llvm::raw_ostream &OS) const {
@@ -66,7 +83,9 @@ void TaintConfigParser::parse_line(const std::string &line,
   std::string directive = tokens[0];
   std::string func_name = tokens[1];
 
-  if (directive == "SOURCE") {
+  if (directive == "SANITIZER") {
+    config.sanitizers.insert(func_name);
+  } else if (directive == "SOURCE") {
     config.sources.insert(func_name);
 
     for (size_t i = 2; i + 3 <= tokens.size(); i += 3) {
@@ -93,7 +112,8 @@ void TaintConfigParser::parse_line(const std::string &line,
         parsed = parse_taint_spec(tokens, i, spec);
         advance = 3;
       } else if (i + 2 <= tokens.size()) {
-        std::vector<std::string> implicit_tokens = {tokens[i], tokens[i + 1], "T"};
+        std::vector<std::string> implicit_tokens = {tokens[i], tokens[i + 1],
+                                                    "T"};
         parsed = parse_taint_spec(implicit_tokens, 0, spec);
         advance = 2;
       } else {
@@ -119,7 +139,8 @@ void TaintConfigParser::parse_line(const std::string &line,
     }
     PipeSpec pipe_spec;
     // The shipped syntax is PIPE <dst_loc> <dst_access> <src_loc> <src_access>.
-    // Normalize it into PipeSpec's semantic fields: from=source, to=destination.
+    // Normalize it into PipeSpec's semantic fields: from=source,
+    // to=destination.
     std::vector<std::string> src_tokens = {tokens[4], tokens[5], "T"};
     if (!parse_taint_spec(src_tokens, 0, pipe_spec.from)) {
       llvm::errs() << "[TaintConfigParser] Warning: PIPE for '" << func_name

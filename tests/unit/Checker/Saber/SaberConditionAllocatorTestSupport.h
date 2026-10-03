@@ -160,16 +160,19 @@ public:
 class SaberOptionScope {
 public:
   SaberOptionScope()
-      : oldFullSVFG_(SaberFullSVFG), oldCxtLimit_(SaberCxtLimit) {}
+      : oldFullSVFG_(SaberFullSVFG), oldCxtLimit_(SaberCxtLimit),
+        oldNoSMT_(SaberNoSMT) {}
 
   ~SaberOptionScope() {
     SaberFullSVFG = oldFullSVFG_;
     SaberCxtLimit = oldCxtLimit_;
+    SaberNoSMT = oldNoSMT_;
   }
 
 private:
   bool oldFullSVFG_;
   unsigned oldCxtLimit_;
+  bool oldNoSMT_;
 };
 
 } // namespace

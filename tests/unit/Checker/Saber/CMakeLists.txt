@@ -1,3 +1,4 @@
 lotus_collect_test_sources(checker_tests
   SaberConditionAllocatorTest.cpp
-  SaberConditionAllocatorReportingTest.cpp)
+  SaberConditionAllocatorReportingTest.cpp
+  UseAfterFreeCheckerTest.cpp)

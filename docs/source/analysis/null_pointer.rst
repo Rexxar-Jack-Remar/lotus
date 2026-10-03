@@ -11,7 +11,6 @@ null-flow through the program.
 **Main components**:
 
 - **AliasAnalysisAdapter** – Integrates with alias analyses for null checking
-- **ContextSensitiveLocalNullCheckAnalysis** – Local, context-sensitive analysis
 - **ContextSensitiveNullCheckAnalysis** – Interprocedural, context-sensitive analysis
 - **ContextSensitiveNullFlowAnalysis** – Null value flow tracking
 - **LocalNullCheckAnalysis** – Intraprocedural null checking

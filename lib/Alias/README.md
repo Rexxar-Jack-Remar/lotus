@@ -1,22 +1,23 @@
-# The Phenix Alias Analsyis Toolkits
+# Alias Analysis
 
-This directory contains various alias analysis implementations and toolkits used in the Phenix project.
+This directory contains the alias- and pointer-analysis implementations used by
+Lotus.
 
 ## Analysis Comparison Table
 
 | Analysis | Tool/Command | Analysis Type | Flow-Sensitive | Context-Sensitive | Field-Sensitive | Third-Party | Notes |
 |----------|--------------|---------------|----------------|-------------------|-----------------|-------------|-------|
 | **SparrowAA** | `lotus-alias-sparrow-aa` | Inclusion-based | ❌ No | ✅ Yes (CI, 1-CFA, 2-CFA, etc.) | ❌ No | ❌ No | More graph simplification algorithms; no on-the-fly callgraph construction |
-| **AserPTA** | `lotus-alias-aser-aa` | Inclusion-based | ❌ No | ✅ Yes (CI, 1-CFA, 2-CFA, Origin) | ✅ Yes | ✅ Adapted from AserPTA | On-the-fly callgraph construction; supports both field-insensitive and field-sensitive modes; adapted and upgraded to LLVM 14.x |
+| **AserPTA** | `lotus-alias-aser-aa` | Inclusion-based | ❌ No | ✅ Yes (CI, 1-CFA, 2-CFA, Origin) | ✅ Yes | ✅ Adapted from AserPTA | On-the-fly callgraph construction; supports both field-insensitive and field-sensitive modes |
 | **CFL (LLVM)** | - | CFL-reachability | ❌ No | ❌ No | - | ✅ Yes (LLVM) | Via alias wrapper (libLLVMAnalysis) |
-| **DDA** | `dda` | Demand-driven value-flow | ✅ Yes | Optional (`FlowDDA` / `ContextDDA`) | ✅ Yes | ❌ No | Migrated from SVF concepts, but reimplemented natively in Lotus |
+| **DDA** | - (library only, `DDAPass`) | Demand-driven value-flow | ✅ Yes | Optional (`FlowDDA` / `ContextDDA`) | ✅ Yes | ❌ No | SVF-style demand-driven value-flow solver implemented natively in Lotus |
 | **DyckAA** | - | Unification-based | ❌ No | ❌ No | - | ❌ No | - |
 | **Dynamic** | - | Dynamic | - | - | - | ❌ No | Runtime analysis |
 | **FPA** | `lotus-alias-fpa` | Type-based | - | - | - | ❌ No | Function pointer analysis |
 | **GPG** | `lotus-alias-gpg` | Inclusion-based GPG summaries | ✅ Yes | ✅ Fully context-sensitive | ✅ Yes | ❌ No | Bottom-up GPG analysis with blocking, coalescing, recursion, and k-limited heap paths |
 | **LotusAA** | `lotus-alias-lotus-aa` | Inclusion-based | ✅ Yes | ✅ Yes | - | ❌ No | Native Lotus analysis; flow- and context-sensitive |
-| **seadsa** | `lotus-alias-sea-dsa-dg`, `lotus-alias-seadsa-tool` | Unification-based | ❌ No | ✅ Yes | - | ✅ Yes (SeaDsa) | Context-sensitive heap (heap cloning); Boost dependency removed |
-| **SRAA** | - | Range-based | ❌ No | ❌ No | - | ❌ No (based on CGO'17 paper) | Flow- and context-insensitive; upgraded to LLVM 14.x |
+| **seadsa** | `lotus-alias-sea-dsa-dg`, `lotus-alias-seadsa-tool` | Unification-based | ❌ No | ✅ Yes | - | ✅ Yes (SeaDsa) | Context-sensitive heap (heap cloning) |
+| **SRAA** | - | Range-based | ❌ No | ❌ No | - | ❌ No (based on CGO'17 paper) | Flow- and context-insensitive |
 | **UnderApproxAA** | - | Pattern-based | - | - | - | ❌ No | Must-alias analysis |
 | **AllocAA** | - | - | - | - | - | ❌ No | - |
 | **TPA** | `lotus-alias-tpa` | Inclusion-based | ✅ Yes | ✅ Yes (k-limiting) | - | ❌ No | Flow- and context-sensitive with k-limiting |
@@ -56,7 +57,7 @@ This directory contains various alias analysis implementations and toolkits used
 
 ## Subdirectories
 
-`lib/Alias/` is now organized by higher-level taxonomy:
+`lib/Alias/` is organized by high-level taxonomy:
 
 - `InclusionBased/`: inclusion-style whole-program pointer analyses such as
   `AserPTA`, `GPG`, `SparrowAA`, `LotusAA`, `TPA`, and `CclyzerAA`.
@@ -67,8 +68,8 @@ This directory contains various alias analysis implementations and toolkits used
   `TypeQualifier`, and `UnderApproxAA`.
 - `Infrastructure/`: shared support layers such as `AliasAnalysisWrapper`,
   `PtsSet`, `Metrics`, and `Spec`.
-- `Dynamic/`: runtime-based alias instrumentation and validation support. This
-  remains directly under `lib/Alias/` by design.
+- `Dynamic/`: runtime-based alias instrumentation and validation support; it
+  sits directly under `lib/Alias/`.
 
 ## Comparing precision and soundness: metrics
 
@@ -85,13 +86,13 @@ To compare pointer analyses (e.g. SparrowAA vs TPA vs AserPTA), use the built-in
 | SparrowAA, GPG | ✅ Full | ✅ |
 | AserPTA | ❌ Wrapper backend not integrated | ❌ Wrapper backend not integrated |
 | TPA | ✅ Size only | ✅ |
-| DyckAA, UnderApprox, CFL* | ❌ | ❌ |
+| DyckAA, UnderApproxAA, CFLAnders/CFLSteens | ❌ | ❌ |
 | Combined | ✅ (via Andersen) | ✅ (via Andersen) |
 
 LotusAA and FPA are separate tools and are not backends in
-`AliasAnalysisWrapper`; AserPTA has a wrapper configuration but currently
-rejects initialization rather than silently falling back. SeaDsa/AllocAA/etc.
-are not yet integrated in the wrapper. See [METRICS.md](METRICS.md) for the
-full support table.
+`AliasAnalysisWrapper`; AserPTA has a wrapper configuration, but the backend
+rejects it explicitly instead of falling back to another analysis. SeaDsa,
+AllocAA, and the remaining analyses are not integrated in the wrapper. See
+[METRICS.md](METRICS.md) for the full support table.
 
 - **High-level clients** (taint, use-after-free, ref-count) need more than alias/points-to (mod/ref, DFA, etc.) and live outside this metrics layer.

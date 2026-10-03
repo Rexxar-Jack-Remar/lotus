@@ -4,7 +4,7 @@
 
 - LLVM 14.x
 - Z3 4.11
-- CMake 3.10+
+- CMake 3.18+
 - C++17 compatible compiler
 
 ## Quick Build

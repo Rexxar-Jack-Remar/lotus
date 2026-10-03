@@ -30,9 +30,8 @@ SMTSampler).
 Third-Party Libraries
 ---------------------
 
-Additional vendored libraries in ``third-party/`` that are not currently
-integrated:
+Vendored libraries in ``third-party/``:
 
 * **MDE** (``third-party/mde/``) — Multilevel Deduplication Engine
-  for caching set operations in dataflow analyses. Currently not
-  compiled or linked (commented out in ``third-party/CMakeLists.txt``).
+  for caching set operations in dataflow analyses. Not compiled or
+  linked (commented out in ``third-party/CMakeLists.txt``).

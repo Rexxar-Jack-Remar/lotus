@@ -12,9 +12,9 @@ Overview
 --------
 
 The subsystem packages graph-based CFG edge analyses together with several
-instrumentation and rewrite passes. It now includes the original ``Nisse`` and
-``KS`` pipelines plus the newer PRUE flow, which inserts delayed delta-counter
-updates and rewrites them after optimization.
+instrumentation and rewrite passes: the ``Nisse`` and ``KS`` pipelines, and the
+PRUE flow, which inserts delayed delta-counter updates and rewrites them after
+optimization.
 
 Main components
 ---------------
@@ -25,7 +25,7 @@ Main components
   edge sets, spanning trees, and well-founded loop annotations.
 - ``NissePass.cpp`` implements ``NissePass`` and ``KSPass``, which materialize
   global counter/index arrays, emit ``info.prof``, and call the profiling
-  runtime in ``prof.c``.
+  runtime in ``Prof.c``.
 - ``PRUE.cpp`` implements ``DeltaCounterPass`` and ``PruePass`` for the
   optimizer-friendly PRUE instrumentation/rewrite pipeline.
 - ``NissePlugin.cpp`` registers the analyses and the pass pipeline names for
@@ -64,5 +64,5 @@ Notes
 
 ``CanaryNisse`` is built from ``Edge.cpp``, ``NisseAnalysis.cpp``,
 ``NissePass.cpp``, ``PRUE.cpp``, ``NissePlugin.cpp``, and ``Prof.c`` as defined
-in ``lib/Transform/Nisse/CMakeLists.txt``. ``NissePropagation.cpp`` currently
-serves as a standalone utility rather than part of the library target.
+in ``lib/Transform/Nisse/CMakeLists.txt``. ``NissePropagation.cpp`` is a
+standalone utility rather than part of the library target.

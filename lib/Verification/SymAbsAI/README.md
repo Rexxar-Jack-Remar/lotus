@@ -6,18 +6,9 @@ Migrated from the thesis "Compiler Optimizations using Symbolic Abstraction" (ht
 
 This is a complete **program analysis framework** for LLVM IR using abstract interpretation with symbolic abstraction. It provides a full analysis infrastructure including fixpoint engines, abstract domains, and LLVM pass integration.
 
-**⚠️ Important Distinction**: This framework is **NOT** the same as `lib/Solvers/SMT/SymAbs`, which provides formula-level abstraction algorithms for SMT formulas.
-
-### Key Differences
-
-| Aspect | `lib/Verification/SymAbsAI` (this framework) | `lib/Solvers/SMT/SymAbs` |
-|--------|--------------------------------------------------------|--------------------------|
-| **Input** | LLVM IR (program code) | SMT bit-vector formulas (Z3 expressions) |
-| **Output** | Abstract domain values for LLVM values | Abstract constraints (intervals, octagons, etc.) |
-| **Approximation** | Works directly with program semantics | Converts bit-vectors to linear integer formulas |
-| **Level** | Program-level abstract interpretation | Formula-level abstraction algorithms |
-| **Integration** | Integrated LLVM pass with fixpoint engine | Standalone SMT formula processing |
-| **Use Case** | Static analysis and optimization of programs | Abstracting SMT formulas for constraint solving |
+This framework is distinct from `lib/Solvers/SMT/SymAbs`, which provides
+formula-level abstraction algorithms for SMT formulas rather than analyzing LLVM
+IR. The two modules are compared side by side in that README.
 
 ## Architecture
 

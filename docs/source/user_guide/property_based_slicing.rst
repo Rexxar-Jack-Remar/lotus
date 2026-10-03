@@ -1,7 +1,9 @@
 Property-Based Slicing
 ======================
 
-Property-based slicing allows you to slice programs with respect to specific verification properties, reducing the program to only the parts relevant to checking that property.
+Property-based slicing slices programs with respect to specific verification
+properties, reducing the program to the parts relevant to checking that
+property.
 
 Overview
 --------

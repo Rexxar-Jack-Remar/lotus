@@ -31,9 +31,16 @@ The solver maintains:
 Location
 ========
 
-* ``include/Alias/InclusionBased/FlowSensitive/FlowSensitivePTA.h``
-* ``include/Alias/InclusionBased/FlowSensitive/VersionedFlowSensitivePTA.h``
+* ``include/Alias/InclusionBased/FlowSensitive/Sparse/FlowSensitivePTA.h``
+* ``include/Alias/InclusionBased/FlowSensitive/Versioned/VersionedFlowSensitivePTA.h``
+* ``include/Alias/InclusionBased/FlowSensitive/ValueFlow/ValueFlowPTA.h``
+* ``include/Alias/InclusionBased/FlowSensitive/ValueFlow/ValueFlowGraph.h``
 * ``lib/Alias/InclusionBased/FlowSensitive/``
+
+Headers and implementations are grouped into matching ``Sparse/``,
+``Versioned/``, and ``ValueFlow/`` subdirectories. The value-flow graph belongs
+to the direct value-flow variant. All variants are built into the
+``FlowSensitivePTA`` library.
 
 Components
 ==========
@@ -47,10 +54,11 @@ Lotus-native migrations of the corresponding SVF pipelines:
 2. **VersionedFlowSensitivePTA** implements the ``vfspta`` analysis. Memory
    facts are keyed by ``(abstract object, meld version)`` rather than by
    ``(SVFG location, abstract object)`` as in the conventional solver. It adds
-   object prelabeling, meld versions, consume/yield maps, version and statement
-   reliance, strong and weak updates, intrinsic memory definitions,
-   footprint-equivalent object reuse, occurrence-weighted propagation, OTF
-   delta-edge updates, and result persistence.
+   object prelabeling and version-keyed consume/yield bookkeeping so that strong
+   and weak updates, statement-level reliance, and on-the-fly delta-edge
+   updates all operate on versioned memory state instead of on the whole
+   object. ``lib/Alias/InclusionBased/FlowSensitive/README.md`` lists the
+   remaining mechanisms.
 
 3. **ValueFlowPTA** implements the ``vfpta`` analysis described in
    :doc:`valueflowpta`. It constructs a field-insensitive value-flow graph
@@ -91,6 +99,15 @@ Key options:
 * ``--analysis=fspta|vfspta|vfpta`` – Select the conventional sparse
   flow-sensitive solver (default), object-versioned solver, or direct
   value-flow solver.
+* ``--parallel --threads=N`` – Evaluate ``fspta`` transfers concurrently with
+  validated snapshots and reference-order retirement. Zero workers selects
+  hardware concurrency; the worker count includes the calling thread.
+* ``--verify-parallel`` – Compare all public pointer and memory queries with
+  sequential solving on the final graph; exit with status 3 on a mismatch.
+* ``--parallel-block-size=N`` – Transfers per speculative worker block
+  (default 8). One disables local effect forwarding.
+* ``--parallel-memo=false`` and ``--parallel-share-sets=false`` – Disable
+  certified unchanged-effect reuse and immutable set sharing for experiments.
 * ``--points-to-sets=mutable|hash-consed`` – Points-to set backend for
   ``fspta``: mutable ordered sets (default) or interned immutable sets with
   operation caching.

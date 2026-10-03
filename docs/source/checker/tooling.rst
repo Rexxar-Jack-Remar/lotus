@@ -19,10 +19,10 @@ unified ``lotus-check`` binary. Each checker category registers an
 dispatch from a single entry point.
 
 .. note::
-   These subcommands are an internal C++ option-registration mechanism. The
-   public command-line interface selects an engine with ``--engine=<name>``
-   (e.g. ``lotus-check --engine=kint input.bc``); the old ``lotus-check kint
-   input.bc`` subcommand form is rejected.
+   These subcommands are an internal C++ option-registration mechanism, not
+   user-facing syntax. The public command-line interface selects an engine with
+   ``--engine=<name>``
+   (e.g. ``lotus-check --engine=kint input.bc``).
 
 Checker Subcommands
 -------------------

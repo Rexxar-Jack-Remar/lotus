@@ -19,6 +19,7 @@ extern llvm::cl::opt<unsigned> SaberCxtLimit;
 extern llvm::cl::opt<unsigned> SaberMaxStepInWrapper;
 extern llvm::cl::opt<unsigned> SaberMaxForwardItems;
 extern llvm::cl::opt<unsigned> SaberZ3Timeout;
+extern llvm::cl::opt<bool> SaberNoSMT;
 extern llvm::cl::opt<bool> SaberDumpSlice;
 extern bool SaberValidateTests;
 extern llvm::cl::opt<bool> SaberCollectExtRetGlobals;
@@ -26,4 +27,3 @@ extern bool SaberVerbose;
 
 } // namespace analysis
 } // namespace lotus
-

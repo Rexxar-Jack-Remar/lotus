@@ -83,22 +83,22 @@ Only analyses that are **initialized by the wrapper** and expose points-to or ca
 | Analysis | In wrapper? | Points-to size | Indirect-call resolution | Notes |
 |----------|-------------|----------------|---------------------------|-------|
 | **SparrowAA** | Yes | ✅ Full (`getPointsToSet` + size) | ✅ Via `getPointsToSet` (filter to `Function*`) | Full metrics. |
-| **AserPTA** | Yes (fallback) | ✅ Same as SparrowAA | ✅ Same as SparrowAA | Wrapper uses SparrowAA; full metrics. |
+| **AserPTA** | No (config rejected) | ❌ | ❌ | Config parsing accepts `AserPTA_*`, but the wrapper fails initialization explicitly. |
 | **TPA** | Yes | ✅ Size only (`getPointsToSetSize`) | ✅ Via `getIndirectCallTargets` | Uses TPA’s `getCallees(inst)` in wrapper. |
 | **DyckAA** | Yes | ❌ | ❌ | Alias only (`getAliasSet`); no pts in wrapper. |
 | **UnderApprox** | Yes | ❌ | ❌ | Must-alias only; no pts. |
 | **CFLAnders / CFLSteens** | Yes | ❌ | ❌ | Alias queries only; no pts in wrapper. |
 | **Combined** | Yes | ✅ Via Andersen | ✅ Via Andersen | Uses SparrowAA + DyckAA; pts from Andersen. |
-| **SeaDsa, AllocAA, BasicAA, …** | No | — | — | “Not yet fully supported”; wrapper does not init them. |
+| **SeaDsa, AllocAA, BasicAA, …** | No | — | — | The wrapper does not initialize them. |
 | **LotusAA, FPA** | No | — | — | Separate tools (`lotus-alias-lotus-aa`, `lotus-alias-fpa`); not backends in AliasAnalysisWrapper. |
 
-So today **points-to size** metrics are filled for **SparrowAA, AserPTA, TPA, Combined**. **Indirect-call** metrics are filled for **SparrowAA, AserPTA, TPA, Combined** via the wrapper’s `getIndirectCallTargets()` (SparrowAA/AserPTA use points-to; TPA uses its internal `getCallees()`).
+So **points-to size** metrics are filled for **SparrowAA, TPA, Combined**, and **indirect-call** metrics are filled for **SparrowAA, TPA, Combined** via the wrapper’s `getIndirectCallTargets()` (SparrowAA uses points-to; TPA uses its internal `getCallees()`).
 
 ## Files
 
 - **Design**: this file (`lib/Alias/METRICS.md`).
 - **API**: `PointerAnalysisMetrics` and `collectMetricsFromWrapper()` in `lib/Alias/Infrastructure/Metrics/` (see header and implementation).
-- **Wrapper**: `getPointsToSetSize()` for SparrowAA and TPA; `getPointsToSet()` for SparrowAA (and AserPTA fallback); `getIndirectCallTargets()` for SparrowAA and TPA.
+- **Wrapper**: `getPointsToSetSize()` for SparrowAA and TPA; `getPointsToSet()` for SparrowAA; `getIndirectCallTargets()` for SparrowAA and TPA.
 
 ## References
 

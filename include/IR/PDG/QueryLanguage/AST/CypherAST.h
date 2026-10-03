@@ -288,6 +288,17 @@ public:
   }
 
   static std::unique_ptr<CypherWhereClause>
+  makePropertyComparison(const std::string &variable,
+                         const std::string &property, CypherComparisonOp op,
+                         const std::string &right_variable,
+                         const std::string &right_property) {
+    auto clause = makeComparison(variable, property, op, "");
+    clause->rightVariable_ = right_variable;
+    clause->rightProperty_ = right_property;
+    return clause;
+  }
+
+  static std::unique_ptr<CypherWhereClause>
   makeInList(const std::string &variable, const std::string &property,
              std::vector<std::string> values) {
     auto clause = std::make_unique<CypherWhereClause>();
@@ -313,6 +324,9 @@ public:
   const std::string &getVariableName() const { return variableName_; }
   const std::string &getProperty() const { return property_; }
   const std::string &getValue() const { return value_; }
+  bool comparesProperty() const { return !rightProperty_.empty(); }
+  const std::string &getRightVariable() const { return rightVariable_; }
+  const std::string &getRightProperty() const { return rightProperty_; }
   const std::vector<std::string> &getListValues() const { return listValues_; }
   CypherComparisonOp getComparisonOp() const { return comparisonOp_; }
   const std::string &getBoolOp() const { return boolOp_; }
@@ -330,6 +344,8 @@ private:
   std::string variableName_;
   std::string property_;
   std::string value_;
+  std::string rightVariable_;
+  std::string rightProperty_;
   std::vector<std::string> listValues_;
   CypherComparisonOp comparisonOp_ = CypherComparisonOp::EQUALS;
   std::string boolOp_;

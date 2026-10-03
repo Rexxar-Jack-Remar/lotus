@@ -47,8 +47,15 @@ The analysis pipeline is organized as:
       ↓
    Points-to Sets (Env and Store)
 
+The semi-sparse CFG is constructed directly from LLVM IR. Global Pointer
+Analysis initializes globals and functions; it is not an exhaustive Andersen
+fixpoint. Neither an auxiliary Andersen run nor an SVFG is required.
+
 Core Components
 ===============
+
+Class inventory grouped by directory; the Architecture diagram above shows the
+order in which these stages run.
 
 1. **Front-End** (``FrontEnd/``)
    - **TypeCollector**: Collects and analyzes types from the LLVM module
@@ -210,6 +217,43 @@ configured via:
 * **External pointer table**: For modeling external library functions
 * **Precision tracking**: Enable precision loss tracking
 
+Parallel execution
+------------------
+
+The standalone tool exposes an experimental parallel solver:
+
+.. code-block:: bash
+
+   build/bin/lotus-alias-tpa input.bc --parallel --threads=4 \
+     --verify-parallel --dump-stats
+
+``--threads`` counts the calling thread; zero selects hardware concurrency.
+``--parallel-lookahead`` bounds retained predictions per worker (default 4).
+``--verify-parallel`` checks complete Env bindings and incoming Stores at every
+program point against a fresh serial run on the same semi-sparse program.
+Verification time is excluded from the reported solver timing.
+
+Workers evaluate private Env and call-graph views with shared immutable input
+Store versions. Memo copies a retained version only on a changed join. Call
+graphs stage new edges as deltas, and queue preview avoids copying context maps
+and duplicate-removal hash tables. Alloc/Copy/Offset nodes execute directly at
+the queue head between worker batches.
+Only the coordinator publishes pointer registrations, Env updates, call edges,
+and worklist propagation, in the original two-level worklist order. It validates
+reads at retirement and reevaluates stale transfers. This also protects strong
+updates when a predicted singleton destination grows before retirement.
+
+In C++, pass ``SemiSparsePointerAnalysis::Config`` to ``runOnProgram`` with
+``parallel = true`` and the desired ``threads``. Construct a fresh analysis for
+each run. The program, annotations, context strategy, k-limit, and LLVM IR must
+remain unchanged during solving. Simultaneous sessions sharing an LLVMContext
+are outside the supported contract.
+
+Serial execution remains the default. Current local SPEC2006 checks find
+parallel overhead without a speedup; retirement, propagation, and parts of
+canonical registration are serial. Phase timings and retry/eviction counters
+are available through ``--dump-stats`` and ``getStatistics()``.
+
 Integration
 ===========
 
@@ -217,7 +261,7 @@ TPA integrates with other Lotus components:
 
 * **Annotation System**: Uses external pointer annotations for library functions
 * **Alias Analysis Wrapper**: Provides unified interface for alias queries
-* **Type System**: Leverages LLVM type information for memory modeling
+* **Type System**: Reads LLVM types through ``TypeCollector``/``TypeLayout`` to recover struct and array offsets used by the memory model
 
 The analysis results (points-to sets) can be queried through the
 ``PointerAnalysis`` base class interface, which provides methods to:

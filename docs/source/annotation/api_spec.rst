@@ -90,24 +90,27 @@ Top-level loader that parses spec files (``config/ptr.spec``,
    #include "Annotation/APISpec.h"
 
    lotus::APISpec spec;
-   spec.loadFromDirectory("./config/");
-   spec.loadFromFile("./extra.spec");
+   std::string err;
+   spec.loadFile("config/ptr.spec", err);
+   spec.loadFile("config/modref.spec", err);
 
-   auto effects = spec.queryAllEffects("malloc");
-   auto modRef   = spec.queryModRef("memcpy");
-   auto pointers = spec.queryPointerEffects("fopen");
+   const lotus::FunctionSpec *mallocSpec = spec.get("malloc");
+   auto copies = spec.getCopies("memcpy");
+   auto modRefs = spec.getModRefs("memcpy");
 
 Usage
 -----
 
-Spec files use a text format with entries like::
+Spec files use a line-based text format with entries like::
 
-   function: malloc
-     effect: alloc Ret
+   # Allocation and copy effects (e.g. config/ptr.spec)
+   malloc ALLOC
+   fopen ALLOC
+   getcwd COPY Ret V Arg0 V
 
-   function: memcpy
-     effect: mod Arg1
-     effect: ref Arg2
+   # Mod/ref effects (e.g. config/modref.spec)
+   memcpy MOD Arg0 R
+   memcpy REF Arg1 R
 
 The loader parses these into the structured ``APISpec`` representation for use
 by alias analyses and checkers.

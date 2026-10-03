@@ -9,8 +9,9 @@ LotusAA is the **native alias analysis framework** of Lotus. It provides a modul
 - **Field-sensitivity**: Tracks memory objects at the field/element level
 - **On-the-fly call graph construction**: Alternates between pointer analysis and call graph refinement
 - **Points-to graph representation**: Nodes represent memory objects and SSA values; edges represent points-to, load, store, and field relations
-- **Staged strong updates**: Tuna-style must-kill forests prune overwritten
-  stores before guarded heap histories are expanded
+- **Staged strong updates**: TUNA-style must-kill forests prune overwritten
+  stores before guarded heap histories are expanded (see
+  [Path-Sensitive Strong Updates](#path-sensitive-strong-updates))
 
 ## Architecture
 
@@ -49,19 +50,19 @@ The analysis alternates between:
 
 ## Usage
 
-LotusAA is typically not run as a standalone tool. Instead, it is selected via configuration:
-
-- Clam / Lotus front-ends can choose LotusAA as the primary AA engine
-- YAML configurations and command-line flags control whether LotusAA is enabled
-- When enabled, LotusAA registers itself with the AA wrapper so that all AA queries go through its results
-
-### Standalone Tool
+### Standalone tool
 
 ```bash
 lotus-alias-lotus-aa [options] <input bitcode file>
 ```
 
-### Configuration Options
+### As the program's alias-analysis backend
+
+- Lotus front-ends can choose LotusAA as the primary AA engine
+- YAML configurations and command-line flags control whether LotusAA is enabled
+- When enabled, LotusAA registers itself with the AA wrapper so that all AA queries go through its results
+
+### Configuration options
 
 - `lotus_restrict_inline_depth`: Max inter-procedural inlining depth (default: unbounded via Falcon-compatible sentinel `-2`)
 - `lotus_restrict_cg_size`: Max indirect call targets (default: 5)
@@ -74,7 +75,7 @@ lotus-alias-lotus-aa [options] <input bitcode file>
 
 LotusAA implements the staged load/store matching algorithm from *Efficient
 Strong Updates for Path Sensitive Data Dependence Analysis* (Guo and Zhang,
-ICSE 2026):
+ICSE 2026), whose released tool is named TUNA:
 
 1. `getAliasCondition` directly intersects guarded points-to targets to obtain
    the may-alias condition of a load/store pair.
@@ -87,6 +88,9 @@ ICSE 2026):
 5. Only forest roots are expanded by the existing guarded heap walker. This
    retains LotusAA's summary, undef, and confidence handling while avoiding
    conditions for stores already proven dead.
+
+Here `TUNA` refers to the ICSE 2026 tool; it is unrelated to the SMT
+front-end under `lib/Solvers/SMT/TUNA/`, which happens to share the name.
 
 The optimization follows LotusAA's existing treatment of cyclic CFG regions:
 only instructions numbered by the framework's acyclic topological traversal

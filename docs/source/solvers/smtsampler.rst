@@ -73,59 +73,39 @@ Uses the SymAbs library to build linear abstractions (Zone or Octagon domains).
 - ``CoordinateWalk`` - coordinate axis random walk
 - ``ConstraintWalk`` - constraint-based random walk
 
-QuickSampler Usage
-------------------
-
-Command-line interface (if built as a tool):
-
-.. code-block:: bash
-
-   quicksampler input.cnf -samples 100 -timeout 60
-
-**Output Format**::
-
-   3: 1010110101
-   5: 0011101010
-   ...
-
-Each line: ``<number_of_mutations>: <bitstring>``
-
-IntervalSampler Usage
-----------------------
-
-.. code-block:: bash
-
-   intervalsampler input.smt2 -samples 1000
-
-RegionSampler Usage
--------------------
-
-.. code-block:: bash
-
-   regionsampler input.smt2 -domain zone -walk hitandrun -samples 500
-
-**Options**:
-- ``-domain``: ``zone`` or ``octagon``
-- ``-walk``: ``hitandrun``, ``ballwalk``, ``diknwalk``, ``coordinate``, ``constraint``
-- ``-samples``: Number of samples to generate
-
 C++ API Usage
 -------------
+
+The samplers are invoked through functions declared in ``Solvers/SMT/SMTSampler/SMTSampler.h``:
 
 .. code-block:: cpp
 
    #include "Solvers/SMT/SMTSampler/SMTSampler.h"
 
-   using namespace z3;
+   // Run mutation-based sampling on a DIMACS CNF formula;
+   // writes samples to <input>.samples
+   lotus::SMTSampler::runQuickSampler("formula.cnf", 100, 60.0);
 
-   context ctx;
-   expr x = ctx.bv_const("x", 8);
-   expr y = ctx.bv_const("y", 8);
-   expr phi = (x > 0) && (y < 10) && (x + y < 20);
+   // Run interval-based sampling on an SMT-LIB file or directory;
+   // appends summary statistics to res.log
+   lotus::SMTSampler::runIntervalSampler("problem.smt2", 1000, 30000.0);
 
-   // Create and use sampler
-   auto sampler = createQuickSampler(ctx);
-   auto samples = sampler->sample(phi, 100);
+   // Run region-based random-walk sampling on an SMT-LIB file;
+   // writes samples to <input>.abs.samples
+   lotus::SMTSampler::runRegionSampler(
+       "problem.smt2",
+       500,
+       30000.0,
+       lotus::SMTSampler::Domain::OCTAGON,
+       lotus::SMTSampler::Walk::HIT_AND_RUN);
+
+**QuickSampler Output Format** (in ``<input>.samples``)::
+
+   3: 1010110101
+   5: 0011101010
+   ...
+
+Each line contains ``<number_of_mutations>: <bitstring>``.
 
 Related Work
 ------------

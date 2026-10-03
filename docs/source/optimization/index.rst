@@ -43,7 +43,7 @@ custom optimization passes.
 Scalar passes
 -------------
 
-``lib/Optimization/Scalar/`` currently builds ``CanaryOptimizationScalar`` from
+``lib/Optimization/Scalar/`` builds ``CanaryOptimizationScalar`` from
 four passes:
 
 - ``AggressiveInliner`` (legacy pass name ``ainline``)
@@ -73,8 +73,8 @@ See :doc:`ip` for prerequisites, pass names, and behavior.
 Partial evaluation
 ------------------
 
-``lib/Optimization/PartialEvaluation/`` contains the historical LLPE engine,
-ported to LLVM 14.x and built as ``CanaryPE``. It provides the ``llpe-analysis``
+``lib/Optimization/PartialEvaluation/`` contains the LLPE engine,
+built as ``CanaryPE``. It provides the ``llpe-analysis``
 and ``llpe`` legacy passes plus supporting infrastructure for specialization,
 symbolic reasoning, and committed IR rewriting.
 

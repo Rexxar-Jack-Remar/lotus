@@ -5,8 +5,8 @@ Overview
 ========
 
 The **Newtonian Program Analysis (NPA)** engine in ``lib/Dataflow/NPA``
-implements advanced, research-oriented techniques for compositional and
-recurrence-based data-flow reasoning.
+solves systems of recursive transfer-function equations by Newton iteration,
+supporting compositional and recurrence-based data-flow reasoning.
 It is designed for **numeric** and **relational** analyses that go
 beyond classical bit-vector or IFDS/IDE formulations.
 
@@ -146,7 +146,7 @@ semiring :math:`(a,b) \otimes_p (a',b') = (a' \otimes a, b \otimes b')`,
 :math:`R((w_1,w_2)) = w_1 \otimes w_2`; (2) solve the left-linear system
 (e.g. by worklist or path expressions); (3) **project** back via :math:`R`.
 The paired structure maintains the mirrored correlation of left/right
-coefficients. The implementation uses ``TensorProductDomain`` and
+coefficients. The implementation uses ``TensorProductLift`` and
 ``solve_linear_tensor_impl`` when the system has LCFL structure (Concat/Star).
 
 ``Star`` is the paper-faithful Kleene-star construct used by Newton/tensor
@@ -178,7 +178,7 @@ NPA supports both **distributive** and **non-distributive** program analyses:
   (:math:`a \cdot (b + c) \sqsupseteq a \cdot b + a \cdot c`). In this case, the least
   fixed point is an **overapproximation** of the JOP solution, but still provides a
   sound analysis result. In-tree clients such as constant propagation and interval
-  analysis use ``SummaryTransformerDomain`` as NPA's current abstract-summary path
+  analysis use ``TransformerSummary`` as NPA's current abstract-summary path
   for this fragment.
 
 Implementation Layout

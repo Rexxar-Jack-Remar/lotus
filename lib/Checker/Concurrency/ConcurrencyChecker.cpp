@@ -29,6 +29,9 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
 
   // Register bug types with BugReportMgr (shared pattern)
   BugReportMgr &mgr = BugReportMgr::get_instance();
+  m_starvationTypeId = mgr.register_bug_type(
+      "Starvation", BugDescription::BI_MEDIUM, BugDescription::BC_PERFORMANCE,
+      "Blocking or arbitrary callbacks in restricted concurrency contexts");
   m_dataRaceTypeId =
       mgr.register_bug_type("Data Race", BugDescription::BI_HIGH,
                             BugDescription::BC_SECURITY, "CWE-362");
@@ -161,6 +164,7 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
 void ConcurrencyChecker::runAnalyses() {
   // The previous checker may retain a non-owning pointer to the sparse solver.
   m_dataRaceChecker.reset();
+  m_starvationChecker.reset();
   m_mhpAnalysis = nullptr;
   m_mhpAnalysisStorage.reset();
   m_locksetAnalysis.reset();
@@ -177,6 +181,7 @@ void ConcurrencyChecker::runAnalyses() {
   m_stats.mhpPairs = 0;
   m_stats.locksAnalyzed = 0;
   m_stats.cudaBugsFound = 0;
+  m_stats.starvationBugsFound = 0;
   m_stats.sparseInterferenceEdges = 0;
   m_stats.sparsePointsToFacts = 0;
   m_stats.sparseMemoryRegions = 0;
@@ -198,7 +203,7 @@ void ConcurrencyChecker::runAnalyses() {
                  m_checkAtomicityViolations || m_checkCondVars;
   bool needLockSet = m_checkDataRaces || m_checkDeadlocks ||
                      m_checkAtomicityViolations || m_checkCondVars ||
-                     m_checkLockMismatches;
+                     m_checkLockMismatches || m_checkStarvation;
   bool needEscape = m_checkDataRaces;
   bool needThreadLocal = m_checkDataRaces;
   bool needStaticSharing = m_checkDataRaces;
@@ -390,6 +395,8 @@ void ConcurrencyChecker::runAnalyses() {
 }
 
 void ConcurrencyChecker::runChecks() {
+  if (m_checkStarvation)
+    checkStarvation();
   if (m_checkDataRaces) {
     checkDataRaces();
   }
@@ -441,6 +448,20 @@ void ConcurrencyChecker::checkDeadlocks() {
       reportBug(report, m_deadlockTypeId);
     }
   }
+}
+
+void ConcurrencyChecker::checkStarvation() {
+  m_stats.starvationBugsFound = 0;
+  if (!m_locksetAnalysisView)
+    return;
+  m_starvationChecker =
+      std::make_unique<StarvationChecker>(m_module, *m_locksetAnalysisView);
+  for (const auto &name : m_starvationBlockingFunctions)
+    m_starvationChecker->addBlockingFunction(name);
+  auto reports = m_starvationChecker->checkStarvation();
+  m_stats.starvationBugsFound = reports.size();
+  for (const auto &report : reports)
+    reportBug(report, m_starvationTypeId);
 }
 
 void ConcurrencyChecker::checkAtomicityViolations() {

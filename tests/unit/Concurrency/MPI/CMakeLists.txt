@@ -2,8 +2,13 @@
 
 lotus_collect_test_sources(concurrency_tests
   MPIAnalysisTest.cpp
-  MPIAnalysisTest_Collectives.cpp
-  MPIAnalysisTest_RMA.cpp
+  MPIOperationLoweringTest.cpp
+  MPICollectiveMatchingTest.cpp
+  MPICommunicatorLifecycleTest.cpp
+  MPISemanticDescriptorsTest.cpp
+  MPIRMAEpochsTest.cpp
+  MPIChannelAndDiagnosticsTest.cpp
+  MPIRMALifecycleAndProtocolTest.cpp
   MPIAnalysisTest_Communicators.cpp
   MPIAnalysisTest_State.cpp)
 

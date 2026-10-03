@@ -33,6 +33,18 @@ public:
   using Value = ExtendedTaintValue;
 
   IDEExtendedTaintAnalysis();
+  explicit IDEExtendedTaintAnalysis(const TaintConfig &model);
+
+  const llvm::Value *sparse_fact_value(const Fact &fact) const override {
+    return fact;
+  }
+  bool is_identity_flow(const llvm::Instruction *inst,
+                        const llvm::Instruction *succ,
+                        const Fact &fact) const override;
+  bool is_identity_edge(const llvm::Instruction *, const llvm::Instruction *,
+                        const Fact &) const override {
+    return true;
+  }
 
   Fact zero_fact() const override { return nullptr; }
   FactSet normal_flow(const llvm::Instruction *stmt,
@@ -85,8 +97,8 @@ public:
                                      const Fact &tgt_fact) override;
 
 private:
-  std::unordered_set<std::string> m_sources;
-  std::unordered_set<std::string> m_sanitizers;
+  std::shared_ptr<const TaintConfig> m_model;
+  const TaintConfig &model() const;
 
   bool is_source_function(const llvm::Function *callee) const;
   bool is_sanitizer_function(const llvm::Function *callee) const;

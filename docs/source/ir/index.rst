@@ -1,7 +1,8 @@
 Intermediate Representations
 ============================
 
-This section covers the intermediate representations used in Lotus.
+Lotus provides intermediate representations for control-flow, dependence, and
+value-flow analyses across program abstractions.
 
 .. toctree::
    :maxdepth: 2
@@ -11,6 +12,7 @@ This section covers the intermediate representations used in Lotus.
    ssi
    vssa
    svfg
+   usetracessa
    gvfg
    gsa
    shadowmemssa

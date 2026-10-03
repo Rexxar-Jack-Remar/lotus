@@ -13,6 +13,8 @@
 
 #include "Alias/InclusionBased/TPA/PointerAnalysis/MemoryModel/Type/PointerLayout.h"
 
+#include <mutex>
+
 namespace tpa {
 
 const PointerLayout *PointerLayout::getEmptyLayout() { return emptyLayout; }
@@ -23,6 +25,8 @@ const PointerLayout *PointerLayout::getSinglePointerLayout() {
 }
 
 const PointerLayout *PointerLayout::getLayout(SetType &&set) {
+  static std::mutex mutex;
+  std::lock_guard<std::mutex> lock(mutex);
   auto itr = layoutSet.insert(PointerLayout(std::move(set))).first;
   return &(*itr);
 }

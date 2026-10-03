@@ -4,13 +4,17 @@
 
 namespace tpa {
 
-PtsSet::PtsSetSet PtsSet::existingSet;
-const PtsSet::SetType *PtsSet::emptySet =
-    &*(existingSet.insert(PtsSet::SetType()).first);
+std::array<PtsSet::Shard, 32> PtsSet::existingSets;
+const PtsSet::SetType *PtsSet::emptySet = uniquifySet(SetType{});
 
 const PtsSet::SetType *PtsSet::uniquifySet(SetType &&set) {
   if (set.count(MemoryManager::getUniversalObject()))
     set = {MemoryManager::getUniversalObject()};
+
+  auto &shard =
+      existingSets[util::ContainerHasher<SetType>{}(set) % existingSets.size()];
+  std::lock_guard<std::mutex> lock(shard.mutex);
+  auto &existingSet = shard.sets;
 
   auto itr = existingSet.find(set);
   if (itr == existingSet.end()) {
@@ -21,7 +25,7 @@ const PtsSet::SetType *PtsSet::uniquifySet(SetType &&set) {
   return &*itr;
 }
 
-PtsSet PtsSet::insert(const MemoryObject *obj) {
+PtsSet PtsSet::insert(const MemoryObject *obj) const {
   if (pSet->count(obj))
     return *this;
 
@@ -31,7 +35,7 @@ PtsSet PtsSet::insert(const MemoryObject *obj) {
   return PtsSet(uniquifySet(std::move(newSet)));
 }
 
-PtsSet PtsSet::merge(const PtsSet &rhs) {
+PtsSet PtsSet::merge(const PtsSet &rhs) const {
   // The easy case
   if (pSet == rhs.pSet)
     return *this;
@@ -39,6 +43,14 @@ PtsSet PtsSet::merge(const PtsSet &rhs) {
     return rhs;
   if (rhs.pSet == emptySet)
     return *this;
+  // Sets containing Universal normalize to this singleton. Preserve the
+  // lattice join without allocating a temporary vector or taking an intern
+  // lock.
+  const auto *universal = MemoryManager::getUniversalObject();
+  if (pSet->size() == 1 && pSet->front() == universal)
+    return *this;
+  if (rhs.pSet->size() == 1 && rhs.pSet->front() == universal)
+    return rhs;
 
   SetType newSet(*pSet);
   newSet.merge(*rhs.pSet);

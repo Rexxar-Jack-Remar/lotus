@@ -25,6 +25,11 @@ static cl::opt<std::string>
                   cl::Required,
                   cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 enum class RunMode { Analysis, Check };
+static cl::list<std::string> StarvationBlockingFunctions(
+    "concur.starvation-blocking-functions",
+    cl::desc("Additional blocking function names (comma separated)"),
+    cl::CommaSeparated,
+    cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<RunMode>
     Mode("concur.mode", cl::desc("Concurrency engine run mode"),
          cl::values(clEnumValN(RunMode::Analysis, "analysis",
@@ -123,6 +128,9 @@ int runConcurrencyCheckerTool(const char *argv0) {
   checker.enableOpenMPCheck(selected.count("openmp"));
   checker.enableMPICheck(selected.count("mpi"));
   checker.enableCUDACheck(selected.count("cuda"));
+  checker.enableStarvationCheck(selected.count("starvation"));
+  for (const auto &name : StarvationBlockingFunctions)
+    checker.addStarvationBlockingFunction(StringRef(name).trim().str());
   checker.enableSparseFlowSensitiveRefinement(SparseFlowSensitive);
   checker.enableMultiStageSlicing(MultiStageSlicing);
   switch (MemoryPartition) {

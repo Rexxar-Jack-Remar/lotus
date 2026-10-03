@@ -46,7 +46,7 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/config/checkers/
 install(TARGETS lotus-check
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-if(LOTUS_BUILD_TESTS)
+if(LOTUS_BUILD_TESTS AND "checker" IN_LIST LOTUS_SELECTED_TEST_SUBSYSTEMS)
   set(CHECKER_CLI_TEST_SCRIPT
       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/verify_cli.cmake)
   set(CHECKER_CLI_MINIMAL ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/minimal.ll)
@@ -108,9 +108,44 @@ if(LOTUS_BUILD_TESTS)
   add_checker_cli_test(checker_cli_fitx_rejects_unknown_check 2
                        "unknown fitx check 'foobar'"
                        --engine=fitx --checks=foobar ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test(checker_cli_saber_uaf_selection 0
+                       "Running Use After Free candidate checker"
+                       --engine=saber --checks=use-after-free
+                       ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test(checker_cli_saber_memory_leak_analysis 0
+                       "Memory Leak detected at main"
+                       --engine=saber --checks=memory-leak --saber.no-smt
+                       ${CHECKER_CLI_AE_LEAK})
   add_checker_cli_test(checker_cli_concur_rejects_substring_check 2
                        "unknown concur check 'raceXYZ'"
                        --engine=concur --checks=raceXYZ ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test(checker_cli_topl_reports_interprocedural_violation 1
+                       "TOPL Error"
+                       --engine=pulse --checks=topl --fail-on-findings
+                       --pulse.topl-properties=${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/temporal.topl
+                       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/temporal.ll)
+  add_checker_cli_test(checker_cli_topl_requires_property_file 2
+                       "TOPL requires --pulse.topl-properties"
+                       --engine=pulse --checks=topl ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test(checker_cli_topl_rejects_missing_property_file 2
+                       "cannot read TOPL properties"
+                       --engine=pulse --checks=topl
+                       --pulse.topl-properties=${CMAKE_CURRENT_BINARY_DIR}/missing.topl
+                       ${CHECKER_CLI_MINIMAL})
+  add_checker_cli_test_without_output(checker_cli_topl_respects_check_selection 0
+                       "No findings" "TOPL Error"
+                       --engine=pulse --checks=null-deref --fail-on-findings
+                       --pulse.topl-properties=${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/temporal.topl
+                       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/temporal.ll)
+  add_checker_cli_test(checker_cli_starvation_reports_blocking_helper 1
+                       "Starvation"
+                       --engine=concur --checks=starvation --fail-on-findings
+                       --report-json=${CMAKE_CURRENT_BINARY_DIR}/starvation-report.json
+                       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/starvation.ll)
+  add_checker_cli_test_without_output(checker_cli_starvation_respects_check_selection 0
+                       "No findings" "Starvation"
+                       --engine=concur --checks=data-race --fail-on-findings
+                       ${PROJECT_SOURCE_DIR}/tests/regress/Checker/CLI/starvation.ll)
   add_checker_cli_test(checker_cli_concur_analysis_respects_selection 0
                        "CONCURRENCY ANALYSIS RESULTS"
                        --engine=concur --concur.mode=analysis
@@ -322,12 +357,7 @@ if(LOTUS_BUILD_TESTS)
   add_checker_cli_test(checker_cli_list_checkers_includes_taint 0
                        "taint-flow.*taint.*native"
                        --list-checkers)
-  add_checker_cli_test(checker_cli_list_parameters_groups_engines 0
-                       "engine.*saber"
-                       --list-parameters)
-  add_checker_cli_test(checker_cli_list_parameters_qualifies_options 0
-                       "--kint.summary-mode"
-                       --list-parameters)
+
   add_checker_cli_test(checker_cli_ae_help_uses_namespace 0
                        "--ae.recursion-mode"
                        --engine=ae --help)

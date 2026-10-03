@@ -122,18 +122,21 @@ Available Options
   
   Counts how many functions a function pointer may point to.
 
-* ``-no-function-type-check``
-  
-  If set, disables function type checking when resolving pointer calls.
-  Otherwise, only FuncTy-compatible functions can be aliased with a function
-  pointer. Two functions f1 and f2 are FuncTy-compatible if:
-  
-  - Both or neither are variadic functions
-  - Both or neither have a non-void return value
-  - They have the same number of parameters
-  - Parameters have the same FuncTy store sizes
-  - There is an explicit cast operation between FuncTy(f1) and FuncTy(f2)
-    (works with ``-with-function-cast-comb`` option)
+* ``-function-type-check-level=<0-4>``
+
+  Selects how strict function type compatibility is when resolving pointer
+  calls (default ``4``):
+
+  - ``4``: equivalent function types
+  - ``3``: same number of parameters and same store size of each parameter
+  - ``2``: same number of parameters, comparing only pointer/integer parameters
+  - ``1``: same number of parameters
+  - ``0``: no compatibility check at all
+
+  FuncTy compatibility also requires that both or neither function is
+  variadic, that both or neither has a non-void return value, and that
+  ``FuncTy(f1)`` and ``FuncTy(f2)`` cast to each other when
+  ``-with-function-cast-comb`` is set.
 
 * ``-dot-dyck-callgraph``
   

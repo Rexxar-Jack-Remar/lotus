@@ -45,7 +45,7 @@ concrete path witness. Do not reinterpret `upper_bound` as exact reachability.
 
 Header: `CFL/InterleavedDyck/LCL/Solver.h`.
 Library: `CanaryInterleavedDyckLCL`.
-Executable: `lotus-cfl-interleaved-dyck-lcl`.
+Executable: `lotus-cfl-interleaved-dyck lcl`.
 
 ```cpp
 #include "CFL/InterleavedDyck/LCL/Solver.h"
@@ -175,8 +175,7 @@ The CLI reuses the existing Core DOT reader; it is not a general Graphviz
 parser. Use one edge per line and labels such as `op--7`, `cp--7`, `ob--9`,
 `cb--9`, or `normal`/`eps`/`epsilon`. The existing parser does not register
 standalone vertex declarations. Represent isolated vertices through
-`Graph::addVertex`, or use a neutral self-edge in CLI input. The patch does not
-change Core's parser or other engines.
+`Graph::addVertex`, or use a neutral self-edge in CLI input.
 
 ## Complexity
 
@@ -210,7 +209,7 @@ and options, then build:
 ```sh
 cmake -S . -B build -DLOTUS_BUILD_TESTS=ON
 cmake --build build --target CanaryInterleavedDyckLCL \
-  lotus-cfl-interleaved-dyck-lcl interleaved_dyck_lcl_test
+  lotus-cfl-interleaved-dyck lcl interleaved_dyck_lcl_test
 ctest --test-dir build -R interleaved_dyck_lcl --output-on-failure
 ```
 

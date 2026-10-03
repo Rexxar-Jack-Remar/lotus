@@ -1,6 +1,6 @@
 # TODO: Following the code of clam to add the tests in tests/clam
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.18)
 find_package(LLVM REQUIRED CONFIG)
 # GTest should already be found or downloaded by FindGTest.cmake in parent CMakeLists.txt
 # Try find_package, but if targets already exist (from add_subdirectory), that's fine too
@@ -18,8 +18,18 @@ set(LOTUS_UNIT_TEST_TIMEOUT 60 CACHE STRING
 set(LOTUS_TEST_DISCOVERY_TIMEOUT 60 CACHE STRING
     "Default timeout in seconds for the gtest_discover_tests POST_BUILD discovery step")
 
+# Analyses load default specs relative to the test working directory. Keep
+# out-of-tree test builds independent of the source directory's parent layout.
+foreach(spec ptr modref taint)
+    configure_file(${PROJECT_SOURCE_DIR}/config/${spec}.spec
+        ${CMAKE_BINARY_DIR}/config/${spec}.spec COPYONLY)
+endforeach()
+
 # Add unit test subdirectory
 add_subdirectory(unit)
+add_test(NAME build_selection
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildSelectionTest.cmake)
+set_tests_properties(build_selection PROPERTIES LABELS "lotus;unit;build")
 
 # Note: Individual unit tests are registered in their respective subdirectories under unit/
 
@@ -31,8 +41,11 @@ add_custom_target(run_all_tests
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
-# Custom target to run only unit tests
-add_custom_target(run_unit_tests 
+# Custom target to run only unit tests.
+# Depends on lotus_unit_tests so the test binaries are (re)built first when
+# driving `cmake --build <dir> --target run_unit_tests`.
+add_custom_target(run_unit_tests
+    DEPENDS lotus_unit_tests
     COMMAND ${CMAKE_CTEST_COMMAND} -L unit --output-on-failure
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )

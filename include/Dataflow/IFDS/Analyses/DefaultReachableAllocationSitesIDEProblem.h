@@ -164,10 +164,11 @@ protected:
     if (!ptr || !ptr->getType()->isPointerTy()) {
       return false;
     }
-    if (!this->m_alias_analysis || !this->m_alias_analysis->isInitialized()) {
+    auto *aliases = this->alias_analysis();
+    if (!aliases || !aliases->isInitialized()) {
       return false;
     }
-    return this->m_alias_analysis->getPointsToSet(ptr, points_to);
+    return aliases->getPointsToSet(ptr, points_to);
   }
 
   bool may_points_to(const llvm::Value *pointer, const llvm::Value *target,

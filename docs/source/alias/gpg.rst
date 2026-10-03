@@ -18,11 +18,13 @@ Implementation
 
 The implementation includes:
 
-- TS and SS GPU composition and maximal GPU reduction;
+- target-source (TS) and source-source (SS) composition of generalized
+  points-to updates (GPUs), plus maximal GPU reduction;
 - boundary definitions and upwards-exposed locations;
 - reaching-GPU analyses with and without barrier blocking;
 - queued compositions, strong and weak updates, and dead-GPU elimination;
-- coherent GPB coalescing and control-flow minimization;
+- coherent generalized points-to block (GPB) coalescing and control-flow
+  minimization;
 - allocation-site heap abstraction and k-limited field-sensitive indirection
   lists;
 - bottom-up call inlining and fixed-point refinement of recursive SCCs;
@@ -43,13 +45,14 @@ resolution.
 Relationship to the GCC implementation
 --------------------------------------
 
-The LLVM implementation preserves the original analysis pipeline rather than
-replacing it with a conventional Andersen solver. GIMPLE pointer assignments
+The LLVM implementation keeps the analysis pipeline of the reference GPG
+implementation instead of replacing it with a conventional Andersen solver.
+GIMPLE pointer assignments
 and calls correspond to GPUs produced from LLVM instructions, GCC basic blocks
 correspond to GPBs built from the LLVM CFG, and LLVM's SSA/use-def and
 dominator information replace the GCC-specific accessors used by blocking.
 The subsequent reaching-GPU, composition, reduction, coalescing, bottom-up
-summary, recursive-SCC, and call-graph-refinement phases retain the GPG
+summary, recursive-SCC, and call-graph-refinement phases keep the same
 structure.
 
 Usage

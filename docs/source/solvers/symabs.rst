@@ -99,23 +99,21 @@ C++ API Usage
 .. code-block:: cpp
 
    #include "Solvers/SMT/SymAbs/SymbolicAbstraction.h"
+   #include <z3++.h>
 
-   using namespace z3;
-   using namespace SymAbs;
-
-   context ctx;
-   expr x = ctx.bv_const("x", 8);
-   expr y = ctx.bv_const("y", 8);
+   z3::context ctx;
+   z3::expr x = ctx.bv_const("x", 8);
+   z3::expr y = ctx.bv_const("y", 8);
 
    // Build a formula
-   expr phi = (x >= 0) && (x <= 10) && (y >= 0) && (y <= 20);
+   z3::expr phi = (x >= 0) && (x <= 10) && (y >= 0) && (y <= 20);
 
-   // Compute abstraction
-   auto zone = OctagonAbstraction::create(phi);
+   // Compute octagonal abstraction constraints
+   auto oct_constraints = SymAbs::alpha_oct_V(phi, {x, y});
 
-   // Query abstract domain
-   auto max_x = zone.maximum(x);
-   auto bounds = zone.getBounds(x);
+   // Compute bounds via linear expression maximization/minimization
+   auto max_x = SymAbs::maximum(phi, x);
+   auto min_x = SymAbs::minimum(phi, x);
 
 When to Use SymAbs
 ------------------

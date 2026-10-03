@@ -40,6 +40,13 @@ public:
   }
 
   bool empty() const { return workList.empty(); }
+
+  std::vector<ProgramPoint> peek(std::size_t limit) const {
+    std::vector<ProgramPoint> result;
+    for (const auto &pair : workList.peek(limit))
+      result.emplace_back(pair.first.getContext(), pair.second);
+    return result;
+  }
 };
 
 struct PriorityComparator {

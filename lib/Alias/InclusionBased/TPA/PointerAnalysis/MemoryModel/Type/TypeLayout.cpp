@@ -11,6 +11,8 @@
 
 #include "Alias/InclusionBased/TPA/PointerAnalysis/MemoryModel/Type/TypeLayout.h"
 
+#include <mutex>
+
 namespace tpa {
 
 const TypeLayout *
@@ -22,6 +24,8 @@ TypeLayout::getTypeLayout(size_t s, std::initializer_list<ArrayTriple> a,
 
 const TypeLayout *TypeLayout::getTypeLayout(size_t size, const ArrayLayout *a,
                                             const PointerLayout *p) {
+  static std::mutex mutex;
+  std::lock_guard<std::mutex> lock(mutex);
   assert(a != nullptr && p != nullptr);
 
   auto itr = typeSet.insert(TypeLayout(size, a, p)).first;

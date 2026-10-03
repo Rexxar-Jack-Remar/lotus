@@ -17,8 +17,8 @@ Use these passes when you need IR that is easier for analyses and tools to consu
   initializers easier to reason about.
 - **Control-flow cleanup**: remove dead blocks, normalize loop latches, and give
   blocks stable names.
-- **Optimization helpers**: light-weight inlining and loop/vector transforms used
-  by ``ModuleOptimizer`` and custom pipelines.
+- **Specialized transforms**: lower vector and floating-point operations
+  for analysis or targeted environments.
 
 All passes live in ``lib/Transform`` and are exposed as standard LLVM passes.
 
@@ -97,41 +97,40 @@ Transformations that restructure and clean up control flow.
 - Prepare IR for analyses that assume canonical loop shapes.
 - Improve the stability of analysis results and debug dumps.
 
-Optimization and Pipeline Transforms
-------------------------------------
+Vector and Floating-Point Transforms
+-----------------------------------
 
-Passes that implement light-weight optimizations or orchestrate multiple transforms.
+Transformations for vector operations and software floating-point emulation.
+For general module optimization pipelines, see
+:doc:`../optimization/pass_ordering`.
 
 **Location**: ``lib/Transform``
 
 **Main passes**:
 
-- **ModuleOptimizer** – Driver pass that runs a sequence of Lotus transforms and
-  LLVM optimizations on a module.
 - **SoftFloat** – Replace hardware floating-point operations with software implementations.
 - **UnrollVectors** – Unroll short vector operations when profitable.
-- **Unrolling** – Loop unrolling transforms for selected loops.
-- **AInliner** – Aggressive inliner tuned for analysis-friendly IR.
 
 **Typical use cases**:
 
-- Build an analysis-friendly optimization pipeline before running CLAM, SymAbsAI,
-  or alias analyses.
-- Experiment with different levels of inlining and loop/vector transformations.
+- Lower vector operations prior to analyses that do not model vector instructions.
 - Replace floating-point operations in environments without hardware FP support.
 
 **Pipeline usage example (C\+\+)**:
 
 .. code-block:: cpp
 
-   #include <Transform/ModuleOptimizer.h>
-   #include <Transform/UnrollVectors.h>
+   #include <Transform/LowerSelect.h>
+   #include <Transform/MergeReturn.h>
+   #include <Transform/MergeGEP.h>
 
    llvm::Module &M = ...;
 
-   ModuleOptimizer Optimizer;
-   UnrollVectors VectorUnroller;
+   LowerSelect SelectLowerer;
+   MergeReturn ReturnMerger;
+   MergeGEP GEPMerger;
 
    bool Changed =
-       Optimizer.runOnModule(M) ||
-       VectorUnroller.runOnModule(M);
+       SelectLowerer.runOnModule(M) ||
+       ReturnMerger.runOnModule(M) ||
+       GEPMerger.runOnModule(M);

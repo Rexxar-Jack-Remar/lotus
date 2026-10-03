@@ -4,8 +4,7 @@ Spectre Cache Analysis
 Cache speculation analysis for detecting Spectre vulnerabilities related to
 cache timing side-channels.
 
-This page documents the dedicated ``lib/Security/Spectre`` subsystem inside
-Lotus's unified security analysis tree.
+The ``lib/Security/Spectre`` subsystem implements speculative cache analysis.
 
 **Headers**: ``include/Security/Spectre``
 

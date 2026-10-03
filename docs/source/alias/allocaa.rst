@@ -46,9 +46,11 @@ Strengths and Limitations
 Usage
 =====
 
-AllocAA is exposed through the generic AA wrapper and via dedicated tools.
+AllocAA is exposed through the generic AA wrapper (``AliasAnalysisWrapper``)
+and can be selected from drivers that take an AA configuration, such as
+``lotus-check --taint.aa=alloc-aa``.
 In most cases you do not run it directly; instead you enable it in the
 pass pipeline (e.g., through the Lotus AA driver or Clam configuration).
 
-AllocAA is integrated as LLVM ModulePass for basic alias queries.
+AllocAA is a module-scoped query object used for basic alias queries.
 

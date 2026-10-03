@@ -9,13 +9,16 @@ set(Saber_SOURCES
   ProgSlice.cpp
   LeakChecker.cpp
   DoubleFreeChecker.cpp
+  UseAfterFreeChecker.cpp
   FileChecker.cpp
   SaberCheckerAPI.cpp
   Z3Expr.cpp
 )
 
 add_library(Saber STATIC ${Saber_SOURCES})
-target_compile_definitions(Saber PRIVATE USE_Z3)
+# Public Saber headers contain Z3Expr fields whose layout depends on USE_Z3.
+# Consumers constructing Saber checkers must use the same definition.
+target_compile_definitions(Saber PUBLIC USE_Z3)
 target_link_libraries(Saber
   PUBLIC
     SVFG

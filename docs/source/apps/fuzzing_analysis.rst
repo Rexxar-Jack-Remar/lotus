@@ -17,12 +17,9 @@ distance and target-discovery analyses used by the Lotus directed fuzzing stack.
   target instructions.
 - ``DAFLAnalysis`` reads target input and produces optional block weights.
 
-These are the strongest source-backed pieces of the fuzzing stack today. The
-compiler and linker plugin directories are documented separately, but the active
-analysis layer is the part clearly wired into ``lib/Fuzzing/CMakeLists.txt``.
-
-These analyses are consumed by the compiler and linker plugins documented in
-:doc:`aflgo_compiler` and :doc:`aflgo_linker`.
+The analysis library is built by ``lib/Fuzzing/CMakeLists.txt``, while the
+compiler and linker plugin directories provide complementary instrumentation
+passes documented in :doc:`aflgo_compiler` and :doc:`aflgo_linker`.
 
 Pipeline guidance
 -----------------

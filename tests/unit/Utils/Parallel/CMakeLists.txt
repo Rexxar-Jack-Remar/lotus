@@ -2,71 +2,22 @@ lotus_collect_test_sources(utils_tests
   PipelineSchedulerTest.cpp
   PipelineSchedulerTimeoutTest.cpp
   ParallelSchedulerPassTest.cpp
-  ThreadSafeTest.cpp)
+  ThreadSafeTest.cpp
+  ThreadPoolHarnessTest.cpp
+  PipelineSchedulerHarnessTest.cpp)
+if(LOTUS_ENABLE_CFL)
+  lotus_collect_test_sources(utils_tests ParallelTabulationHarnessTest.cpp)
+endif()
 
-add_executable(thread_pool_harness_test ThreadPoolHarnessTest.cpp)
-set_target_properties(thread_pool_harness_test PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-target_include_directories(thread_pool_harness_test PRIVATE ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
-target_link_libraries(thread_pool_harness_test lotus_test_harness_utils CanaryParallel)
-
-add_test(NAME thread_pool_harness_serial_test
-  COMMAND ${LOTUS_TEST_BIN_DIR}/thread_pool_harness_test -nworkers=0)
-set_tests_properties(thread_pool_harness_serial_test PROPERTIES
-  TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-  LABELS "lotus;component;utils;parallel"
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-
-add_test(NAME thread_pool_harness_parallel_test
-  COMMAND ${LOTUS_TEST_BIN_DIR}/thread_pool_harness_test -nworkers=2)
-set_tests_properties(thread_pool_harness_parallel_test PROPERTIES
-  TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-  LABELS "lotus;component;utils;parallel"
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-
-add_executable(parallel_tabulation_harness_test ParallelTabulationHarnessTest.cpp)
-set_target_properties(parallel_tabulation_harness_test PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-target_include_directories(parallel_tabulation_harness_test PRIVATE ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
-target_link_libraries(parallel_tabulation_harness_test
-  lotus_test_harness_utils
-  CanaryCSIndexFLARE)
-
-add_test(NAME parallel_tabulation_harness_serial_test
-  COMMAND ${LOTUS_TEST_BIN_DIR}/parallel_tabulation_harness_test -nworkers=0)
-set_tests_properties(parallel_tabulation_harness_serial_test PROPERTIES
-  TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-  LABELS "lotus;component;utils;parallel"
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-
-add_test(NAME parallel_tabulation_harness_parallel_test
-  COMMAND ${LOTUS_TEST_BIN_DIR}/parallel_tabulation_harness_test -nworkers=2)
-set_tests_properties(parallel_tabulation_harness_parallel_test PROPERTIES
-  TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-  LABELS "lotus;component;utils;parallel"
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-
-add_executable(pipeline_scheduler_harness_test PipelineSchedulerHarnessTest.cpp)
-set_target_properties(pipeline_scheduler_harness_test PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-target_include_directories(pipeline_scheduler_harness_test PRIVATE ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
-target_link_libraries(pipeline_scheduler_harness_test lotus_test_harness_utils CanaryParallel)
-
-add_test(NAME pipeline_scheduler_harness_parallel_test
-  COMMAND ${LOTUS_TEST_BIN_DIR}/pipeline_scheduler_harness_test -nworkers=2)
-set_tests_properties(pipeline_scheduler_harness_parallel_test PROPERTIES
+# The discovered GTest cases use the default zero-worker pool. Repeat the
+# worker-dependent harness cases with two real workers.
+string(CONCAT utils_parallel_harness_filter
+  "ThreadPoolHarnessTest.*:ParallelTabulationHarnessTest.*:"
+  "PipelineSchedulerHarnessTest.*")
+add_test(NAME utils_parallel_harness_workers
+  COMMAND $<TARGET_FILE:utils_tests> -nworkers=2
+    --gtest_filter=${utils_parallel_harness_filter})
+set_tests_properties(utils_parallel_harness_workers PROPERTIES
   TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
   LABELS "lotus;component;utils;parallel"
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

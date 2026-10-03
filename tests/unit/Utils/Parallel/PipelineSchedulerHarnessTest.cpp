@@ -338,10 +338,3 @@ TEST(PipelineSchedulerHarnessTest, QueuedTasksTimeoutWhenWorkersNeverFreeUp) {
 }
 
 } // namespace
-
-int main(int argc, char **argv) {
-  testing::InitGoogleTest(&argc, argv);
-  llvm::cl::ParseCommandLineOptions(argc, argv,
-                                    "PipelineScheduler harness\n");
-  return RUN_ALL_TESTS();
-}

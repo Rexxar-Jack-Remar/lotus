@@ -50,9 +50,10 @@ closing-edge tables. The tables are indexed by compact epsilon components,
 not all lifted states. Final Dyck component IDs are dense; closing transitions
 that repeat the last target of a source/label list do not allocate pool entries.
 
-Adaptive releases vertical state maps and parent data after labeling, releases
-sorting scratch before allocating the merge DSU, and constructs the horizontal
-arm only afterward. Counting-sort ranges use the height bound and compact
+Adaptive frees its temporary buffers between phases: vertical state maps and
+parent data are released after labeling, sorting scratch is released before
+the merge DSU is allocated, and the horizontal arm is built last. Counting-sort
+ranges use the height bound and compact
 component count. Both algorithms identify only the queried zero-state roots
 when producing their final vertex partitions.
 
@@ -105,9 +106,9 @@ Command line
 
 .. code-block:: console
 
-   cmake --build build --target lotus-cfl-interleaved-dyck-unary
-   build/bin/lotus-cfl-interleaved-dyck-unary --algorithm adaptive --stats bidirected.dot
-   build/bin/lotus-cfl-interleaved-dyck-unary --algorithm fixed-counter --stats bidirected.dot
+   cmake --build build --target lotus-cfl-interleaved-dyck
+   build/bin/lotus-cfl-interleaved-dyck unary --algorithm adaptive --stats bidirected.dot
+   build/bin/lotus-cfl-interleaved-dyck unary --algorithm fixed-counter --stats bidirected.dot
 
 ``--direct`` disables shared quotient sparsification. ``--shallow K`` applies
 only to Adaptive. ``--bidirect`` explicitly selects symmetrization, and output

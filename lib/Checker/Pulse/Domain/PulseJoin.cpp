@@ -534,6 +534,11 @@ PulseFormula PulseJoin::joinFormulas(const AbductiveDomain &lhs,
 std::optional<AbductiveDomain>
 PulseJoin::joinAbductive(const AbductiveDomain &lhs,
                          const AbductiveDomain &rhs) {
+  // Value-renaming joins would also need to rename temporal registers.
+  // Keep these temporal paths as separate disjuncts instead.
+  if (!lhs.getToplHistory().events.empty() ||
+      !rhs.getToplHistory().events.empty())
+    return std::nullopt;
   PulseLogger::trace("Joining abductive domains");
   PulseLogger::incrementCounter("joins.performed");
 

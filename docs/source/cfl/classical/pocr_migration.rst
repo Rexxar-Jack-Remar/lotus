@@ -17,7 +17,8 @@ General solvers
    trees. Primary transitive arcs are registered before tree traversal;
    closure pairs are then queued as secondary facts. The ``X -> X A`` and
    ``X -> A X`` cases traverse the appropriate tree and prune a subtree when
-   its summary edge already exists, as in ``checkStree``/``checkPtree``.
+   its summary edge already exists, as in ``checkStree``/``checkPtree``
+   (the pruning helpers of the upstream POCR implementation).
    Structural identity is kept separate from semantic epsilon, so non-nullable
    cycles correctly derive reflexive pairs.
 

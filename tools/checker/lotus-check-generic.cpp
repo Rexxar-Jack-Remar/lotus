@@ -1,17 +1,14 @@
-#include "Checker/Framework/CheckerDriver.h"
 #include "Checker/Framework/BugReportMgr.h"
+#include "Checker/Framework/CheckerDriver.h"
 #include "Checker/Framework/CheckerRegistry.h"
 #include "Checker/Framework/CheckerSpecLoader.h"
 #include "Checker/Framework/ReportOptions.h"
 #include "Checker/Framework/Subcommands.h"
-#include "Checker/Framework/SuppressionManager.h"
 #include "Checker/Tooling/CheckerOptions.h"
 #include "Checker/Tooling/CheckerReport.h"
 #include "Checker/Tooling/CheckerToolEntrypoints.h"
 
 #include <array>
-#include <optional>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -20,8 +17,6 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/InitLLVM.h>
-#include <llvm/Support/Path.h>
-#include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Process.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
@@ -29,40 +24,10 @@
 
 using namespace llvm;
 
-static cl::OptionCategory GenericSelectionCategory(
-    "Generic Checker Selection Options",
-    "Options for selecting registry-backed declarative checkers");
-static cl::OptionCategory GenericExecutionCategory(
-    "Generic Checker Execution Options",
-    "Options for running the generic declarative checker driver");
-static cl::opt<std::string>
-    InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
-                  cl::value_desc("bitcode"), cl::init(""),
-                  cl::cat(GenericExecutionCategory),
-                  cl::sub(*cl::TopLevelSubCommand),
-                  cl::sub(lotus::checker::tooling::genericSubCommand()));
-static cl::opt<bool>
-    ListCheckers("list-checkers",
-                 cl::desc("List available checker ids and exit"),
-                 cl::cat(GenericSelectionCategory), cl::init(false),
-                 cl::sub(*cl::TopLevelSubCommand),
-                 cl::sub(lotus::checker::tooling::genericSubCommand()));
-static cl::opt<bool> ListParameters(
-    "list-parameters",
-    cl::desc("List global and engine-qualified parameters and exit"),
-    cl::cat(GenericSelectionCategory), cl::init(false),
-    cl::sub(*cl::TopLevelSubCommand));
-static cl::opt<std::string> CategoryFilter(
-    "generic.category", cl::desc("Run only checkers in the given category"),
-    cl::value_desc("category"), cl::init(""), cl::cat(GenericSelectionCategory),
-    cl::sub(*cl::TopLevelSubCommand),
-    cl::sub(lotus::checker::tooling::genericSubCommand()));
-static cl::opt<std::string> BuiltinSpecDir(
-    "generic.spec-dir",
-    cl::desc("Load declarative checker specs from this directory"),
-    cl::value_desc("dir"), cl::init(""), cl::cat(GenericExecutionCategory),
-    cl::sub(*cl::TopLevelSubCommand),
-    cl::sub(lotus::checker::tooling::genericSubCommand()));
+// ---------------------------------------------------------------------------
+// Engine descriptor table
+// ---------------------------------------------------------------------------
+
 namespace {
 
 struct EngineDescriptor {
@@ -93,7 +58,8 @@ const std::array<EngineDescriptor, 9> &engineDescriptors() {
        lotus::checker::tooling::pulseSubCommand, runPulseCheckerTool},
       {"fitx", "FiTx typestate analysis", lotus::checker::EngineKind::FiTx,
        lotus::checker::tooling::fitxSubCommand, runFiTxCheckerTool},
-      {"saber", "Sparse value-flow checking", lotus::checker::EngineKind::Saber,
+      {"saber", "Sparse value-flow checking",
+       lotus::checker::EngineKind::Saber,
        lotus::checker::tooling::saberSubCommand, runSaberCheckerTool},
       {"symex", "Symbolic execution", lotus::checker::EngineKind::SymExec,
        lotus::checker::tooling::symexSubCommand, runSymExCheckerTool},
@@ -101,340 +67,178 @@ const std::array<EngineDescriptor, 9> &engineDescriptors() {
   return descriptors;
 }
 
-const EngineDescriptor *findEngineDescriptor(StringRef name) {
-  for (const EngineDescriptor &descriptor : engineDescriptors()) {
-    if (descriptor.name == name) {
-      return &descriptor;
-    }
-  }
+const EngineDescriptor *findEngine(StringRef name) {
+  for (const auto &d : engineDescriptors())
+    if (d.name == name)
+      return &d;
   return nullptr;
 }
 
-bool isHelpFlag(StringRef arg) {
-  return arg == "-h" || arg == "--help" || arg == "--help-hidden" ||
-         arg == "--help-list" || arg == "--help-list-hidden";
-}
+bool isKnownEngine(StringRef name) { return findEngine(name) != nullptr; }
 
-bool isKnownCheckerSubcommand(StringRef arg) {
-  return findEngineDescriptor(arg) != nullptr;
-}
+/// Validate that all options are known to the target subcommand.
+/// Returns an error for the first unrecognized option found.
+Error validateOptions(ArrayRef<std::string> args) {
+  cl::SubCommand *sub = &*cl::TopLevelSubCommand;
+  if (args.size() > 1 && isKnownEngine(args[1]))
+    sub = &findEngine(args[1])->subcommand();
 
-std::optional<std::string> requestedSubcommand(int argc, char **argv) {
-  for (int i = 1; i < argc; ++i) {
-    StringRef arg(argv[i]);
-    if (arg == "--") {
-      return std::nullopt;
+  static const StringRef helpFlags[] = {"help", "help-hidden", "help-list",
+                                        "help-list-hidden", "version", "h"};
+  bool afterSentinel = false;
+  unsigned positionalCount = 0;
+  for (size_t i = 1; i < args.size(); ++i) {
+    StringRef a(args[i]);
+    // Skip the subcommand token inserted by normalization.
+    if (i == 1 && isKnownEngine(a))
+      continue;
+    if (a == "--") {
+      afterSentinel = true;
+      continue;
     }
-    if (!arg.empty() && arg[0] != '-') {
-      if (isKnownCheckerSubcommand(arg)) {
-        return arg.str();
-      }
-      return std::nullopt;
+    if (afterSentinel) {
+      ++positionalCount;
+      continue;
     }
+    if (!a.startswith("-") || a == "-") {
+      ++positionalCount;
+      continue;
+    }
+    StringRef spelling = a.startswith("--") ? a.drop_front(2) : a.drop_front(1);
+    spelling = spelling.split('=').first;
+    if (spelling.empty() || sub->OptionsMap.count(spelling))
+      continue;
+    if (llvm::is_contained(helpFlags, spelling))
+      continue;
+    StringRef prefix = a.startswith("--") ? "--" : "-";
+    return createStringError(inconvertibleErrorCode(),
+                             "Unknown command line argument '%s%s'.",
+                             prefix.str().c_str(),
+                             spelling.str().c_str());
   }
-  return std::nullopt;
-}
-
-bool helpRequested(int argc, char **argv) {
-  for (int i = 1; i < argc; ++i) {
-    if (StringRef(argv[i]) == "--") {
-      break;
-    }
-    if (isHelpFlag(argv[i])) {
-      return true;
-    }
+  if (positionalCount > 1) {
+    return createStringError(inconvertibleErrorCode(),
+                             "Too many positional arguments specified!");
   }
-  return false;
+  return Error::success();
 }
 
-bool hiddenHelpRequested(int argc, char **argv) {
-  for (int index = 1; index < argc; ++index) {
-    StringRef argument(argv[index]);
-    if (argument == "--") {
-      break;
-    }
-    if (argument == "--help-hidden" || argument == "--help-list-hidden") {
-      return true;
-    }
+StringRef cliEngineName(lotus::checker::EngineKind engine) {
+  for (const auto &d : engineDescriptors())
+    if (d.kind == engine)
+      return d.name;
+  llvm_unreachable("unhandled checker engine");
+}
+
+void printEngineHelp(const EngineDescriptor &desc, bool showHidden) {
+  cl::SubCommand &sub = desc.subcommand();
+  outs() << "OVERVIEW: Lotus " << desc.name << " engine\n\n"
+         << "USAGE: lotus-check --engine=" << desc.name
+         << " [options] <input bitcode file>\n\nOPTIONS:\n\n";
+
+  std::vector<cl::Option *> opts;
+  for (const auto &entry : sub.OptionsMap) {
+    cl::Option *o = entry.second;
+    if (!o || o->isPositional())
+      continue;
+    if (!showHidden && o->getOptionHiddenFlag() != cl::NotHidden)
+      continue;
+    opts.push_back(o);
   }
-  return false;
-}
-
-cl::SubCommand *checkerSubcommand(StringRef engine) {
-  const EngineDescriptor *descriptor = findEngineDescriptor(engine);
-  return descriptor ? &descriptor->subcommand() : nullptr;
-}
-
-void printTopLevelHelp() {
-  outs() << "OVERVIEW: Lotus checker front-end\n\n"
-         << "USAGE:\n"
-         << "  lotus-check --engine=<name> [engine options] <input bitcode>\n"
-         << "  lotus-check --list-checkers\n"
-         << "  lotus-check --list-parameters\n\n"
-         << "ENGINES:\n";
-  for (const EngineDescriptor &descriptor : engineDescriptors()) {
-    outs() << "  " << formatv("{0,-8}", descriptor.name) << descriptor.summary
-           << "\n";
-  }
-  outs() << "\nPARAMETER NAMESPACES:\n"
-         << "  Shared parameters use --<parameter>.\n"
-         << "  Engine-specific parameters use --<engine>.<parameter>.\n\n"
-         << "Use --list-parameters for all parameter descriptions, or\n"
-         << "--engine=<name> --help for one engine.\n";
-}
-
-bool isParameterOption(const cl::Option &option) {
-  if (option.isPositional() || option.getOptionHiddenFlag() != cl::NotHidden) {
-    return false;
-  }
-  static const std::set<StringRef> metaOptions = {
-      "help",    "help-hidden",    "help-list", "help-list-hidden",
-      "version", "list-parameters"};
-  return !metaOptions.count(option.ArgStr);
-}
-
-void printParameterOptions(const std::set<cl::Option *> &options) {
-  std::vector<cl::Option *> sorted(options.begin(), options.end());
-  llvm::sort(sorted, [](const cl::Option *left, const cl::Option *right) {
-    return left->ArgStr < right->ArgStr;
+  llvm::sort(opts, [](const cl::Option *a, const cl::Option *b) {
+    return a->ArgStr < b->ArgStr;
   });
   size_t width = 0;
-  for (const cl::Option *option : sorted) {
-    width = std::max(width, option->getOptionWidth());
-  }
-  for (const cl::Option *option : sorted) {
-    option->printOptionInfo(width);
-  }
-}
+  for (const auto *o : opts)
+    width = std::max(width, o->getOptionWidth());
+  for (const auto *o : opts)
+    o->printOptionInfo(width);
 
-void printParameterDescriptions() {
-  std::set<cl::Option *> globalOptions;
-  bool firstEngine = true;
-  for (const EngineDescriptor &descriptor : engineDescriptors()) {
-    std::set<cl::Option *> currentOptions;
-    for (const auto &entry : descriptor.subcommand().OptionsMap) {
-      if (entry.second && isParameterOption(*entry.second)) {
-        currentOptions.insert(entry.second);
-      }
-    }
-    if (firstEngine) {
-      globalOptions = std::move(currentOptions);
-      firstEngine = false;
-      continue;
-    }
-    for (auto iterator = globalOptions.begin();
-         iterator != globalOptions.end();) {
-      if (!currentOptions.count(*iterator)) {
-        iterator = globalOptions.erase(iterator);
-      } else {
-        ++iterator;
-      }
-    }
-  }
-
-  outs() << "GLOBAL PARAMETERS\n"
-         << "  Shared by checker engines and intentionally unqualified.\n\n";
-  printParameterOptions(globalOptions);
-
-  outs() << "\nTo set an engine parameter, use "
-            "--<engine>.<parameter>=<value>.\n";
-  for (const EngineDescriptor &descriptor : engineDescriptors()) {
-    const std::string prefix = (descriptor.name + ".").str();
-    std::set<cl::Option *> engineOptions;
-    for (const auto &entry : descriptor.subcommand().OptionsMap) {
-      if (entry.second && isParameterOption(*entry.second) &&
-          entry.second->ArgStr.startswith(prefix)) {
-        engineOptions.insert(entry.second);
-      }
-    }
-    if (engineOptions.empty()) {
-      continue;
-    }
-    outs() << "\n[engine] " << descriptor.name << "\n\n";
-    printParameterOptions(engineOptions);
-  }
-}
-
-void printEngineHelp(StringRef engine, cl::SubCommand &subcommand,
-                     bool showHidden) {
-  outs() << "OVERVIEW: Lotus " << engine << " engine\n\n"
-         << "USAGE: lotus-check --engine=" << engine
-         << " [options] <input bitcode file>\n\n"
-         << "OPTIONS:\n\n";
-
-  std::set<cl::Option *> uniqueOptions;
-  for (const auto &entry : subcommand.OptionsMap) {
-    cl::Option *option = entry.second;
-    if (!option || option->isPositional() ||
-        (!showHidden && option->getOptionHiddenFlag() != cl::NotHidden)) {
-      continue;
-    }
-    uniqueOptions.insert(option);
-  }
-
-  std::vector<cl::Option *> options(uniqueOptions.begin(), uniqueOptions.end());
-  llvm::sort(options, [](const cl::Option *left, const cl::Option *right) {
-    return left->ArgStr < right->ArgStr;
-  });
-  size_t width = 0;
-  for (const cl::Option *option : options) {
-    width = std::max(width, option->getOptionWidth());
-  }
-  for (const cl::Option *option : options) {
-    option->printOptionInfo(width);
-  }
-
-  const EngineDescriptor *descriptor = findEngineDescriptor(engine);
-  if (descriptor &&
-      descriptor->kind != lotus::checker::EngineKind::Declarative) {
-    ArrayRef<lotus::checker::NativeCheckDescriptor> checks =
-        lotus::checker::getBuiltinNativeChecks(descriptor->kind);
+  if (desc.kind != lotus::checker::EngineKind::Declarative) {
+    auto checks = lotus::checker::getBuiltinNativeChecks(desc.kind);
     if (!checks.empty()) {
       outs() << "\nCHECKS:\n\n";
-      for (const auto &check : checks) {
-        outs() << "  " << formatv("{0,-28}", check.id) << check.title;
-        if (check.default_enabled) {
+      for (const auto &c : checks) {
+        outs() << "  " << formatv("{0,-28}", c.id) << c.title;
+        if (c.default_enabled)
           outs() << " (default)";
-        }
         outs() << "\n";
       }
     }
   }
 }
 
-StringRef cliEngineName(lotus::checker::EngineKind engine) {
-  for (const EngineDescriptor &descriptor : engineDescriptors()) {
-    if (descriptor.kind == engine) {
-      return descriptor.name;
-    }
-  }
-  llvm_unreachable("unhandled checker engine");
-}
+} // namespace
 
-Expected<std::vector<std::string>> normalizeEngineSelectionArgs(int argc,
-                                                                char **argv) {
-  if (argc > 1 && isKnownCheckerSubcommand(argv[1])) {
-    return createStringError(
-        inconvertibleErrorCode(),
-        "engine subcommands are not part of the public CLI; use --engine=%s",
-        argv[1]);
-  }
+// ---------------------------------------------------------------------------
+// Generic-engine CLI options
+// ---------------------------------------------------------------------------
 
-  std::optional<std::string> selectedEngine;
-  std::vector<std::string> normalized;
-  normalized.reserve(argc + 1);
-  normalized.push_back(argv[0]);
+static cl::OptionCategory GenericSelectionCategory(
+    "Generic Checker Selection Options");
+static cl::OptionCategory GenericExecutionCategory(
+    "Generic Checker Execution Options");
+static cl::opt<std::string>
+    InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
+                  cl::value_desc("bitcode"), cl::init(""),
+                  cl::cat(GenericExecutionCategory),
+                  cl::sub(*cl::TopLevelSubCommand),
+                  cl::sub(lotus::checker::tooling::genericSubCommand()));
+static cl::opt<bool>
+    ListCheckers("list-checkers",
+                 cl::desc("List available checker ids and exit"),
+                 cl::cat(GenericSelectionCategory), cl::init(false),
+                 cl::sub(*cl::TopLevelSubCommand),
+                 cl::sub(lotus::checker::tooling::genericSubCommand()));
+static cl::opt<std::string> CategoryFilter(
+    "generic.category", cl::desc("Run only checkers in the given category"),
+    cl::value_desc("category"), cl::init(""), cl::cat(GenericSelectionCategory),
+    cl::sub(*cl::TopLevelSubCommand),
+    cl::sub(lotus::checker::tooling::genericSubCommand()));
+static cl::opt<std::string> BuiltinSpecDir(
+    "generic.spec-dir",
+    cl::desc("Load declarative checker specs from this directory"),
+    cl::value_desc("dir"), cl::init(""), cl::cat(GenericExecutionCategory),
+    cl::sub(*cl::TopLevelSubCommand),
+    cl::sub(lotus::checker::tooling::genericSubCommand()));
 
-  for (int index = 1; index < argc; ++index) {
-    StringRef argument(argv[index]);
-    if (argument == "--") {
-      normalized.push_back(argv[index]);
-      for (++index; index < argc; ++index) {
-        normalized.push_back(argv[index]);
-      }
-      break;
-    }
-    StringRef engineName;
-    if (argument.consume_front("--engine=")) {
-      engineName = argument;
-    } else if (argument == "--engine") {
-      if (++index >= argc) {
-        return createStringError(inconvertibleErrorCode(),
-                                 "--engine requires a value");
-      }
-      engineName = argv[index];
-    } else {
-      normalized.push_back(argv[index]);
-      continue;
-    }
+// ---------------------------------------------------------------------------
+// Registry construction (shared by generic engine and --list-checkers)
+// ---------------------------------------------------------------------------
 
-    if (selectedEngine) {
-      return createStringError(inconvertibleErrorCode(),
-                               "--engine may only be specified once");
-    }
-    if (!isKnownCheckerSubcommand(engineName)) {
-      std::string expected;
-      for (const EngineDescriptor &descriptor : engineDescriptors()) {
-        if (!expected.empty()) {
-          expected += ", ";
-        }
-        expected += descriptor.name.str();
-      }
-      return createStringError(inconvertibleErrorCode(),
-                               "invalid engine '%s'; expected %s",
-                               engineName.str().c_str(), expected.c_str());
-    }
-    selectedEngine = engineName.str();
-  }
-
-  if (selectedEngine) {
-    normalized.insert(normalized.begin() + 1, *selectedEngine);
-  }
-  return normalized;
-}
-
-Error validateLongOptionSpellings(ArrayRef<std::string> arguments) {
-  cl::SubCommand *subcommand = nullptr;
-  if (arguments.size() > 1 && isKnownCheckerSubcommand(arguments[1])) {
-    subcommand = checkerSubcommand(arguments[1]);
-  } else {
-    subcommand = &*cl::TopLevelSubCommand;
-  }
-
-  bool afterSentinel = false;
-  for (size_t index = 1; index < arguments.size(); ++index) {
-    StringRef argument(arguments[index]);
-    if (argument == "--") {
-      afterSentinel = true;
-      continue;
-    }
-    if (afterSentinel || !argument.startswith("--")) {
-      continue;
-    }
-    StringRef spelling = argument.drop_front(2).split('=').first;
-    if (spelling.empty() || subcommand->OptionsMap.count(spelling)) {
-      continue;
-    }
-    return createStringError(inconvertibleErrorCode(),
-                             "Unknown command line argument '--%s'.",
-                             spelling.str().c_str());
-  }
-  return Error::success();
-}
+namespace {
 
 Expected<lotus::checker::CheckerRegistry> buildRegistry() {
   lotus::checker::CheckerRegistry registry;
-  if (auto error = lotus::checker::registerBuiltinNativeCheckers(registry)) {
+  if (auto error = lotus::checker::registerBuiltinNativeCheckers(registry))
     return std::move(error);
-  }
 
   std::string specDir;
-  if (BuiltinSpecDir.getNumOccurrences() != 0) {
+  if (BuiltinSpecDir.getNumOccurrences() != 0)
     specDir = BuiltinSpecDir;
-  } else if (auto environment =
-                 sys::Process::GetEnv("LOTUS_CHECKER_SPEC_DIR")) {
-    specDir = *environment;
-  } else if (sys::fs::is_directory(LOTUS_INSTALL_CHECKER_SPEC_DIR)) {
+  else if (auto env = sys::Process::GetEnv("LOTUS_CHECKER_SPEC_DIR"))
+    specDir = *env;
+  else if (sys::fs::is_directory(LOTUS_INSTALL_CHECKER_SPEC_DIR))
     specDir = LOTUS_INSTALL_CHECKER_SPEC_DIR;
-  } else {
+  else
     specDir = LOTUS_SOURCE_CHECKER_SPEC_DIR;
-  }
 
   lotus::checker::CheckerSpecLoader loader;
   auto specs_or = loader.loadFromDirectory(specDir);
-  if (!specs_or) {
+  if (!specs_or)
     return specs_or.takeError();
-  }
-  for (const auto &spec : *specs_or) {
-    if (auto error = registry.registerDeclarative(spec)) {
+  for (const auto &spec : *specs_or)
+    if (auto error = registry.registerDeclarative(spec))
       return std::move(error);
-    }
-  }
 
   return registry;
 }
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Generic engine entry point
+// ---------------------------------------------------------------------------
 
 int runGenericCheckerTool(const char *argv0) {
   (void)lotus::checker::tooling::statsEnabled();
@@ -443,23 +247,23 @@ int runGenericCheckerTool(const char *argv0) {
     logAllUnhandledErrors(registry_or.takeError(), errs(), "");
     return lotus::checker::tooling::EXIT_ERROR;
   }
-  lotus::checker::CheckerRegistry registry = std::move(*registry_or);
+  auto registry = std::move(*registry_or);
 
   if (ListCheckers) {
     outs() << "ID\tENGINE\tMODE\tDEFAULT\tCATEGORY\tTITLE\n";
-    for (const auto *descriptor : registry.list()) {
-      if (descriptor->isDeclarative()) {
-        outs() << descriptor->metadata.id << "\tgeneric\tgeneric\t"
-               << (descriptor->metadata.default_enabled ? "yes" : "no") << "\t"
-               << descriptor->metadata.category << "\t"
-               << descriptor->metadata.title << "\n";
+    for (const auto *desc : registry.list()) {
+      if (desc->isDeclarative()) {
+        outs() << desc->metadata.id << "\tgeneric\tgeneric\t"
+               << (desc->metadata.default_enabled ? "yes" : "no") << "\t"
+               << desc->metadata.category << "\t" << desc->metadata.title
+               << "\n";
         continue;
       }
-      for (const auto &check : lotus::checker::getBuiltinNativeChecks(
-               descriptor->metadata.engine)) {
-        outs() << check.id << "\t" << cliEngineName(descriptor->metadata.engine)
+      for (const auto &check :
+           lotus::checker::getBuiltinNativeChecks(desc->metadata.engine)) {
+        outs() << check.id << "\t" << cliEngineName(desc->metadata.engine)
                << "\tnative\t" << (check.default_enabled ? "yes" : "no") << "\t"
-               << descriptor->metadata.category << "\t" << check.title << "\n";
+               << desc->metadata.category << "\t" << check.title << "\n";
       }
     }
     return lotus::checker::tooling::EXIT_SUCCESS_CODE;
@@ -473,7 +277,7 @@ int runGenericCheckerTool(const char *argv0) {
 
   LLVMContext context;
   SMDiagnostic error;
-  std::unique_ptr<Module> module = parseIRFile(InputFilename, error, context);
+  auto module = parseIRFile(InputFilename, error, context);
   if (!module) {
     error.print(argv0, errs());
     return lotus::checker::tooling::EXIT_ERROR;
@@ -506,22 +310,19 @@ int runGenericCheckerTool(const char *argv0) {
         return lotus::checker::tooling::EXIT_ERROR;
       }
       if (!CategoryFilter.empty() &&
-          descriptor->metadata.category != CategoryFilter) {
+          descriptor->metadata.category != CategoryFilter)
         continue;
-      }
       selection.push_back(descriptor);
     }
   } else {
-    selection = registry.select(CategoryFilter,
-                                lotus::checker::EngineKind::Declarative);
+    selection =
+        registry.select(CategoryFilter, lotus::checker::EngineKind::Declarative);
     if (!lotus::checker::tooling::hasExplicitCheckSelection() &&
         CategoryFilter.empty()) {
       std::vector<const lotus::checker::CheckerDescriptor *> defaults;
-      for (const auto *descriptor : selection) {
-        if (descriptor->metadata.default_enabled) {
-          defaults.push_back(descriptor);
-        }
-      }
+      for (const auto *d : selection)
+        if (d->metadata.default_enabled)
+          defaults.push_back(d);
       selection = std::move(defaults);
     }
   }
@@ -549,78 +350,130 @@ int runGenericCheckerTool(const char *argv0) {
       mgr, {lotus::checker::tooling::Verbose});
 }
 
-int main(int argc, char **argv) {
-  auto normalizedArgsOr = normalizeEngineSelectionArgs(argc, argv);
-  if (!normalizedArgsOr) {
-    logAllUnhandledErrors(normalizedArgsOr.takeError(), errs(), "error: ");
-    return lotus::checker::tooling::EXIT_ERROR;
-  }
-  std::vector<std::string> normalizedArgs = std::move(*normalizedArgsOr);
-  std::vector<char *> normalizedArgv;
-  normalizedArgv.reserve(normalizedArgs.size() + 1);
-  for (std::string &argument : normalizedArgs) {
-    normalizedArgv.push_back(argument.data());
-  }
-  normalizedArgv.push_back(nullptr);
-  int normalizedArgc = static_cast<int>(normalizedArgs.size());
-  char **argumentVector = normalizedArgv.data();
+// ---------------------------------------------------------------------------
+// main — thin entry point: parse --engine, dispatch to the engine runner
+// ---------------------------------------------------------------------------
 
-  sys::PrintStackTraceOnErrorSignal(argumentVector[0]);
-  PrettyStackTraceProgram stack_trace(normalizedArgc, argumentVector);
-  llvm::InitLLVM init_llvm(normalizedArgc, argumentVector);
+int main(int argc, char **argv) {
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
+  PrettyStackTraceProgram stack_trace(argc, argv);
+  llvm::InitLLVM init_llvm(argc, argv);
   llvm_shutdown_obj shutdown;
   report_options::initializeReportOptions();
 
-  const bool wants_help = helpRequested(normalizedArgc, argumentVector);
-  const auto requested_subcommand =
-      requestedSubcommand(normalizedArgc, argumentVector);
-  if (wants_help) {
-    if (!requested_subcommand) {
-      printTopLevelHelp();
-      return lotus::checker::tooling::EXIT_SUCCESS_CODE;
+  // Extract --engine=<name> from argv before cl::Parse sees it.
+  std::string selectedEngine;
+  std::vector<std::string> filteredArgs;
+  filteredArgs.push_back(argv[0]);
+
+  for (int i = 1; i < argc; ++i) {
+    StringRef arg(argv[i]);
+    if (arg == "--")
+      break;
+
+    StringRef engineName;
+    if (arg.consume_front("--engine=")) {
+      engineName = arg;
+    } else if (arg == "--engine") {
+      if (++i >= argc) {
+        errs() << "error: --engine requires a value\n";
+        return lotus::checker::tooling::EXIT_ERROR;
+      }
+      engineName = argv[i];
+    } else {
+      filteredArgs.push_back(argv[i]);
+      continue;
     }
-    cl::SubCommand *subcommand = checkerSubcommand(*requested_subcommand);
-    assert(subcommand && "normalized engine must have a subcommand");
-    const bool showHidden = hiddenHelpRequested(normalizedArgc, argumentVector);
-    printEngineHelp(*requested_subcommand, *subcommand, showHidden);
-    return lotus::checker::tooling::EXIT_SUCCESS_CODE;
+
+    if (!selectedEngine.empty()) {
+      errs() << "error: --engine may only be specified once\n";
+      return lotus::checker::tooling::EXIT_ERROR;
+    }
+    if (!findEngine(engineName)) {
+      errs() << "error: unknown engine '" << engineName << "'; available:";
+      for (const auto &d : engineDescriptors())
+        errs() << " " << d.name;
+      errs() << "\n";
+      return lotus::checker::tooling::EXIT_ERROR;
+    }
+    selectedEngine = engineName.str();
   }
 
-  if (Error spellingError = validateLongOptionSpellings(normalizedArgs)) {
-    logAllUnhandledErrors(std::move(spellingError), errs(), "error: ");
+  // Collect remaining args (after "--" sentinel, if any).
+  for (int i = 1; i < argc; ++i) {
+    if (StringRef(argv[i]) == "--") {
+      for (int j = i; j < argc; ++j)
+        filteredArgs.push_back(argv[j]);
+      break;
+    }
+  }
+
+  // Build the argv for cl::ParseCommandLineOptions with the engine as a
+  // subcommand token.
+  std::vector<std::string> normalizedArgs;
+  normalizedArgs.push_back(filteredArgs[0]);
+  if (!selectedEngine.empty())
+    normalizedArgs.push_back(selectedEngine);
+  for (size_t i = 1; i < filteredArgs.size(); ++i)
+    normalizedArgs.push_back(filteredArgs[i]);
+
+  std::vector<char *> argvPtrs;
+  for (auto &s : normalizedArgs)
+    argvPtrs.push_back(s.data());
+  argvPtrs.push_back(nullptr);
+  int newArgc = static_cast<int>(normalizedArgs.size());
+
+  if (Error e = validateOptions(normalizedArgs)) {
+    logAllUnhandledErrors(std::move(e), errs(), "error: ");
     return lotus::checker::tooling::EXIT_ERROR;
+  }
+
+  // Intercept --help before LLVM's parser (which calls exit(0)).
+  // This lets us append native check IDs for engine subcommands.
+  if (!selectedEngine.empty()) {
+    bool showHidden = false;
+    bool wantsHelp = false;
+    for (const auto &arg : normalizedArgs) {
+      StringRef a(arg);
+      if (a == "--help" || a == "--help-list") {
+        wantsHelp = true;
+      } else if (a == "--help-hidden" || a == "--help-list-hidden") {
+        wantsHelp = true;
+        showHidden = true;
+      }
+    }
+    if (wantsHelp) {
+      printEngineHelp(*findEngine(selectedEngine), showHidden);
+      return lotus::checker::tooling::EXIT_SUCCESS_CODE;
+    }
   }
 
   if (!cl::ParseCommandLineOptions(
-          normalizedArgc, argumentVector,
+          newArgc, argvPtrs.data(),
           "Lotus checker front-end\n"
-          "  Select one engine with --engine=<name>.\n"
-          "  Example: 'lotus-check --engine=symex --help' shows Symbolic "
-          "Execution options.\n",
-          &errs())) {
+          "  Usage: lotus-check --engine=<name> [options] <input bitcode>\n")) {
     return lotus::checker::tooling::EXIT_ERROR;
   }
 
-  if (!lotus::checker::tooling::validateReportOptions()) {
+  if (!lotus::checker::tooling::validateReportOptions())
     return lotus::checker::tooling::EXIT_ERROR;
-  }
-  if (ListParameters) {
-    printParameterDescriptions();
-    return lotus::checker::tooling::EXIT_SUCCESS_CODE;
-  }
+
   lotus::checker::tooling::configureCommonLogging();
 
-  for (const EngineDescriptor &descriptor : engineDescriptors()) {
-    if (descriptor.subcommand()) {
-      return descriptor.run(argumentVector[0]);
-    }
-  }
-  if (ListCheckers) {
-    return runGenericCheckerTool(argumentVector[0]);
+  // Dispatch to the selected engine.
+  if (!selectedEngine.empty()) {
+    const auto *desc = findEngine(selectedEngine);
+    return desc->run(argvPtrs[0]);
   }
 
-  errs() << "error: no engine selected\n";
-  errs() << "hint: use --engine=<name>, --list-checkers, or "
-            "--list-parameters\n";
+  // No engine: check for top-level actions (--list-checkers).
+  if (ListCheckers)
+    return runGenericCheckerTool(argvPtrs[0]);
+
+  errs() << "error: no engine selected\n"
+         << "hint: use --engine=<name> or --list-checkers\n"
+         << "\navailable engines:\n";
+  for (const auto &d : engineDescriptors())
+    errs() << "  " << formatv("{0,-8}", d.name) << " " << d.summary << "\n";
   return lotus::checker::tooling::EXIT_ERROR;
 }

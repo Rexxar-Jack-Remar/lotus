@@ -1,7 +1,7 @@
 Troubleshooting and FAQ
 ========================
 
-This document helps resolve common issues and answers frequently asked questions.
+Solutions for common issues and answers to frequently asked questions.
 
 Installation Issues
 -------------------
@@ -90,13 +90,13 @@ Boost Not Found
 
 .. code-block:: bash
 
-   cmake ../ -DCUSTOM_BOOST_ROOT=/path/to/boost
+   cmake ../ -DLOTUS_CUSTOM_BOOST_ROOT=/path/to/boost
 
 3. Lotus can auto-download Boost:
 
 .. code-block:: bash
 
-   cmake ../ -DAUTO_DOWNLOAD_BOOST=ON
+   cmake ../ -DLOTUS_DOWNLOAD_BOOST=ON
 
 Compilation Errors
 ~~~~~~~~~~~~~~~~~~
@@ -197,7 +197,7 @@ Analysis Takes Too Long
    ./bin/lotus-alias-aser-aa -field-sensitive=false input.bc
    
    # Limit context depth
-   ./bin/lotus-alias-aser-aa -analysis-mode=1-cfa -max-context-depth=2 input.bc
+   ./bin/lotus-alias-aser-aa -analysis-mode=1-cfa input.bc
 
 Out of Memory
 ~~~~~~~~~~~~~
@@ -356,7 +356,7 @@ DyckAA Issues
 
 .. code-block:: bash
 
-   # Don't use -no-function-type-check
+   # Keep -function-type-check-level at its default (4)
 
 2. The analysis is very precise but conservative. This is expected behavior.
 
@@ -445,8 +445,9 @@ Performance Tuning
 Speeding Up Analysis
 ~~~~~~~~~~~~~~~~~~~~
 
-1. **Choose appropriate analysis**
-
+1. **Choose appropriate analysis**:
+   Use context-insensitive pointer analysis (e.g., ``-analysis-mode=ci``) or
+   simpler abstract domains (e.g., ``--crab-dom=int``) for initial scans.
 
 2. **Reduce scope**:
 
@@ -463,10 +464,6 @@ Speeding Up Analysis
    # Simplify IR first
    opt -mem2reg -simplifycfg input.bc -o simplified.bc
    ./bin/tool simplified.bc
-
-4. **Parallel analysis** (if tool supports):
-
-.. code-block:: bash
 
 
 Reducing Memory Usage
@@ -502,7 +499,9 @@ General Questions
 
 **Q: Which alias analysis should I use?**
 
-A: Depends on your needs
+A: Use SparrowAA or DyckAA for fast whole-program analysis, AserPTA
+(``-analysis-mode=1-cfa``) for callsite-sensitive pointer analysis, or Sea-DSA
+for memory-graph and field-sensitive verification.
 
 **Q: Can Lotus analyze C++ code?**
 
@@ -531,7 +530,7 @@ A: Generate DOT files:
    ./bin/lotus-alias-dyck-aa -dot-dyck-callgraph input.bc
    
    # PDG
-   ./bin/lotus-ir-pdg-query -dump-dot input.bc
+   ./bin/lotus-ir-pdg-query --format=dot input.bc
    
    # Sea-DSA memory graph
    ./bin/lotus-alias-seadsa-tool --sea-dsa-dot --outdir=output/ input.bc

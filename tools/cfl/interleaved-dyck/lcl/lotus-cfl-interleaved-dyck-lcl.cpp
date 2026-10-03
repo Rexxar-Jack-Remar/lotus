@@ -28,7 +28,7 @@ struct CommandLine {
 };
 
 void usage(std::ostream &out) {
-  out << "usage: lotus-cfl-interleaved-dyck-lcl [options] <graph.dot>\n\n"
+  out << "usage: lotus-cfl-interleaved-dyck lcl [options] <graph.dot>\n\n"
          "POPL 2017 LCL upper bound for directed, typed interleaved Dyck.\n"
          "A retained pair is MAY-REACH, not a certified balanced witness.\n\n"
          "options:\n"
@@ -118,7 +118,7 @@ CommandLine parseCommandLine(int argc, char **argv) {
 
 } // namespace
 
-int main(int argc, char **argv) {
+int runInterleavedDyckLCL(int argc, char **argv) {
   try {
     const auto command = parseCommandLine(argc, argv);
     const auto graph = dyck::Graph::parseDotFile(command.input);
@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
     }
     return 0;
   } catch (const std::exception &error) {
-    std::cerr << "lotus-cfl-interleaved-dyck-lcl: " << error.what() << '\n';
+    std::cerr << "lotus-cfl-interleaved-dyck lcl: " << error.what() << '\n';
     return 1;
   }
 }

@@ -54,8 +54,8 @@ generating memory graphs that can be visualized using Graphviz.
 lotus-alias-seadsa-tool
 -----------------------
 
-Advanced Sea-DSA analysis tool with comprehensive memory graph analysis
-capabilities.
+Same graph output as ``lotus-alias-sea-dsa-dg``, plus call-graph DOT dumps and
+an output directory to write them to.
 
 .. code-block:: bash
 
@@ -66,9 +66,6 @@ Key options:
 * ``--sea-dsa-dot`` – Generate DOT files visualizing memory graphs
 * ``--sea-dsa-callgraph-dot`` – Generate DOT files of the complete call graph
 * ``--outdir <DIR>`` – Specify an output directory for generated files
-
-This tool provides advanced analysis capabilities for understanding memory usage
-patterns, pointer relationships, and potential memory-related issues in programs.
 
 Sea-DSA results are consumed by other analyses (e.g., mod/ref, verification
 tools) to obtain a precise view of heap structure and aliasing.

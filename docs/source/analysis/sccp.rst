@@ -58,9 +58,10 @@ Results
 
 The analysis returns a ``FunctionResult`` containing:
 
-- **constants** — a map from ``llvm::Value *`` to ``ConstantInt *`` for
-  values that were resolved to constants
-- **dead_blocks** — the set of basic blocks found to be unreachable
+- **constants** — a map from ``const llvm::Value *`` to
+  ``const llvm::ConstantInt *`` for values that were resolved to constants
+- **dead_blocks** — the set of basic blocks (``const llvm::BasicBlock *``) found
+  to be unreachable
 
 The module-level entry point (``runSCCPOnModule``) aggregates results across
 all functions and also provides cross-function constant discovery.

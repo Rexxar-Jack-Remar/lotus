@@ -5,18 +5,40 @@
 namespace ifds {
 
 IDEExtendedTaintAnalysis::IDEExtendedTaintAnalysis() {
-  m_sources = {"recv", "read", "fgets", "getline", "getenv"};
-  m_sanitizers = {"sanitize", "escape", "strncpy_s", "memset_s"};
+  TaintConfig config;
+  config.sources = {"recv", "read", "fgets", "getline", "getenv"};
+  config.sanitizers = {"sanitize", "escape", "strncpy_s", "memset_s"};
+  m_model = std::make_shared<const TaintConfig>(std::move(config));
+}
+
+IDEExtendedTaintAnalysis::IDEExtendedTaintAnalysis(const TaintConfig &config)
+    : m_model(std::make_shared<const TaintConfig>(config)) {}
+
+const TaintConfig &IDEExtendedTaintAnalysis::model() const {
+  auto session = analysis_session();
+  return session && session->taint_config() ? *session->taint_config()
+                                            : *m_model;
+}
+
+bool IDEExtendedTaintAnalysis::is_identity_flow(const llvm::Instruction *inst,
+                                                const llvm::Instruction *,
+                                                const Fact &fact) const {
+  if (!fact || inst->getType()->isVoidTy())
+    return fact != nullptr;
+  for (const auto &operand : inst->operands())
+    if (operand.get() == fact)
+      return false;
+  return true;
 }
 
 bool IDEExtendedTaintAnalysis::is_source_function(
     const llvm::Function *callee) const {
-  return callee && m_sources.count(callee->getName().str()) > 0;
+  return callee && model().sources.count(callee->getName().str()) > 0;
 }
 
 bool IDEExtendedTaintAnalysis::is_sanitizer_function(
     const llvm::Function *callee) const {
-  return callee && m_sanitizers.count(callee->getName().str()) > 0;
+  return callee && model().sanitizers.count(callee->getName().str()) > 0;
 }
 
 IDEExtendedTaintAnalysis::FactSet

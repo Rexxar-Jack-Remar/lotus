@@ -98,9 +98,9 @@ Use ``clam-pp`` to normalize and simplify bitcode before analysis:
 Key Options
 -----------
 
-* ``--crab-lower-unsigned-icmp`` – Lower unsigned comparisons
-* ``--crab-lower-select`` – Lower select instructions
-* ``--crab-devirt`` – Perform devirtualization
+* ``--clam-lower-unsigned-icmp`` – Lower unsigned comparisons
+* ``--clam-lower-select`` – Lower select instructions
+* ``--clam-devirt`` – Perform devirtualization
 * ``-o <file>`` – Output file
 
 Differential Analysis (clam-diff)
@@ -143,5 +143,5 @@ Typical Workflow
       ./build/bin/clam \
          --crab-dom=zones \
          --crab-check=assert \
-         --crab-out=results.json \
+         -ojson=results.json \
          prep.bc

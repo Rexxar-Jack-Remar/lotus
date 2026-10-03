@@ -34,6 +34,9 @@ IFDSSolver<Problem>::~IFDSSolver() {
 
 template<typename Problem>
 void IFDSSolver<Problem>::solve(const llvm::Module& module) {
+    auto session = m_problem.analysis_session();
+    if (session && &session->module() != &module)
+        throw std::invalid_argument("Analysis session belongs to a different module");
     if (m_injected_alias_analysis) {
         m_problem.set_alias_analysis(nullptr);
         m_owned_alias_analysis.reset();
@@ -49,10 +52,11 @@ void IFDSSolver<Problem>::solve(const llvm::Module& module) {
     }
 
     m_steps_performed = 0;
+    m_sparse_transfers = 0;
     m_bound_reached = false;
 
     // Initialize data structures
-    m_graph_context.initialize(module);
+    m_graph_context.initialize(module, session);
     initialize_worklist(module);
 
     // Run sequential tabulation algorithm
@@ -147,16 +151,31 @@ IFDSSolver<Problem>::get_facts_at_in_llvm_ssa(const llvm::Instruction* inst) con
 
 template<typename Problem>
 bool IFDSSolver<Problem>::propagate_path_edge(const PathEdgeType& edge) {
-    // Try to insert the edge - if already exists, return false
-    if (!m_state.add_path_edge(edge)) {
-        return false;
+    auto current = edge;
+    bool inserted = false;
+    while (true) {
+        const llvm::Instruction *next = nullptr;
+        if (m_config.sparse_execution()) {
+            next = m_graph_context.sparse_next(
+                current.target_node, m_problem.sparse_fact_value(current.target_fact),
+                [&](const llvm::Instruction *inst, const llvm::Instruction *succ) {
+                    return m_problem.is_identity_flow(inst, succ, current.target_fact);
+                });
+        }
+        if (!m_state.add_path_edge(current, next == nullptr))
+            return inserted;
+        inserted = true;
+        m_entry_facts[current.target_node].insert(current.target_fact);
+        if (!next)
+            return true;
+        // Keep dense query and ESG semantics while avoiding worklist jobs and
+        // flow-function evaluation for certified identity transfers.
+        m_exit_facts[current.target_node].insert(current.target_fact);
+        on_normal_transition(Node(current.target_node, current.target_fact),
+                             Node(next, current.target_fact));
+        ++m_sparse_transfers;
+        current.target_node = next;
     }
-
-    // Preserve context precision: process each newly discovered path edge,
-    // even if another start fact already reached the same (target_node, target_fact).
-    m_entry_facts[edge.target_node].insert(edge.target_fact);
-
-    return true;
 }
 
 template<typename Problem>
@@ -466,7 +485,7 @@ IFDSSolver<Problem>::get_successors(const llvm::Instruction* inst) const {
 
 template<typename Problem>
 void IFDSSolver<Problem>::initialize_call_graph(const llvm::Module& module) {
-    m_graph_context.initialize(module);
+    m_graph_context.initialize(module, m_problem.analysis_session());
 }
 
 template<typename Problem>

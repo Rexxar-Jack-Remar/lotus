@@ -18,7 +18,7 @@ than bug finding: instead of only reporting secret-dependent control flow, it
 can transform functions so they execute a uniform set of instructions
 regardless of sensitive inputs.
 
-The implementation lives under the unified ``lib/Security`` tree alongside the
+The implementation lives under ``lib/Security/LIF`` alongside the
 ``ConstantTime`` and ``Spectre`` components.
 
 Main Components

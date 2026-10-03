@@ -114,21 +114,25 @@ Programmatic Usage
 
    #include "Verification/clam/Clam.hh"
    #include "Verification/clam/CfgBuilder.hh"
-   
-   // Create CFG builder
-   CrabBuilderManager builder(module);
-   
-   // Create CLAM analysis
-   GlobalClam ga(module, builder);
-   
+
+   // Create a crab CFG builder manager
+   CrabBuilderParams cparams;
+   auto tli = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+   std::unique_ptr<HeapAbstraction> mem(new DummyHeapAbstraction());
+   CrabBuilderManager builder(cparams, tli, std::move(mem));
+
+   // Create CLAM analysis (use IntraGlobalClam for a non-interprocedural run)
+   InterGlobalClam ga(module, builder);
+
    // Run analysis
    AnalysisParams params;
    params.run_inter = true;
-   ga.analyze(params);
-   
+   ClamGlobalAnalysis::abs_dom_map_t assumptions;
+   ga.analyze(params, assumptions);
+
    // Query invariants
-   auto pre = ga.getPre(bb);
-   auto post = ga.getPost(bb);
+   auto pre = ga.getPre(&bb);
+   auto post = ga.getPost(&bb);
 
 Abstract Domains
 ----------------
@@ -144,10 +148,10 @@ See :doc:`../tools/verifier/clam/index` for detailed domain documentation and us
 Integration Points
 ------------------
 
-* **Sea-DSA**: Heap abstraction for memory modeling
-* **Lotus Alias Analysis**: Pointer analysis integration
-* **CRAB Library**: Abstract domain implementations
-* **LLVM Pass Infrastructure**: Standard pass registration
+* **Sea-DSA**: Supplies the ``HeapAbstraction`` handed to ``CrabBuilderManager``
+* **Lotus Alias Analysis**: Provides alias facts used when the CFG builder models memory
+* **CRAB Library**: Implements the abstract domains and fixpoint engines
+* **LLVM Pass Infrastructure**: ``clam``/``clam-pp`` register as LLVM passes
 
 See Also
 --------

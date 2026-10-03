@@ -47,7 +47,7 @@ produced by SeaHorn).
 .. code-block:: bash
 
    # Generate CHCs from a program using SeaHorn
-   ./build/bin/seahorn --horn program.c -o program.smt2
+   ./build/bin/seahorn --horn-format=smt2 program.bc -o program.smt2
 
    # Verify using Horn-ICE
    ./build/bin/chc_verifier program.smt2
@@ -85,7 +85,7 @@ Typical workflow for using Horn-ICE:
 
    .. code-block:: bash
 
-      ./build/bin/seahorn --horn program.c -o program.smt2
+      ./build/bin/seahorn --horn-format=smt2 program.bc -o program.smt2
 
 2. **Verify using Horn-ICE**:
 

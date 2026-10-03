@@ -88,7 +88,8 @@ Some related publications
 - ISSTA 17:  Boosting the Precision of Virtual Call Integrity Protection with Partial Pointer Analysis for C++ 
 
 
-## 5. Numerical Analysis
+## 5. Numeric
+al Analysis
 
 + Crab/Lotus concurrent fixpoint performance:
   - Study speculative concurrency for Crab's `concurrenty_fwd_fixpoint_iterator`: allow bounded stale reads inside a WPO SCC, then repair deterministically at loop heads.

@@ -43,7 +43,7 @@ The pass can obtain prefetch distances from multiple sources:
 - ``lbr``: Use the values passed to ``-dist`` as prefetch distances.
 - ``llm``: Use values passed to ``-llm-dist`` as prefetch distances. This is a
   heuristic mode intended for experimentation.
-- ``static``: Reserved for future static-analysis-driven distance estimation.
+- ``static``: Reserved for static-analysis-driven distance estimation.
 
 Algorithm
 ---------

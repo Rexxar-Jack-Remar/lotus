@@ -42,8 +42,8 @@ The source tree is grouped by subdirectory under ``include/Concurrency/`` and
 - ``Runtime/``: ``APIRegistry``, ``RuntimeKind``, and language runtime abstractions
 - ``Thread/``: Core thread model and reasoning:
   - ``ThreadModel``, ``ThreadModelBuilder``, and ``ThreadCreationTree``
-  - ``Join/``: ``JoinTargetAnalysis`` (previously ``JoinTarget/``)
-  - ``Sharing/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis`` (previously ``Memory/``)
+  - ``Join/``: ``JoinTargetAnalysis``
+  - ``Sharing/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis``
 - ``Utils/``: ``ThreadAPI``, ``ThreadFlowGraph``, vector-clock utilities,
   RAII lock tracking, and language models for C++, OpenMP, MPI, and Linux kernel
   APIs
@@ -146,7 +146,6 @@ Essential for data race detection, deadlock detection, and precise MHP analysis.
 
 - ``getMayLockSetAt(inst)`` – Get may-lockset at an instruction
 - ``getMustLockSetAt(inst)`` – Get must-lockset at an instruction
-- ``isLockHeldAt(lock, inst)`` – Check if a specific lock is held
 
 JoinTargetAnalysis
 ~~~~~~~~~~~~~~~~~~
@@ -162,8 +161,6 @@ termination effects beyond a simple name-based match.
 
 - Refining join reasoning when multiple thread handles may alias
 - Supporting more precise MHP pruning around thread termination
-- Providing a dedicated analysis for the ``Thread/Join/`` subdirectory that now
-  exists in the source tree
 
 ThreadAPI
 ~~~~~~~~~
@@ -225,7 +222,7 @@ reasoning about memory ordering and data races.
 Some synchronization constructs are recognized more precisely than they are
 fully proved. For example, ``std::call_once``, ``std::latch``,
 ``std::barrier``, and condition-variable signaling are modeled conservatively,
-and definite happens-before edges are still limited for some of them.
+and definite happens-before edges are not emitted for all patterns.
 
 ThreadFlowGraph
 ~~~~~~~~~~~~~~~
@@ -313,10 +310,9 @@ Thread-Aware Sparse Value-Flow Refinement
 The ``ValueFlow/`` subdirectory implements the optional whole-program refinement
 used by the concurrency checker: a thread-aware sparse value-flow analysis that
 refines data-race alias pairs with a flow-sensitive points-to solve over the
-SVFG. It was introduced by the thread-aware sparse SVFG refinement commit
-(``d13d1543``). The general solver lives in
-``Alias/InclusionBased/FlowSensitive/`` and is composed with the thread-aware
-SVFG by ``FSMPTA``; the concurrency layer does not duplicate it.
+SVFG. The general solver lives in ``Alias/InclusionBased/FlowSensitive/`` and is
+composed with the thread-aware SVFG by ``FSMPTA``; the concurrency layer does
+not duplicate it.
 
 **ThreadAwareSVFGBuilder** (``ThreadAwareSVFG.h``): adds guarded Store-to-Load
 and symmetric Store-to-Store ``ThreadMHPIndirectVF`` edges for accesses that may
@@ -326,18 +322,17 @@ subgraph without copying graph nodes. Fork and join memory flow is connected
 through dedicated passes (``connectForkFlow``, ``connectJoinFlow``).
 
 **SparseValueFlowRefinement** (``SparseValueFlowRefinement.h``): a lightweight
-concurrency-specific diagnostic refinement, introduced as
-``SparseFlowSensitivePTA`` in the original commit and later renamed. It solves
-pointer-value flow over the SVFG and its thread-interference overlay, attaching
-memory values to sparse MemorySSA definitions rather than to every LLVM
-instruction. It is not the alias-analysis oracle and cannot suppress race
-candidates on its own. Queries include ``pointsTo``, ``memoryValue``,
+concurrency-specific diagnostic refinement. It solves pointer-value flow over
+the SVFG and its thread-interference overlay, attaching memory values to sparse
+MemorySSA definitions rather than to every LLVM instruction. It does not
+replace alias analysis and cannot suppress race candidates on its own.
+Queries include ``pointsTo``, ``memoryValue``,
 ``hasCompletePointsTo``, ``accessTargets``, and ``mayAliasAccesses`` (which
 returns ``nullopt`` when refinement is unavailable, otherwise whether two
 accesses may still address a common abstract object). Mutable and hash-consed
 points-to set backends are supported.
 
-**FlowSensitivePTA** (``Alias/InclusionBased/FlowSensitive/FlowSensitivePTA.h``):
+**FlowSensitivePTA** (``Alias/InclusionBased/FlowSensitive/Sparse/FlowSensitivePTA.h``):
 the general sparse flow-sensitive inclusion-based pointer analysis. It owns the
 top-level points-to sets and per-node MemorySSA ``IN``/``OUT`` state.
 
@@ -375,9 +370,9 @@ points-to sets from silently receiving unrelated SSA version streams.
 **Checker integration**: ``ConcurrencyChecker`` owns a
 ``WholeProgramSparseRefinement`` and builds it when sparse flow-sensitive
 refinement is enabled and data-race checking is active, recording statistics
-such as interference edges and points-to facts. The original commit wired the
-sparse solver into ``DataRaceChecker``, which consults ``mayAliasAccesses``
-while deciding whether two accesses may share a location. Incomplete or
+such as interference edges and points-to facts. When enabled,
+``DataRaceChecker`` consults ``mayAliasAccesses`` while deciding whether two
+accesses may share a location. Incomplete or
 wildcard points-to results never suppress a race candidate; the checker only
 removes a pair when complete sparse results prove its access-target sets
 disjoint.
@@ -398,7 +393,7 @@ Multi-stage slicing is enabled with:
      --concur.points-to-sets=hash-consed input.bc
 
 The sparse analysis and hash-consed backend are both opt-in; mutable ordered
-sets remain the default.
+sets are the default.
 
 See also :doc:`../ir/svfg` for the underlying sparse value-flow graph and
 :doc:`../checker/concurrency` for the checker that consumes this refinement.
@@ -452,7 +447,7 @@ Usage
    mhp.enableLockSetAnalysis();
    mhp.analyze();
    
-   mhp::EscapeAnalysis escape(M);
+   lotus::EscapeAnalysis escape(M);
    escape.analyze();
    
    // Check for data races
@@ -463,7 +458,7 @@ Usage
            mayAlias(I1, I2) &&
            (isWrite(I1) || isWrite(I2)) &&
            !isProtectedByCommonLock(I1, I2, lsa) &&
-           escape.isShared(getMemoryLocation(I1))) {
+           escape.isEscaped(getMemoryLocation(I1))) {
          // Potential data race detected
        }
      }
@@ -494,14 +489,14 @@ CUDA Concurrency Analysis
 ``CUDA/CUDASemantics.cpp``, ``CUDA/CUDAStreamAutomaton.cpp``,
 ``CUDA/CUDASymbolicModel.cpp``, ``CUDA/CUDAMemoryModel.cpp``
 
-The CUDA concurrency module provides comprehensive PTX-level reasoning, thread/block 
+The CUDA concurrency module provides PTX-level reasoning, thread/block
 hierarchy analysis, and host-device synchronization modeling for GPU kernels.
 
 **Key Features**:
 
-- **Launch ABI Decoding**: Precisely decodes current CUDA Runtime, Extended (Ex), 
-  Cooperative, and Driver launch ABIs to extract grid dimensions, block dimensions, 
-  and shared memory allocations. Multi-device launches are recognized but currently 
+- **Launch ABI Decoding**: Decodes CUDA Runtime, Extended (Ex),
+  Cooperative, and Driver launch ABIs to extract grid dimensions, block dimensions,
+  and shared memory allocations. Multi-device launches are recognized but
   modeled conservatively.
 - **Stream and Event Automata**: Implements CFG-aware stream/event frontiers. 
   Accurately models stream/event creation, wait, synchronization, and non-blocking 

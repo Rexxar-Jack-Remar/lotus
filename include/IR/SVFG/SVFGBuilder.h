@@ -309,7 +309,11 @@ private:
   /// @brief Last graph returned by build(); used for compatibility accessors.
   SVFG *lastBuiltSVFG = nullptr;
 
+protected:
   SVFG *getActiveSVFG() const { return svfg ? svfg.get() : lastBuiltSVFG; }
+
+  /// Keep points-to queries on the graph that replaced a completed build.
+  void setActiveSVFG(SVFG *graph) { lastBuiltSVFG = graph; }
 
 public:
   /// @brief Constructor

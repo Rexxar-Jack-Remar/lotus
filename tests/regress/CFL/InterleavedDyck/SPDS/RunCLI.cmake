@@ -81,7 +81,7 @@ elseif(CASE STREQUAL "invalid_backwards_prefix")
 elseif(NOT CASE STREQUAL "crossing_forward")
   message(FATAL_ERROR "Unknown CLI regression: ${CASE}")
 endif()
-execute_process(COMMAND "${PROGRAM}" ${args} "${graph}"
+execute_process(COMMAND "${PROGRAM}" spds ${args} "${graph}"
   RESULT_VARIABLE status OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(NOT "${status}" STREQUAL "${expected_status}")
   message(FATAL_ERROR "${CASE}: expected exit ${expected_status}, got ${status}\n${out}\n${err}")

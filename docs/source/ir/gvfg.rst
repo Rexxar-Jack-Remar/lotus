@@ -141,8 +141,8 @@ The construction pipeline is intentionally split:
 
 - ``GuardedValueFlowGraphBuilderPass`` builds the structural graph for each
   function and stores it in a per-module pass-managed cache.
-- ``GuardedValueFlowBuilder.h`` is a compatibility shim that aliases the newer
-  builder pass name for older includes.
+- ``GuardedValueFlowBuilder.h`` aliases ``GuardedValueFlowGraphBuilderPass``
+  as ``GuardedValueFlowBuilderPass``.
 - ``LotusAAWrapper`` replaces placeholder memory edges with
   LotusAA-backed producers and materializes richer interprocedural interface and
   summary information.
@@ -151,7 +151,7 @@ The construction pipeline is intentionally split:
 
 When LotusAA's must-kill optimization is enabled, the adapter receives only
 the surviving roots of the incremental kill forest for each load. Conditional
-roots retain their ``path_cond_t`` provenance, so GVFG matching regions still
+roots retain their ``path_cond_t`` provenance, so GVFG matching regions
 represent the fallback blocking conditions for stores that cannot be killed
 statically.
 

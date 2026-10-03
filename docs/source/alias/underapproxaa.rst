@@ -21,7 +21,7 @@ Components
 * **EquivDB** – Equivalence class database
 * **UnderApproxAA** – Core under-approximation algorithm
 
-**Features**: Conservative alias analysis for safety-critical applications.
+**Features**: Under-approximate must-alias analysis with no false positives.
 
 Algorithm
 =========

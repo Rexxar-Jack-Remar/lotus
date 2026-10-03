@@ -1,7 +1,8 @@
 Utility Libraries
 ==================
 
-Lotus provides comprehensive utility libraries organized into categories: Platform, Random, Types, Benchmark, ADT, Formats, Algorithms, Vendor, LLVM, and Parallel.
+Lotus provides utility libraries organized into categories: Platform, Random,
+Types, Benchmark, ADT, Formats, Algorithms, LLVM, and Parallel.
 
 Dedicated module pages:
 
@@ -37,7 +38,7 @@ Type utilities in ``include/Utils/Types/``:
 * **Offset.h** - Offset manipulation utilities
 * **Nullable.h** - Nullable type utilities
 * **ScopeExit.h** - RAII-style scope exit handlers
-* **range.h** - Range utilities
+* **Range.h** - Terminal color and text styling utilities (vendored rang library)
 
 Benchmark
 ~~~~~~~~~
@@ -65,12 +66,12 @@ Data structures in ``lib/Utils/ADT/`` and ``include/Utils/ADT/``:
 * **VectorMap.h** / **VectorSet.h** - Vector-based map/set containers
 * **anatree.h** - Tree analysis utilities
 * **GraphSlicer.h** - Graph slicing utilities
-* **PdQsort.h** - Parallel quicksort implementation
+* **PdQsort.h** - Pattern-defeating quicksort implementation
 
 Iterator utilities (``include/Utils/ADT/Iterator/``):
 
 * **DereferenceIterator.h** - Iterator that dereferences values
-* **filter_iterator.h** - Filtered iterator
+* **FilterIterator.h** - Filtered iterator
 * **InfixOutputIterator.h** - Output iterator with infix separators
 * **IteratorAdaptor.h** / **IteratorFacade.h** - Iterator base classes
 * **IteratorRange.h** - Range wrapper for iterators
@@ -115,14 +116,6 @@ Parser Combinator Framework (pcomb):
 - **Parser/** - Base parser classes (Parser, ParseResult, StringParser, RegexParser, etc.)
 - **Combinator/** - Combinators (AltParser, SeqParser, ManyParser, LazyParser, etc.)
 - **InputStream/** - Input stream abstractions
-
-Vendor
-~~~~~~
-
-Third-party vendored libraries in ``include/Utils/Vendor/``:
-
-* **spdlog/** - Fast C++ logging library
-* **CLI11.h** - Command-line argument parsing
 
 Usage
 ~~~~~
@@ -246,7 +239,7 @@ Debugging and Profiling
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 * **Debug.h** - Debug output utilities
-* **Log.h** - Logging infrastructure (uses spdlog from Utils/Vendor/)
+* **Log.h** - Rudimentary warning and error logging stream
 * **Statistics.h** - Analysis statistics collection
 * **RecursiveTimer.h** - Recursive timing utilities
 
@@ -255,10 +248,10 @@ Debugging and Profiling
 .. code-block:: cpp
 
    #include "Utils/LLVM/Log.h"
-   LOG_INFO("Analysis completed");
+   INFO << "Analysis completed";
 
    #include "Utils/LLVM/Statistics.h"
-   Statistics::counter("functions_analyzed")++;
+   Statistics::run(module);
 
 Work Lists
 ~~~~~~~~~~
@@ -355,6 +348,6 @@ Common Usage Patterns
 .. code-block:: cpp
 
    #include "Utils/LLVM/Log.h"
-   LOG_INFO("Starting analysis");
-   LOG_DEBUG("Processing function: " << funcName);
-   LOG_ERROR("Error occurred: " << errorMsg);
+   INFO << "Starting analysis";
+   WARN << "Suspicious pattern in " << funcName;
+   ERR << "Error occurred: " << errorMsg;

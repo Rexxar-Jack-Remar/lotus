@@ -4,6 +4,11 @@ TUNA
 This section documents ``TUNA``, the compiler-optimization-based SMT
 simplification toolkit in Lotus.
 
+.. note::
+
+   This toolkit is for SMT formula simplification via LLVM IR optimization.
+   It is distinct from the TUNA strong-update alias analysis algorithm.
+
 Overview
 --------
 
@@ -37,13 +42,6 @@ It contains two modules:
   ``llvm2smt``, and ``llvm2feat``.
 - **GA** (``TUNA-Opt/GA/``): a genetic algorithm optimizer that searches for
   the optimal LLVM pass combination for a dataset of SMT files.
-
-TUNA-Learn
-~~~~~~~~~~
-
-A planned machine-learning-based optimization framework under
-``lib/Solvers/SMT/TUNA/TUNA-Learn/``. Currently a placeholder with no
-implementation.
 
 .. _tuna-build:
 
@@ -156,7 +154,7 @@ Manager (``-passes=``) syntax:
 +===========================+=======+==========================================+
 | ``passes-slot-old.txt``   | 9     | Core passes used by the original SLOT    |
 +---------------------------+-------+------------------------------------------+
-| ``passes-run.txt``        | 41    | All currently supported meaningful passes|
+| ``passes-run.txt``        | 41    | Supported passes used for optimization   |
 +---------------------------+-------+------------------------------------------+
 | ``passes-filter.txt``     | 25    | Subset with clear optimization benefit   |
 +---------------------------+-------+------------------------------------------+

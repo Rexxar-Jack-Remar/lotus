@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.18)
 project(lotus C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -87,10 +87,17 @@ if(LOTUS_BUILD_TESTS)
 endif()
 
 # Third-party libraries (CUDD, WPDS, spdlog)
-add_subdirectory(third-party)
+if(LOTUS_BUILD_ALL_LIBRARIES)
+    add_subdirectory(third-party)
+    add_subdirectory(lib)
+else()
+    # Keep targets discoverable; CMake brings in the dependency closure of
+    # selected tools, tests, examples, or explicitly requested libraries.
+    add_subdirectory(third-party EXCLUDE_FROM_ALL)
+    add_subdirectory(lib EXCLUDE_FROM_ALL)
+endif()
 
 # Add subdirectories
-add_subdirectory(lib)
 add_subdirectory(tools)
 add_subdirectory(benchmarks)
 
@@ -115,4 +122,6 @@ install(FILES
   config/linux_kernel_api.spec
   DESTINATION share/lotus/config)
 
+include(cmake/LotusBuildAcceleration.cmake)
+lotus_apply_build_acceleration()
 lotus_print_build_summary()

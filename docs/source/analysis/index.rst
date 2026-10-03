@@ -20,8 +20,8 @@ At a glance:
   NTSCD variants, DOD variants, strong control closure, and Lotus ICFG
   integration. See :doc:`control_dependence`.
 - **Concurrency** (``lib/Concurrency``): Thread-aware analyses for
-  multi-threaded code (MHP, lock sets, thread modeling). Now documented in its
-  own section: see :doc:`../concurrency/index`.
+  multi-threaded code (MHP, lock sets, thread modeling). See
+  :doc:`../concurrency/index`.
 - **DebugInfo** (``lib/Analysis/DebugInfo``): Source-location and metadata
   extraction support. See :doc:`debug_info`.
 - **Loop** (``lib/Analysis/Loop``): Loop-dependence, iteration-space, and

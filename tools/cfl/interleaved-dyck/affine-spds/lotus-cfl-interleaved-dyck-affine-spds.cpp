@@ -37,7 +37,7 @@ std::vector<unsigned> stack(std::string_view text) {
 }
 void usage() {
   std::cout
-      << "Usage: lotus-cfl-interleaved-dyck-affine-spds [options] graph.dot\n"
+      << "Usage: lotus-cfl-interleaved-dyck affine-spds [options] graph.dot\n"
          "  --all-pairs             analyze every source/target pair\n"
          "  --query SOURCE TARGET   one query (default post*)\n"
          "  --source V              query all successors using post*\n"
@@ -219,7 +219,7 @@ void certificate(std::ostream &out, const affine::HistoryComparison &comparison,
   }
 }
 } // namespace
-int main(int argc, char **argv) {
+int runInterleavedDyckAffineSPDS(int argc, char **argv) {
   try {
     affine::Options options;
     std::optional<dyck::Vertex> source, target;

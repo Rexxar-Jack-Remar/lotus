@@ -6,9 +6,9 @@ communication structure in the SPMD model rather than shared-memory threading.
 ## Components
 
 - `MPIProcessModel`: extracts MPI operations and records metadata such as
-  communicator, rank, tag, request, and window handles. It is the emitter of
-  normalized MPI facts, not the final semantic owner of point-to-point or
-  request truth.
+  communicator, rank, tag, request, and window handles. It normalizes raw
+  calls into MPI facts; point-to-point and request semantics are decided by
+  the fact classes below.
 - `MPICollectiveAnalysis`: owns collective protocol composition, collective
   compatibility, and rank-guarded collective reasoning.
 - `MPIRMAAnalysis`: tracks RMA windows, synchronization epochs, and possible
@@ -17,8 +17,7 @@ communication structure in the SPMD model rather than shared-memory threading.
 
 ## Authoritative Facts
 
-The following internal facts are the primary reasoning surfaces for the MPI
-subsystem:
+The following internal facts are the inputs that the MPI checkers reason over:
 
 - `MPIProcessSetFact` / `MPIParticipantSet`: canonical process/rank scope facts
 - `MPIRequestSetFact`: request lifecycle and completion-scope facts
@@ -29,12 +28,12 @@ subsystem:
 - `MPIFunctionSummary`: projected function exit-state across channel/request and
   collective effects
 
-Legacy result buckets and summary counters are projected from these facts for
-compatibility.
+The public result buckets in `MPIAnalysis::getResults()` are derived from these
+facts.
 
 ## Entry Point
 
-Use [MPIAnalysis.h](lotus/include/Concurrency/MPI/MPIAnalysis.h):
+Use [MPIAnalysis.h](../../include/Concurrency/MPI/MPIAnalysis.h):
 
 ```c++
 mpi::MPIAnalysis analysis(module);
@@ -85,8 +84,8 @@ The top-level results include:
 - Unknown ranks, tags, or communicators are handled conservatively.
 - PSCW RMA synchronization is modeled, but unresolved access/exposure scopes
   still degrade to model gaps rather than strong proofs.
-- Some public result buckets remain compatibility projections of richer
-  automaton/summary state rather than direct user-facing semantic APIs.
+- Some public result buckets are derived views over richer automaton/summary
+  state, so their fields are coarser than the underlying facts.
 
 ## Tests
 

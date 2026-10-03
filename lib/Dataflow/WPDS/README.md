@@ -131,9 +131,7 @@ The four existing client functions have compatible overloads taking
 
 Query batches currently use a prepared liveness session and deterministic,
 distinct boundary seeds drawn from the module. The other client analyses
-support runtime backend selection for one-shot runs. See
-[BACKEND_AUDIT.md](BACKEND_AUDIT.md) for the lowering, query, ownership, SWPDS
-lifecycle, concurrency, and compatibility contracts.
+support runtime backend selection for one-shot runs.
 
 ## References
 

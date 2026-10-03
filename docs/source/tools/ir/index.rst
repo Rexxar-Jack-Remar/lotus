@@ -1,5 +1,10 @@
-PDG Query – Program Dependence Graph Queries
-==============================================
+IR Tools
+========
+
+This page documents the command-line tools under ``tools/ir/``.
+
+PDG Query (lotus-ir-pdg-query)
+------------------------------
 
 Interactive and batch query engine for the Program Dependence Graph (PDG).
 
@@ -74,6 +79,38 @@ Relevant options:
 - ``--function=<name>`` restricts the experiment to one function.
 - ``--seed-index=N`` adds closure seeds; the function entry is always included.
 - ``--format=text|json|csv`` selects the output format.
+
+UseTraceSSA (lotus-ir-usetracessa)
+----------------------------------
+
+Driver for value-flow use histories and defect detection (double-free,
+use-after-free, memory-leak, and file-leak) over Lotus SVFG.
+
+**Binary**: ``lotus-ir-usetracessa``  
+**Location**: ``tools/ir/lotus-ir-usetracessa.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   # Check for defects
+   ./build/bin/lotus-ir-usetracessa --check=double-free program.bc
+   ./build/bin/lotus-ir-usetracessa --check=use-after-free program.bc
+   ./build/bin/lotus-ir-usetracessa --check=memory-leak program.bc
+   ./build/bin/lotus-ir-usetracessa --check=file-leak program.bc
+
+   # Query flow path between SVFG nodes
+   ./build/bin/lotus-ir-usetracessa --source-node=1 --sink-node=5 program.bc
+
+Relevant options:
+
+- ``--check=double-free|use-after-free|memory-leak|file-leak`` – Run detection
+- ``--context-limit=k`` – Use a bounded call string; omit for unbounded
+- ``--source-node=<ID>`` and ``--sink-node=<ID>`` – Query flow reachability
+- ``--format=text|json|dot`` – Select output format (default: ``text``)
+- ``--dump-svfg=<file>`` – Write the source SVFG to a DOT file
+- ``--timing`` – Print analysis phase timings to standard error
+- ``--quiet`` – Suppress issue and witness details
 
 .. toctree::
    :maxdepth: 1

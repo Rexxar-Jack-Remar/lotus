@@ -19,7 +19,7 @@ int main (int argc, char *argv[]){
     }
   }
 
-  printf("%ld, %ld\n", arr2[0][0], arr2[iterations][iterations2 / 2]);
+  printf("%lld, %lld\n", arr2[0][0], arr2[iterations][iterations2 / 2]);
 
   return 0;
 }

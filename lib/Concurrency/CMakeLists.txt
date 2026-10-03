@@ -29,6 +29,9 @@ add_library(Concurrency STATIC
 target_link_libraries(Concurrency
   CanaryLLVMUtils
   CanaryAliasAnalysisWrapper
+  # StaticThreadSharingAnalysis uses Sea-DSA directly, independently of the
+  # wrapper's available backends.
+  SeaDsaAnalysis
   FlowSensitivePTA
   SVFG
 )

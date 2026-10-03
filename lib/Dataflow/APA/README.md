@@ -42,10 +42,9 @@ include/Dataflow/APA/
 └── Passes/                        # Legacy-pass wrappers
 ```
 
-The current layout is the supported public header structure; there are no
-compatibility aliases for an older pre-reorg layout.
+The layout shown above is the supported public header structure.
 
-The solver tree is grouped by responsibility, with no catch-all `Detail` directory:
+The solver tree is grouped by responsibility:
 
 ```text
 Solver/
@@ -60,7 +59,7 @@ Solver/
     ├── Policy.h    # Policy registration, requirements, and validation
     ├── Signals.h   # Read-only local cost signals and cached metadata lookup
     ├── Selector.h  # Dirty candidates and versioned heap; no policy formulas
-    └── StructuralModel.h # Legacy graph-only ordering simulation
+    └── StructuralModel.h # Graph-only ordering simulation (comparison baseline)
 ```
 
 The public and implementation trees are intentionally not exact mirrors.
@@ -195,12 +194,12 @@ LLVM instruction.
 
 ### Order-aware state elimination
 
-`EliminationOptions::Ordering` supports the draft's `Structural`,
-`ExpressionAware`, `StarRisk`, and `Hybrid` policies, plus `ReversePostOrder`,
-seeded `Random`, `MinDegree`, `MinFill`, and `Explicit` baselines.
-The historical `Default` and `CostAware` policies remain available unchanged.
+`EliminationOptions::Ordering` supports four order-aware policies:
+`Structural`, `ExpressionAware`, `StarRisk`, and `Hybrid`, plus
+`ReversePostOrder`, seeded `Random`, `MinDegree`, `MinFill`, and `Explicit`
+baselines. `Default` and `CostAware` are retained as reference policies.
 
-The new policies use the shared `Solver/Elimination/SparseSolver.h` engine. It removes
+The four order-aware policies use the shared `Solver/Elimination/SparseSolver.h` engine. It removes
 each pivot from the live graph and back-substitutes its recorded equation to
 recover entry-to-node summaries at **every** program point. Online ordering requires
 `StateElimination`; incompatible ADT/ordering requests are rejected rather than
@@ -209,9 +208,9 @@ exposes the same `Ordering` and `Order` settings for both equation directions,
 the whole-program forward-summary solver, and the modular per-procedure builder.
 The separate interprocedural affine module driver exposes equivalent `ordering`
 and `order` fields in `InterAffineEqualitiesOptions`, forwarding them to its
-per-procedure solver without changing its historical ADT default.
+per-procedure solver while keeping ADT as its default.
 
-Policy scores follow the draft:
+Policy scores:
 
 - Structural: `|P| * |Q|`, excluding the pivot itself.
 - Expression-aware: sum of `size(in) + size(self) + size(out) + 2` over bypasses;
@@ -227,9 +226,9 @@ Star is **not** evidence that semantic iteration has been memoized. Clients may
 supply an immutable `Order.IsStarResultCached` snapshot keyed by the **operand**
 expression pointer. No callback means an ordinary uncached interpretation:
 Star-risk still uses iteration exposure, and Hybrid still uses all three signals.
-Strategies never silently degrade to Structural or omit requested terms. DAG sizes
-are always prepared for policies that require them; missing prepared metadata is
-an error. There are no signal-disabling/fallback flags.
+Strategies always report Structural as a requested term alongside the others; DAG sizes
+are always prepared for policies that require them, and missing prepared metadata is
+an error.
 
 `Solver/Ordering/Selector.h` maintains dirty candidates and a versioned min-heap.
 Only pivot predecessors/successors are refreshed after each elimination. Ties
@@ -258,9 +257,9 @@ Invalid normalization caps and permutations are rejected.
 
 For **order-only performance comparisons**, enable `--order-sparse` for every
 configuration, including Default/CostAware, so all use the same sparse engine.
-The sparse intraprocedural Default retains the historical pivot permutation;
+The sparse intraprocedural Default uses a fixed pivot permutation;
 the sparse equation Default uses ascending local SCC indices. Do not attribute
-differences against the legacy full-matrix engine solely to ordering.
+differences against the dense full-matrix engine solely to ordering.
 
 Diagnostics include initial construction, elimination and back-substitution
 allocations, bypass counts, peak reachable live-summary DAG nodes/child edges,
@@ -284,8 +283,8 @@ bounded nonconvergent stars must not be assumed order-independent.
 `OnlineOrderTest.cpp` includes worked-score checks, randomized incremental/full
 differentials, exact bounded-language comparison against direct graph paths,
 and exhaustive four-node permutations for separate allocation/live-DAG oracles.
-These validate the mechanism; they do not replace the draft's real-program
-experiments, statistical analysis, or empirical cap calibration.
+These validate the mechanism; they do not establish real-program
+performance, statistical significance, or empirically calibrated caps.
 
 Three elimination-style solvers are exposed via `elimination::EliminationOptions`:
 
@@ -360,7 +359,7 @@ LLVM client entry points currently include:
 These are tested for parity with the existing worklist-style interprocedural
 solver on focused forward-analysis cases. Lockset wrapper propagation is also
 tested directly because the summary graph can preserve a callee-return fact that
-the legacy worklist path currently drops. The generic solver is intentionally
+the worklist path currently drops. The generic solver is intentionally
 forward-only at this stage; affine equalities remain out of scope for this
 backend.
 
@@ -532,7 +531,7 @@ Memory modeling can be toggled with:
 
 - `-elim-use-memssa` (default: true) — use MemorySSA to refine memory analyses
 
-When print flags are enabled, pass output now includes solver diagnostics:
+When print flags are enabled, pass output includes solver diagnostics:
 status, requested/executed method, ADT fallback reason, and star-iteration
 counters.
 
@@ -542,14 +541,14 @@ counters.
   `Ok`, `FallbackToState`, `NonConvergentStar`, `InvalidProblem`.
 - `IntraEliminationSolver::getDiagnostics()` reports method/fallback/counters.
 - `DataFlowResultT` uses explicit read lookup:
-  `containsNode(node)` and `tryIN(node)` (nullable pointer), and no longer
-  returns implicit default facts for missing nodes.
+  `containsNode(node)` and `tryIN(node)` (nullable pointer); missing nodes have
+  no implicit default fact.
 - `InterDataFlowResultT<K, ...>` extends the context-sensitive result type with
   `tryIN(inst, ctx)`, `tryOUT(inst, ctx)`, and `contextsForInstruction(inst)`.
 
 ## Analysis coverage notes
 
-Constant propagation now tracks full LLVM `Constant*` values (integers, floats,
+Constant propagation tracks full LLVM `Constant*` values (integers, floats,
 vectors, aggregates), uses LLVM constant-folding and instruction-simplification
 when operands are constant, and performs alias-aware memory updates when
 `AAResults` are available. Uninitialized-variable tracking normalizes pointer

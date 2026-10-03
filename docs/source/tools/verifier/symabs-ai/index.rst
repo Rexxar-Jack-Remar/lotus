@@ -107,7 +107,8 @@ Command-Line Options
 **Output**:
 
 - ``--verbose`` – Enable detailed output
-- ``--dump-cfg`` – Dump control flow graph
+- ``--show-all-blocks`` – Show analysis results for all basic blocks
+- ``--show-exit-blocks`` – Show analysis results at exit blocks
 
 Abstract Domains
 ----------------
