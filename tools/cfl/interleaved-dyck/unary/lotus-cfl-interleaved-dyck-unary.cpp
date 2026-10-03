@@ -1,6 +1,7 @@
 #include "CFL/InterleavedDyck/Core/Graph.h"
 #include "CFL/InterleavedDyck/Unary/Solver.h"
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -29,6 +30,7 @@ namespace {
 struct CommandLine {
   std::string input;
   std::string output;
+  std::string component_output;
   unary::Algorithm algorithm = unary::Algorithm::Adaptive;
   bool sparsify = true;
   bool add_reverse_edges = false;
@@ -53,6 +55,8 @@ void usage(std::ostream &output) {
          "  --stats          print construction and backend statistics\n"
          "  --phase-timing   adaptive only: collect RQ2.2 phase times\n"
          "  --print-pairs    materialize non-reflexive component pairs\n"
+         "  --dump-components FILE\n"
+         "                   write sorted vertex-to-component identifiers\n"
          "  -o FILE          write output to FILE\n"
          "  -h, --help       show this help\n";
 }
@@ -121,6 +125,13 @@ CommandLine parseCommandLine(int argc, char **argv) {
       result.print_pairs = true;
       continue;
     }
+    if (argument == "--dump-components") {
+      if (++i == argc) {
+        throw std::invalid_argument("missing value for --dump-components");
+      }
+      result.component_output = argv[i];
+      continue;
+    }
     if (argument == "-o") {
       if (++i == argc) {
         throw std::invalid_argument("missing value for -o");
@@ -164,6 +175,31 @@ template <typename Result> std::size_t componentCount(const Result &result) {
 }
 
 template <typename Result>
+void dumpComponents(const std::string &path, const Result &result) {
+  if (path.empty()) {
+    return;
+  }
+  using Entry = std::pair<interleaved_dyck::Vertex, std::size_t>;
+  std::vector<Entry> ordered(result.components().begin(),
+                             result.components().end());
+  std::sort(ordered.begin(), ordered.end(),
+            [](const Entry &left, const Entry &right) {
+              return left.first < right.first;
+            });
+  std::ofstream output(path);
+  if (!output) {
+    throw std::runtime_error("cannot open component file: " + path);
+  }
+  for (const auto &[vertex, component] : ordered) {
+    output << vertex << ' ' << component << '\n';
+  }
+  output.flush();
+  if (!output) {
+    throw std::runtime_error("cannot write component file: " + path);
+  }
+}
+
+template <typename Result>
 void printPairs(std::ostream &output, const interleaved_dyck::Graph &graph,
                 const Result &result) {
   std::unordered_map<std::size_t, std::vector<interleaved_dyck::Vertex>> groups;
@@ -190,7 +226,7 @@ void printExecution(std::ostream &output,
          << "  peak construction payload estimate (bytes): "
          << stats.peak_working_bytes << '\n';
 #if defined(__APPLE__) || defined(__linux__)
-  struct rusage usage{};
+  struct rusage usage {};
   if (getrusage(RUSAGE_SELF, &usage) == 0) {
     std::uint64_t bytes = static_cast<std::uint64_t>(usage.ru_maxrss);
 #if defined(__linux__)
@@ -243,20 +279,19 @@ void printAdaptiveResult(std::ostream &output, const CommandLine &command_line,
       output << "  phase projection (us): " << phase.projection_us << '\n'
              << "  phase quotient sparsification (us): "
              << phase.quotient_sparsification_us << '\n'
-             << "  phase decomposition (us): " << phase.decomposition_us
-             << '\n'
+             << "  phase decomposition (us): " << phase.decomposition_us << '\n'
              << "  phase vertical construction (us): "
              << phase.vertical_construction_us << '\n'
-             << "  phase vertical solving (us): "
-             << phase.vertical_solving_us << '\n'
+             << "  phase vertical solving (us): " << phase.vertical_solving_us
+             << '\n'
              << "  phase horizontal construction (us): "
              << phase.horizontal_construction_us << '\n'
              << "  phase horizontal solving (us): "
              << phase.horizontal_solving_us << '\n'
              << "  phase parent-map labeling (us): "
              << phase.parent_map_labeling_us << '\n'
-             << "  phase boundary unions (us): "
-             << phase.boundary_unions_us << '\n'
+             << "  phase boundary unions (us): " << phase.boundary_unions_us
+             << '\n'
              << "  phase output lifting (us): " << phase.output_lifting_us
              << '\n';
     }
@@ -366,6 +401,7 @@ int main(int argc, char **argv) {
               std::chrono::steady_clock::now() - start);
       printAdaptiveResult(*output, command_line, graph, result,
                           elapsed.count());
+      dumpComponents(command_line.component_output, result);
     } else {
       unary::FixedCounterOptions options;
       options.sparsify = command_line.sparsify;
@@ -380,6 +416,7 @@ int main(int argc, char **argv) {
               std::chrono::steady_clock::now() - start);
       printFixedCounterResult(*output, command_line, graph, result,
                               elapsed.count());
+      dumpComponents(command_line.component_output, result);
     }
     return 0;
   } catch (const std::exception &error) {
