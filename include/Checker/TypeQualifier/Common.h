@@ -11,7 +11,7 @@
  */
 
 #pragma once
-#include "Alias/Specialized/TypeQualifier/FunctionSummary.h"
+#include "Checker/TypeQualifier/FunctionSummary.h"
 
 #include <llvm/Support/raw_ostream.h>
 

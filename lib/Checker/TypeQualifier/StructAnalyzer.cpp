@@ -2,9 +2,9 @@
 // Created by ubuntu on 12/26/17.
 //
 
-#include "Alias/Specialized/TypeQualifier/StructAnalyzer.h"
+#include "Checker/TypeQualifier/StructAnalyzer.h"
 
-#include "Alias/Specialized/TypeQualifier/Annotation.h"
+#include "Checker/TypeQualifier/Annotation.h"
 
 #include <llvm/IR/TypeFinder.h>
 #include <llvm/Support/raw_ostream.h>

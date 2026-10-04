@@ -1,4 +1,4 @@
-#include "Alias/Specialized/TypeQualifier/Helper.h"
+#include "Checker/TypeQualifier/Helper.h"
 
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"

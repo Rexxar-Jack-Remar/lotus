@@ -199,11 +199,11 @@ lotus_add_test_group(analysis sccp SCCP analysis_tests LINK_LIBS CanarySCCP)
 
 if(type_hierarchy_selected)
 lotus_collect_test_sources(analysis_tests
-  ../TypeHierarchy/DIBasedTypeHierarchyTest.cpp
-  ../TypeHierarchy/DIBasedTypeHierarchyTransitiveReachabilityTest.cpp
-  ../TypeHierarchy/DIBasedTypeHierarchySerializationTest.cpp
-  ../TypeHierarchy/LLVMVFTableTest.cpp
-  ../TypeHierarchy/CallGraphAlgorithmsTest.cpp)
+  TypeHierarchy/DIBasedTypeHierarchyTest.cpp
+  TypeHierarchy/DIBasedTypeHierarchyTransitiveReachabilityTest.cpp
+  TypeHierarchy/DIBasedTypeHierarchySerializationTest.cpp
+  TypeHierarchy/LLVMVFTableTest.cpp
+  CallGraph/CallGraphAlgorithmsTest.cpp)
 set_property(GLOBAL APPEND PROPERTY LOTUS_TEST_SUITE_analysis_tests_LINK_LIBS
   CanaryCallGraph CanaryTypeHierarchy LLVMAnalysis)
 endif()

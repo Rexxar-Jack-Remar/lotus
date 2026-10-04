@@ -1,12 +1,12 @@
 
 // #include <llvm/IR/Constants.h>
-#include "Alias/Specialized/TypeQualifier/NodeFactory.h"
+#include "Checker/TypeQualifier/NodeFactory.h"
 
 #include "llvm/IR/Constant.h"
 #include "llvm/Support/Casting.h"
 
-#include "Alias/Specialized/TypeQualifier/Common.h"
-#include "Alias/Specialized/TypeQualifier/Helper.h"
+#include "Checker/TypeQualifier/Common.h"
+#include "Checker/TypeQualifier/Helper.h"
 
 #include <limits>
 

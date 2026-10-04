@@ -1,5 +1,5 @@
-#include "Alias/Specialized/TypeQualifier/Annotation.h"
-#include "Alias/Specialized/TypeQualifier/QualifierAnalysis.h"
+#include "Checker/TypeQualifier/Annotation.h"
+#include "Checker/TypeQualifier/QualifierAnalysis.h"
 
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/InstIterator.h>

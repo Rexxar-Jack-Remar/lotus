@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "Alias/Specialized/TypeQualifier/StructAnalyzer.h"
+#include "Checker/TypeQualifier/StructAnalyzer.h"
 
 #include <unordered_map>
 

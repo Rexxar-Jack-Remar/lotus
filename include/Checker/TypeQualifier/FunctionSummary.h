@@ -11,10 +11,10 @@
  */
 
 #pragma once
-#include "Alias/Specialized/TypeQualifier/Annotation.h"
-#include "Alias/Specialized/TypeQualifier/Common.h"
-#include "Alias/Specialized/TypeQualifier/PtsSet.h"
-#include "Alias/Specialized/TypeQualifier/QualifierTypes.h"
+#include "Checker/TypeQualifier/Annotation.h"
+#include "Checker/TypeQualifier/Common.h"
+#include "Checker/TypeQualifier/PtsSet.h"
+#include "Checker/TypeQualifier/QualifierTypes.h"
 
 #include <map>
 #include <unordered_map>

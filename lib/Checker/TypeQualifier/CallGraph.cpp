@@ -1,8 +1,8 @@
-#include "Alias/Specialized/TypeQualifier/CallGraph.h"
+#include "Checker/TypeQualifier/CallGraph.h"
 
 #include "llvm/IR/InstrTypes.h"
 
-#include "Alias/Specialized/TypeQualifier/Annotation.h"
+#include "Checker/TypeQualifier/Annotation.h"
 
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Analysis/CallGraph.h>

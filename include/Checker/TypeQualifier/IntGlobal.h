@@ -2,11 +2,11 @@
 
 #include "llvm/Support/CommandLine.h"
 
-#include "Alias/Specialized/TypeQualifier/CRange.h"
-#include "Alias/Specialized/TypeQualifier/Common.h"
-#include "Alias/Specialized/TypeQualifier/FunctionSummary.h"
-#include "Alias/Specialized/TypeQualifier/StructAnalyzer.h"
-#include "Alias/Specialized/TypeQualifier/TaintSignature.h"
+#include "Checker/TypeQualifier/CRange.h"
+#include "Checker/TypeQualifier/Common.h"
+#include "Checker/TypeQualifier/FunctionSummary.h"
+#include "Checker/TypeQualifier/StructAnalyzer.h"
+#include "Checker/TypeQualifier/TaintSignature.h"
 
 #include <fstream>
 #include <iostream>

@@ -6,9 +6,9 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PatternMatch.h"
 
-#include "Alias/Specialized/TypeQualifier/Annotation.h"
-#include "Alias/Specialized/TypeQualifier/Helper.h"
-#include "Alias/Specialized/TypeQualifier/QualifierAnalysis.h"
+#include "Checker/TypeQualifier/Annotation.h"
+#include "Checker/TypeQualifier/Helper.h"
+#include "Checker/TypeQualifier/QualifierAnalysis.h"
 
 #include <cstring>
 #include <deque>

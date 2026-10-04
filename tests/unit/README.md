@@ -21,7 +21,6 @@ Top-level test buckets:
 - `IR/`
 - `Solvers/`
 - `SymbolicExecution/`
-- `TypeHierarchy/`
 - `Utils/`
 - `Verification/`
 - `TestUtils/` for shared test-only headers

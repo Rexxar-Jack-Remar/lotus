@@ -33,4 +33,3 @@ pages alongside an algorithm page when comparing analyses.
    ptsset
    spec
    tpa
-   typequalifier

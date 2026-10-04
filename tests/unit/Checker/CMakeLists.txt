@@ -8,6 +8,11 @@ lotus_add_test_group(checker kint KINT checker_tests
 lotus_add_test_group(checker pulse Pulse checker_tests LINK_LIBS PulseChecker ${Z3_LIBRARIES})
 lotus_add_test_group(checker saber Saber checker_tests LINK_LIBS Saber ${Z3_LIBRARIES})
 
+if(LOTUS_ENABLE_TYPE_QUALIFIER)
+  lotus_add_test_group(checker typequalifier TypeQualifier checker_tests
+    LINK_LIBS TypeQualifier)
+endif()
+
 lotus_test_group_enabled(checker reports reports_selected)
 if(reports_selected)
   lotus_collect_test_sources(checker_tests ReportFormattingTest.cpp)

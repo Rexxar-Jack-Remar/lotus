@@ -1,13 +1,13 @@
 #include "Analysis/CallGraph/AllocatedTypes.h"
+#include "Analysis/CallGraph/CHA/CHAResolver.h"
 #include "Analysis/CallGraph/CallGraph.h"
 #include "Analysis/CallGraph/CallGraphAnalysisType.h"
 #include "Analysis/CallGraph/CallGraphBuilder.h"
-#include "Analysis/CallGraph/CHA/CHAResolver.h"
-#include "Analysis/TypeHierarchy/DIBasedTypeHierarchy.h"
-#include "Analysis/TypeHierarchy/LLVMVFTableProvider.h"
 #include "Analysis/CallGraph/RTA/RTAResolver.h"
 #include "Analysis/CallGraph/VTA/VTAResolver.h"
 #include "Analysis/CallGraph/VirtualCallUtils.h"
+#include "Analysis/TypeHierarchy/DIBasedTypeHierarchy.h"
+#include "Analysis/TypeHierarchy/LLVMVFTableProvider.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>
@@ -39,7 +39,7 @@ std::set<std::string> getCalleeNames(const CallGraph &CG, const Instruction *CS)
   return Names;
 }
 
-}
+} // namespace
 
 TEST(CallGraphAlgorithmsTest, CHAResolver_ResolvesAllSubtypes) {
   LLVMContext Context;

@@ -13,11 +13,11 @@
 #include <llvm/IR/Value.h>
 
 // #include "IntGlobal.h"
-#include "Alias/Specialized/TypeQualifier/Helper.h"
-#include "Alias/Specialized/TypeQualifier/IntGlobal.h"
-#include "Alias/Specialized/TypeQualifier/PtsSet.h"
-#include "Alias/Specialized/TypeQualifier/StructAnalyzer.h"
-////#include "Alias/Specialized/TypeQualifier/UBIAnalysis.h"
+#include "Checker/TypeQualifier/Helper.h"
+#include "Checker/TypeQualifier/IntGlobal.h"
+#include "Checker/TypeQualifier/PtsSet.h"
+#include "Checker/TypeQualifier/StructAnalyzer.h"
+////#include "Checker/TypeQualifier/UBIAnalysis.h"
 
 #include <set>
 #include <unordered_map>

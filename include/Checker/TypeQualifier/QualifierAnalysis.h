@@ -15,13 +15,13 @@
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/BasicBlock.h>
 
-// #include "Alias/Specialized/TypeQualifier/UBIAnalysis.h"
-#include "Alias/Specialized/TypeQualifier/Config.h"
-#include "Alias/Specialized/TypeQualifier/FunctionSummary.h"
-#include "Alias/Specialized/TypeQualifier/IntGlobal.h"
-#include "Alias/Specialized/TypeQualifier/NodeFactory.h"
-#include "Alias/Specialized/TypeQualifier/PtsSet.h"
-#include "Alias/Specialized/TypeQualifier/QualifierTypes.h"
+// #include "Checker/TypeQualifier/UBIAnalysis.h"
+#include "Checker/TypeQualifier/Config.h"
+#include "Checker/TypeQualifier/FunctionSummary.h"
+#include "Checker/TypeQualifier/IntGlobal.h"
+#include "Checker/TypeQualifier/NodeFactory.h"
+#include "Checker/TypeQualifier/PtsSet.h"
+#include "Checker/TypeQualifier/QualifierTypes.h"
 
 #include <map>
 #include <set>

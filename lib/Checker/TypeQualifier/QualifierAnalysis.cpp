@@ -2,12 +2,12 @@
 // Created by ubuntu on 2/8/18.
 //
 
-#include "Alias/Specialized/TypeQualifier/QualifierAnalysis.h"
+#include "Checker/TypeQualifier/QualifierAnalysis.h"
 
-#include "Alias/Specialized/TypeQualifier/Annotation.h"
-#include "Alias/Specialized/TypeQualifier/CallGraph.h"
-#include "Alias/Specialized/TypeQualifier/FunctionSummary.h"
-#include "Alias/Specialized/TypeQualifier/Helper.h"
+#include "Checker/TypeQualifier/Annotation.h"
+#include "Checker/TypeQualifier/CallGraph.h"
+#include "Checker/TypeQualifier/FunctionSummary.h"
+#include "Checker/TypeQualifier/Helper.h"
 
 #include <cstring>
 #include <deque>

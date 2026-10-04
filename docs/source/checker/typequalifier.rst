@@ -3,9 +3,9 @@ TypeQualifier
 
 ``TypeQualifier`` contains qualifier-based analysis infrastructure.
 
-**Headers**: ``include/Alias/Specialized/TypeQualifier/``
+**Headers**: ``include/Checker/TypeQualifier/``
 
-**Implementation**: ``lib/Alias/Specialized/TypeQualifier/``
+**Implementation**: ``lib/Checker/TypeQualifier/``
 
 Overview
 --------

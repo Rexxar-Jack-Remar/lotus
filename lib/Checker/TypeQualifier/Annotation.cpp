@@ -1,7 +1,7 @@
 // TODO: this was used for analyzing Linux kernel, but maybe it is also
 // applicabel to general programs.
 
-#include "Alias/Specialized/TypeQualifier/Annotation.h"
+#include "Checker/TypeQualifier/Annotation.h"
 
 bool isAllocFn(StringRef name, int *size, int *flag) {
 

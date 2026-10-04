@@ -19,10 +19,7 @@ lotus_add_test_group(alias dyckaa UnificationBased/DyckAA alias_tests LINK_LIBS 
 lotus_add_test_group(alias seadsa UnificationBased/SeaDsa alias_tests LINK_LIBS SeaDsaAnalysis)
 lotus_add_test_group(alias allocaa Specialized/AllocAA alias_tests
   LINK_LIBS CanaryAllocAA LLVMAnalysis)
-if(LOTUS_ENABLE_TYPE_QUALIFIER)
-  lotus_add_test_group(alias typequalifier Specialized/TypeQualifier alias_tests
-    LINK_LIBS TypeQualifier)
-endif()
+
 lotus_add_test_group(alias underapproxaa Specialized/UnderApproxAA alias_tests
   LINK_LIBS CanaryUnderApproxAA)
 lotus_add_test_group(alias ptsset Infrastructure/PtsSet alias_tests LINK_LIBS CanaryAliasPtsSet)

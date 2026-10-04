@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "Alias/Specialized/TypeQualifier/IntGlobal.h"
+#include "Checker/TypeQualifier/IntGlobal.h"
 class CallGraphPass : public IterativeModulePass {
 private:
   bool runOnFunction(llvm::Function *);

@@ -11,7 +11,7 @@
  */
 
 #pragma once
-#include "Alias/Specialized/TypeQualifier/IntGlobal.h"
+#include "Checker/TypeQualifier/IntGlobal.h"
 
 #include <array>
 #include <stack>
