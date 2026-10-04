@@ -19,8 +19,10 @@ Top-level test buckets:
 - `Dataflow/`
 - `Fuzzing/`
 - `IR/`
+- `Security/`
 - `Solvers/`
 - `SymbolicExecution/`
+- `Transform/`
 - `Utils/`
 - `Verification/`
 - `TestUtils/` for shared test-only headers
@@ -69,7 +71,7 @@ still registers every case independently.
 
 Each subsystem builds one merged gtest binary: `alias_tests`, `analysis_tests`,
 `cfl_tests`, `checker_tests`, `concurrency_tests`, `dataflow_tests`, `ir_tests`,
-`solvers_tests`, `symbolic_execution_tests`, `utils_tests`, and
+`security_tests`, `solvers_tests`, `symbolic_execution_tests`, `transform_tests`, `utils_tests`, and
 `verification_tests`. Fuzzing currently has one test source in
 `fuzz_target_generation_test`. Loop and TypeHierarchy fixtures feed
 `analysis_tests`; PrimaryComponent cases feed `cfl_tests`; parallel utility

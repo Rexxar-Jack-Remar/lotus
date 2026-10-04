@@ -1,7 +1,7 @@
 include(${CMAKE_CURRENT_LIST_DIR}/UnitTestHelpers.cmake)
 
 foreach(subsystem Alias Analysis Checker CFL Concurrency Dataflow Fuzzing IR
-                  Solvers SymbolicExecution Utils Verification)
+                  Security Solvers SymbolicExecution Transform Utils Verification)
   string(TOLOWER "${subsystem}" selection_name)
   if(selection_name IN_LIST LOTUS_SELECTED_TEST_ROOTS)
     add_subdirectory(${subsystem})

@@ -185,8 +185,6 @@ lotus_add_test_group(analysis cfg CFG analysis_tests LINK_LIBS CanaryCFG CanaryI
 lotus_add_test_group(analysis controldependence ControlDependence analysis_tests
   LINK_LIBS CanaryICFGControlDependence CanaryICFG)
 lotus_add_test_group(analysis debuginfo DebugInfo analysis_tests LINK_LIBS CanaryDebugInfo)
-lotus_add_test_group(analysis general General analysis_tests
-  LINK_LIBS Spectre ConstantTimeVerify CanaryNisse)
 lotus_add_test_group(analysis multiplicity Multiplicity analysis_tests LINK_LIBS CanaryMultiplicity)
 lotus_add_test_group(analysis nullpointer NullPointer analysis_tests
   LINK_LIBS CanaryNullPointer CanaryDyckAA)

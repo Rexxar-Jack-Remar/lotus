@@ -111,7 +111,7 @@ endfunction()
 
 set(_lotus_test_roots
   alias alias-wrapper analysis checker cfl concurrency dataflow fuzzing ir
-  solvers symbolicexecution utils verification)
+  security solvers symbolicexecution transform utils verification)
 set(_lotus_test_choices ${_lotus_test_roots})
 foreach(group gpg dda aserpta bootstrapaa flowsensitive lotusaa sparrowaa tpa
               cclyzeraa dyckaa seadsa allocaa typequalifier underapproxaa ptsset)
@@ -130,6 +130,13 @@ foreach(group ae concurrency framework kint pulse saber reports)
 endforeach()
 foreach(group ifdside mono wpds apa demandapa npa vasco)
   list(APPEND _lotus_test_choices "dataflow/${group}")
+endforeach()
+
+foreach(group constanttime spectre)
+  list(APPEND _lotus_test_choices "security/${group}")
+endforeach()
+foreach(group nisse)
+  list(APPEND _lotus_test_choices "transform/${group}")
 endforeach()
 
 lotus_resolve_selection(LOTUS_TOOL_FAMILIES
