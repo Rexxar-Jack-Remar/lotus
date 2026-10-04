@@ -15,9 +15,10 @@ and ACF relations.
 Run with the requested Python environment:
 
 ```sh
-conda run -n py311 python scripts/rq3/run_rq3.py --dry-run
-conda run -n py311 python scripts/rq3/run_rq3.py
-conda run -n py311 python scripts/rq3/aggregate_rq3.py
+cmake --build build --target lotus-cfl-interleaved-dyck -j2
+conda run -n py311 python scripts/unary/rq3/run_rq3.py --dry-run
+conda run -n py311 python scripts/unary/rq3/run_rq3.py
+conda run -n py311 python scripts/unary/rq3/aggregate_rq3.py
 ```
 
 Use `--dataset`, `--benchmark`, `--experiment`, and `--restart` for pilot runs.  The runner

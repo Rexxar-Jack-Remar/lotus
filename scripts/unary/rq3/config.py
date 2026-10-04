@@ -3,13 +3,15 @@
 from pathlib import Path
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
+INTERLEAVED_DYCK_BINARY = (
+    REPOSITORY_ROOT / "build/bin/lotus-cfl-interleaved-dyck"
+)
 BINARIES = {
-    "staged": REPOSITORY_ROOT
-    / "build/bin/lotus-cfl-interleaved-dyck-staged-bounds",
-    "mcfl": REPOSITORY_ROOT / "build/bin/lotus-cfl-interleaved-dyck-mcfl",
-    "unary": REPOSITORY_ROOT / "build/bin/lotus-cfl-interleaved-dyck-unary",
+    "staged": INTERLEAVED_DYCK_BINARY,
+    "mcfl": INTERLEAVED_DYCK_BINARY,
+    "unary": INTERLEAVED_DYCK_BINARY,
 }
 
 # Value-flow uses an analysis-specific endpoint language in StagedBounds.  Keep
@@ -44,6 +46,7 @@ EXPERIMENTS = [
         "name": "union-dyck",
         "tool": "staged",
         "args": [
+            "staged-bounds",
             "--analysis",
             "{analysis}",
             "--method",
@@ -56,6 +59,7 @@ EXPERIMENTS = [
         "name": "staged-on-demand",
         "tool": "staged",
         "args": [
+            "staged-bounds",
             "--analysis",
             "{analysis}",
             "--method",
@@ -69,14 +73,14 @@ EXPERIMENTS = [
     {
         "name": "acf",
         "tool": "unary",
-        "args": ["--algorithm", "adaptive", "--bidirect", "--stats"],
+        "args": ["unary", "--algorithm", "adaptive", "--bidirect", "--stats"],
         "artifact_kind": "components",
         "enabled": True,
     },
     {
         "name": "mcfl-plus-d1",
         "tool": "mcfl",
-        "args": ["--dimension", "1", "--stats"],
+        "args": ["mcfl", "--dimension", "1", "--stats"],
         "artifact_kind": "mcfl",
         "family": "plus",
         "dimension": 1,
@@ -85,7 +89,7 @@ EXPERIMENTS = [
     {
         "name": "mcfl-plus-d2",
         "tool": "mcfl",
-        "args": ["--dimension", "2", "--stats"],
+        "args": ["mcfl", "--dimension", "2", "--stats"],
         "artifact_kind": "mcfl",
         "family": "plus",
         "dimension": 2,
@@ -94,7 +98,7 @@ EXPERIMENTS = [
     {
         "name": "mcfl-plus-d3",
         "tool": "mcfl",
-        "args": ["--dimension", "3", "--stats"],
+        "args": ["mcfl", "--dimension", "3", "--stats"],
         "artifact_kind": "mcfl",
         "family": "plus",
         "dimension": 3,
@@ -104,7 +108,7 @@ EXPERIMENTS = [
     {
         "name": "mcfl-circ-d1",
         "tool": "mcfl",
-        "args": ["--dimension", "1", "--simple", "--stats"],
+        "args": ["mcfl", "--dimension", "1", "--simple", "--stats"],
         "artifact_kind": "mcfl",
         "family": "circ",
         "dimension": 1,
@@ -113,7 +117,7 @@ EXPERIMENTS = [
     {
         "name": "mcfl-circ-d2",
         "tool": "mcfl",
-        "args": ["--dimension", "2", "--simple", "--stats"],
+        "args": ["mcfl", "--dimension", "2", "--simple", "--stats"],
         "artifact_kind": "mcfl",
         "family": "circ",
         "dimension": 2,
@@ -122,7 +126,7 @@ EXPERIMENTS = [
     {
         "name": "mcfl-circ-d3",
         "tool": "mcfl",
-        "args": ["--dimension", "3", "--simple", "--stats"],
+        "args": ["mcfl", "--dimension", "3", "--simple", "--stats"],
         "artifact_kind": "mcfl",
         "family": "circ",
         "dimension": 3,
@@ -139,11 +143,11 @@ MEMORY_LIMIT_GIB = 128
 STOP_REPETITIONS_AFTER_FAILURE = True
 CAPTURE_RELATIONS = True
 
-OUTPUT_CSV = REPOSITORY_ROOT / "scripts/rq3/rq3-runs.csv"
-BOUNDS_CSV = REPOSITORY_ROOT / "scripts/rq3/rq3-bounds.csv"
-METHODS_CSV = REPOSITORY_ROOT / "scripts/rq3/rq3-methods.csv"
-LOG_DIRECTORY = REPOSITORY_ROOT / "scripts/rq3/log"
-ARTIFACT_DIRECTORY = REPOSITORY_ROOT / "scripts/rq3/artifacts"
+OUTPUT_CSV = REPOSITORY_ROOT / "scripts/unary/rq3/rq3-runs.csv"
+BOUNDS_CSV = REPOSITORY_ROOT / "scripts/unary/rq3/rq3-bounds.csv"
+METHODS_CSV = REPOSITORY_ROOT / "scripts/unary/rq3/rq3-methods.csv"
+LOG_DIRECTORY = REPOSITORY_ROOT / "scripts/unary/rq3/log"
+ARTIFACT_DIRECTORY = REPOSITORY_ROOT / "scripts/unary/rq3/artifacts"
 RESUME_EXISTING_CSV = True
 
 EXTRA_ENVIRONMENT = {}
