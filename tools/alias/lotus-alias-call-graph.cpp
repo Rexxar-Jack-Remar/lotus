@@ -31,18 +31,20 @@
 #include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
 #include "Alias/InclusionBased/LotusAA/Support/FunctionPointerResults.h"
 #include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
-#include "Alias/Specialized/FPA/CallGraphPass.h"
-#include "Alias/Specialized/FPA/Common.h"
-#include "Alias/Specialized/FPA/Config.h"
-#include "Alias/Specialized/FPA/FLTAPass.h"
-#include "Alias/Specialized/FPA/KELPPass.h"
-#include "Alias/Specialized/FPA/MLTADFPass.h"
-#include "Alias/Specialized/FPA/MLTAPass.h"
 #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/UnificationBased/DyckAA/DyckCallGraph.h"
 #include "Alias/UnificationBased/DyckAA/DyckCallGraphNode.h"
+#include "Analysis/CallGraph/FPA/CallGraphPass.h"
+#include "Analysis/CallGraph/FPA/Common.h"
+#include "Analysis/CallGraph/FPA/Config.h"
+#include "Analysis/CallGraph/FPA/FLTAPass.h"
+#include "Analysis/CallGraph/FPA/KELPPass.h"
+#include "Analysis/CallGraph/FPA/MLTADFPass.h"
+#include "Analysis/CallGraph/FPA/MLTAPass.h"
 
 #include <chrono>
+#include <fstream>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <system_error>
@@ -99,6 +101,14 @@ static cl::opt<std::string> IRFile(cl::Positional, cl::Required,
 static cl::opt<int> FPAMaxTypeLayer("fpa-max-type-layer",
                                     cl::desc("Max type layer for FPA"),
                                     cl::init(10), cl::cat(CGCat));
+
+static cl::opt<bool> FPADebug("fpa-debug",
+                              cl::desc("Enable FPA debug mode"),
+                              cl::init(false), cl::cat(CGCat));
+
+static cl::opt<std::string> FPADumpTargets("fpa-dump-targets",
+                                           cl::desc("Dump FPA resolved targets to file (use 'cout' for stdout)"),
+                                           cl::init(""), cl::cat(CGCat));
 
 struct DiagTimer {
   std::chrono::steady_clock::time_point Start;
@@ -372,7 +382,7 @@ static void buildCGWithFPA(llvm::Module &M, llvm::CallGraph &CG, CGType Type) {
   GlobalCtx.Modules = std::move(Modules);
   GlobalCtx.ModuleMaps.insert({&M, M.getName()});
 
-  debug_mode = false;
+  debug_mode = FPADebug;
   max_type_layer = FPAMaxTypeLayer;
 
   CallGraphPass *Pass = nullptr;
@@ -394,6 +404,51 @@ static void buildCGWithFPA(llvm::Module &M, llvm::CallGraph &CG, CGType Type) {
   }
 
   Pass->run(Modules);
+
+  if (EmitStats) {
+    int totalsize = 0;
+    for (auto *IC : GlobalCtx.IndirectCallInsts)
+      totalsize += GlobalCtx.Callees[IC].size();
+
+    llvm::errs() << "\n@@ Total number of final callees: " << totalsize << ".\n";
+    llvm::errs() << "############## Result Statistics ##############\n";
+    llvm::errs() << "# Number of virtual calls: \t\t\t" << GlobalCtx.NumVirtualCall << "\n";
+    llvm::errs() << "# Number of indirect calls: \t\t\t" << GlobalCtx.IndirectCallInsts.size() << "\n";
+    llvm::errs() << "# Number of indirect calls with targets: \t" << GlobalCtx.NumValidIndirectCalls << "\n";
+    llvm::errs() << "# Number of indirect-call targets: \t\t" << GlobalCtx.NumIndirectCallTargets << "\n";
+    llvm::errs() << "# Number of address-taken functions: \t\t" << GlobalCtx.AddressTakenFuncs.size() << "\n";
+    llvm::errs() << "# Number of multi-layer calls: \t\t\t" << GlobalCtx.NumSecondLayerTypeCalls << "\n";
+    llvm::errs() << "# Number of multi-layer targets: \t\t" << GlobalCtx.NumSecondLayerTargets << "\n";
+    llvm::errs() << "# Number of one-layer calls: \t\t\t" << GlobalCtx.NumFirstLayerTypeCalls << "\n";
+    llvm::errs() << "# Number of one-layer targets: \t\t\t" << GlobalCtx.NumFirstLayerTargets << "\n";
+    llvm::errs() << "# Number of simple indirect calls: \t\t\t" << GlobalCtx.NumSimpleIndCalls << "\n";
+    llvm::errs() << "# Number of confined functions: \t\t\t" << GlobalCtx.NumConfinedFuncs << "\n";
+  }
+
+  if (!FPADumpTargets.empty()) {
+    std::ostream *output = &std::cout;
+    std::ofstream fileStream;
+    if (FPADumpTargets != "cout") {
+      fileStream.open(FPADumpTargets);
+      output = &fileStream;
+    }
+    for (auto &curEle : GlobalCtx.Callees) {
+      if (curEle.first->isIndirectCall() && curEle.first->getDebugLoc()) {
+        FuncSet funcs = curEle.second;
+        auto *Scope = llvm::cast<llvm::DIScope>(curEle.first->getDebugLoc().getScope());
+        *output << Scope->getFilename().str() << ":" 
+                << curEle.first->getDebugLoc().getLine() << ":" 
+                << curEle.first->getDebugLoc().getCol() << "|";
+        bool first = true;
+        for (llvm::Function *func : funcs) {
+          if (!first) *output << ",";
+          *output << func->getName().str();
+          first = false;
+        }
+        *output << "\n";
+      }
+    }
+  }
 
   for (const auto &CallSiteResults : GlobalCtx.Callees) {
     llvm::CallInst *CI = CallSiteResults.first;

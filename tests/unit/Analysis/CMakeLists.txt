@@ -205,7 +205,7 @@ lotus_collect_test_sources(analysis_tests
   ../TypeHierarchy/LLVMVFTableTest.cpp
   ../TypeHierarchy/CallGraphAlgorithmsTest.cpp)
 set_property(GLOBAL APPEND PROPERTY LOTUS_TEST_SUITE_analysis_tests_LINK_LIBS
-  CanaryTypeHierarchy LLVMAnalysis)
+  CanaryCallGraph CanaryTypeHierarchy LLVMAnalysis)
 endif()
 if(loop_selected)
 lotus_collect_test_sources(analysis_tests
