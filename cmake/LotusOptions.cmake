@@ -110,7 +110,7 @@ function(lotus_resolve_selection option_name available out_var)
 endfunction()
 
 set(_lotus_test_roots
-  alias alias-wrapper analysis checker cfl concurrency dataflow fuzzing ir
+  alias analysis checker cfl concurrency dataflow fuzzing ir
   security solvers symbolicexecution transform utils verification)
 set(_lotus_test_choices ${_lotus_test_roots})
 foreach(group gpg dda aserpta bootstrapaa flowsensitive lotusaa sparrowaa tpa

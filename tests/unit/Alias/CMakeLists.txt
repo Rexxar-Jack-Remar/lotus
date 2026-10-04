@@ -13,6 +13,8 @@ lotus_add_test_group(alias lotusaa InclusionBased/LotusAA alias_tests
 lotus_add_test_group(alias sparrowaa InclusionBased/SparrowAA alias_tests LINK_LIBS Andersen)
 lotus_add_test_group(alias tpa InclusionBased/TPA alias_tests
   LINK_LIBS TPATransforms FSCSPointerAnalysis)
+lotus_add_test_group(alias aliaswrapper Infrastructure/AliasAnalysisWrapper alias_tests
+  LINK_LIBS CanaryAliasAnalysisWrapper)
 lotus_add_test_group(alias cclyzeraa InclusionBased/CclyzerAA alias_tests
   LINK_LIBS LotusCclyzerAA CanaryAliasAnalysisWrapper)
 lotus_add_test_group(alias dyckaa UnificationBased/DyckAA alias_tests LINK_LIBS CanaryDyckAA)

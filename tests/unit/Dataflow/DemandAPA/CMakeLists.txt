@@ -35,10 +35,7 @@ foreach(header IN LISTS demand_apa_headers)
   list(APPEND header_checks "${source}")
 endforeach()
 
-add_lotus_test_suite(demand_apa_tests
-  SOURCES HeaderIntegrationTest.cpp HeaderOrderPeer.cpp ${header_checks}
-  LINK_LIBS DemandAPA
-  LABELS demandapa)
-set_target_properties(demand_apa_tests PROPERTIES
-  UNITY_BUILD OFF
-  DISABLE_PRECOMPILE_HEADERS ON)
+set_source_files_properties(${header_checks} HeaderIntegrationTest.cpp HeaderOrderPeer.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON SKIP_UNITY_BUILD_INCLUSION ON)
+
+lotus_collect_test_sources(dataflow_tests
+  HeaderIntegrationTest.cpp HeaderOrderPeer.cpp ${header_checks})
