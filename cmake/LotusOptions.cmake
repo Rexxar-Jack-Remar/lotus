@@ -128,7 +128,7 @@ endforeach()
 foreach(group ae concurrency framework kint pulse saber reports)
   list(APPEND _lotus_test_choices "checker/${group}")
 endforeach()
-foreach(group ifdside mono wpds apa npa vasco)
+foreach(group ifdside mono wpds apa demandapa npa vasco)
   list(APPEND _lotus_test_choices "dataflow/${group}")
 endforeach()
 

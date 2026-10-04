@@ -1,10 +1,13 @@
 # Dataflow Unit Tests
 
 set(dataflow_test_libs)
-foreach(directory IfdsIde Mono WPDS APA NPA VASCO)
+foreach(directory IfdsIde Mono WPDS APA DemandAPA NPA VASCO)
   string(TOLOWER "${directory}" group)
   lotus_test_group_enabled(dataflow "${group}" selected)
   if(NOT selected)
+    continue()
+  endif()
+  if(group STREQUAL "demandapa" AND NOT TARGET DemandAPA)
     continue()
   endif()
   add_subdirectory(${directory})

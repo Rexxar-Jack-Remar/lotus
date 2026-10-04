@@ -55,7 +55,7 @@ if(TARGET lotus-cfl-interleaved-dyck)
         PASS_REGULAR_EXPRESSION "mutual-refinement upper bound: 328")
     add_test(NAME interleaved_dyck_staged_bounds_cli_taint_analysis
         COMMAND $<TARGET_FILE:lotus-cfl-interleaved-dyck>
-            staged-bounds --analysis taint --method mutual-refinement
+            staged-bounds --analysis taint --method mutual-refinement --stage-stats
             ${CMAKE_SOURCE_DIR}/benchmarks/real-world/CFL/InterleavedDyck/taint/faketaobao.dot)
     set_tests_properties(
         interleaved_dyck_staged_bounds_cli_taint_analysis PROPERTIES
@@ -67,4 +67,26 @@ if(TARGET lotus-cfl-interleaved-dyck)
     set_tests_properties(
         interleaved_dyck_staged_bounds_cli_value_flow_analysis PROPERTIES
         PASS_REGULAR_EXPRESSION "mutual-refinement upper bound: 211")
+endif()
+
+if(TARGET lotus-cfl-interleaved-dyck)
+    add_test(NAME interleaved_dyck_staged_bounds_cli_factorized
+        COMMAND $<TARGET_FILE:lotus-cfl-interleaved-dyck>
+            staged-bounds --analysis value-flow --method mutual-refinement
+            --factorized-tracing --stage-stats
+            ${CMAKE_SOURCE_DIR}/benchmarks/real-world/CFL/InterleavedDyck/valueflow/xz.dot)
+    set_tests_properties(interleaved_dyck_staged_bounds_cli_factorized PROPERTIES
+        PASS_REGULAR_EXPRESSION "mutual-refinement upper bound: 211")
+endif()
+
+if(TARGET lotus-cfl-interleaved-dyck)
+    foreach(method stronger-grammar on-demand)
+        add_test(NAME interleaved_dyck_staged_bounds_cli_${method}_factorized
+            COMMAND $<TARGET_FILE:lotus-cfl-interleaved-dyck>
+                staged-bounds --method ${method}
+                --factorized-tracing --stage-stats
+                ${CMAKE_SOURCE_DIR}/tests/regress/CFL/InterleavedDyck/LCL/crossing.dot)
+        set_tests_properties(interleaved_dyck_staged_bounds_cli_${method}_factorized PROPERTIES
+            PASS_REGULAR_EXPRESSION "upper bound: 1")
+    endforeach()
 endif()
