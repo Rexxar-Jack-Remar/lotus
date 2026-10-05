@@ -30,7 +30,11 @@ set(demand_apa_headers
 set(header_checks)
 foreach(header IN LISTS demand_apa_headers)
   set(source "${CMAKE_CURRENT_BINARY_DIR}/headers/${header}.cpp")
-  file(GENERATE OUTPUT "${source}"
+  # file(CONFIGURE) instead of file(GENERATE): these files are consumed by a
+  # target in the parent directory, and file(GENERATE) only writes its output
+  # during the generate phase, after the parent's source-existence check has
+  # already failed on a fresh build directory.
+  file(CONFIGURE OUTPUT "${source}"
     CONTENT "#include \"Dataflow/DemandAPA/${header}\"\n")
   list(APPEND header_checks "${source}")
 endforeach()

@@ -193,7 +193,8 @@ UseAfterFree::checkSite(const GuardedValueFlowSite *CurSite,
     } else if (isa<GuardedValueFlowReturnSite>(CurSite)) {
       return ST_Return;
     } else {
-      assert(isa<GraphSimpleSite>(CurSite));
+      assert(!isa<GuardedValueFlowCallSite>(CurSite) &&
+             !isa<GuardedValueFlowReturnSite>(CurSite));
       return ST_Others;
     }
   } else if (nodeOfKind<GuardedValueFlowNode::Kind::PseudoArgument,
@@ -216,7 +217,8 @@ UseAfterFree::checkSite(const GuardedValueFlowSite *CurSite,
         return ST_Return;
       }
     } else {
-      assert(isa<GraphSimpleSite>(CurSite));
+      assert(!isa<GuardedValueFlowCallSite>(CurSite) &&
+             !isa<GuardedValueFlowReturnSite>(CurSite));
       return ST_Sink;
     }
     // } else if (SrcSite->getParentBasicBlock()->getParent() !=
@@ -239,7 +241,8 @@ UseAfterFree::checkSite(const GuardedValueFlowSite *CurSite,
         return ST_Return;
       }
     } else {
-      assert(isa<GraphSimpleSite>(CurSite));
+      assert(!isa<GuardedValueFlowCallSite>(CurSite) &&
+             !isa<GuardedValueFlowReturnSite>(CurSite));
       return ST_Sink;
     }
     // } else if (SrcSite->getInstruction() != CurSite->getInstruction()) {
@@ -270,7 +273,8 @@ UseAfterFree::checkSite(const GuardedValueFlowSite *CurSite,
             return ST_Return;
           }
         } else {
-          assert(isa<GraphSimpleSite>(CurSite));
+          assert(!isa<GuardedValueFlowCallSite>(CurSite) &&
+                 !isa<GuardedValueFlowReturnSite>(CurSite));
           return AfterSrcSite ? ST_Sink : ST_Others;
         }
       }
