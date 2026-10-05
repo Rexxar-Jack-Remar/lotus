@@ -146,7 +146,7 @@ public:
                                                           Predicate P) const {
     size_t Size = size();
     if (StartIndex >= Size)
-      return std::move(std::make_pair(nullptr, Size));
+      return std::make_pair(nullptr, Size);
 
     for (size_t I = StartIndex;; --I) {
       auto *O = this->operator[](I);

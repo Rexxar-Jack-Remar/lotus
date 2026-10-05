@@ -12,6 +12,7 @@
 #include "Utils/LLVM/StringUtils.h"
 
 #include <algorithm>
+#include <stack>
 
 #include <llvm/Support/Debug.h>
 
