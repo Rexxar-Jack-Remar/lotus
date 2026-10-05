@@ -13,8 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace llvm;
 
 using namespace llvm;
@@ -257,5 +256,4 @@ private:
   void tryReport(std::shared_ptr<VulnerabilityTrace> Trace);
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

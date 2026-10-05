@@ -7,8 +7,7 @@
 
 #include <mutex>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace llvm;
 using namespace lotus::gvfg;
 
@@ -163,5 +162,4 @@ public:
   }
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

@@ -33,4 +33,3 @@ subsystems. Framework diagnostic events and composition extend
 LLVM/GVFG narrative rendering belongs to GSAF. See ``lib/Checker/GSAF/README.md`` for the dependency boundaries.
 The per-function engine is ``Engine/FunctionAnalyzer``. Shared trace containers
 live in ``Utils/Trace``, with GVFG-specific conversion in the GVFG module.
-Original LLVM 3.6 baseline comparisons remain unverified.

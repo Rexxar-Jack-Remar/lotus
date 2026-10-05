@@ -13,8 +13,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Operator.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 using gvfg::GuardedValueFlowArgumentNode;
 using gvfg::GuardedValueFlowCallOutputNode;
@@ -224,5 +223,4 @@ ctrlDepsPair(GuardedValueFlowSolver &solver, llvm::BasicBlock *block,
   return solver.getCtrlDepsPair(block, graph, &context);
 }
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

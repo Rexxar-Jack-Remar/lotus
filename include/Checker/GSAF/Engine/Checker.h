@@ -20,8 +20,7 @@
 #include <llvm/IR/Dominators.h>
 #include <llvm/Support/Error.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 template <typename T> using TraceList = lotus::ThreadSafeVector<T>;
 
@@ -122,5 +121,4 @@ void buildMultiVulnerability(
     const std::shared_ptr<MultiVulnerability> &vulnerability,
     const std::map<std::shared_ptr<Vulnerability>, GSAFChecker *> &checkers);
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

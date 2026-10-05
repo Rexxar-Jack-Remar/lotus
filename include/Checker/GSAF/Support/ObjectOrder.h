@@ -2,8 +2,7 @@
 #include "IR/GVFG/GuardedValueFlowObject.h"
 
 #include <functional>
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 /// Orders graph-owned trace references without copying their IR objects.
 struct ObjectLess {
   bool operator()(const gvfg::GuardedValueFlowObject *left,
@@ -21,5 +20,4 @@ struct ObjectLess {
   }
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

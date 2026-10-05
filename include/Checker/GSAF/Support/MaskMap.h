@@ -7,8 +7,7 @@
 
 #include <llvm/Support/MathExtras.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 // A mask key can relate to multiple values
 template <typename V> class MultiMaskMap {
@@ -159,5 +158,4 @@ public:
   }
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

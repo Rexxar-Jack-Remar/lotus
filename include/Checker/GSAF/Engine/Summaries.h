@@ -14,8 +14,7 @@
 
 #include <llvm/Support/Casting.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 class SummaryCacheItem {
 public:
@@ -382,5 +381,4 @@ public:
   }
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

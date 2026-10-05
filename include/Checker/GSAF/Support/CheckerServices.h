@@ -9,8 +9,7 @@
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/Demangle/Demangle.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 inline Function *calledFunction(Value *value) {
   auto *call = dyn_cast_or_null<CallBase>(value);
@@ -104,5 +103,4 @@ inline bool isSyntheticLoopTrap(const Instruction *instruction) {
   return instruction->getMetadata("lotus.loop-summary.trap") != nullptr;
 }
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

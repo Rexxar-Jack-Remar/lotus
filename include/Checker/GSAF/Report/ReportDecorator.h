@@ -16,8 +16,7 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace lotus::reporting;
 using namespace llvm;
 using namespace std;
@@ -165,11 +164,9 @@ protected:
   std::string getReadableFunctionName(Function *func);
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace lotus::reporting;
 using namespace llvm;
 using namespace std;
@@ -262,11 +259,9 @@ protected:
   Value *trackValueSource(Value *val);
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace llvm;
 using namespace std;
 using namespace lotus::reporting;
@@ -342,5 +337,4 @@ public:
                               bool IsFinalize) override;
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

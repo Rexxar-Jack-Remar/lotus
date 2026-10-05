@@ -15,8 +15,7 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace llvm;
 using namespace std;
 using ir_expression::valueToString;
@@ -127,5 +126,4 @@ public:
               std::shared_ptr<Vulnerability> Vuln = nullptr) override;
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

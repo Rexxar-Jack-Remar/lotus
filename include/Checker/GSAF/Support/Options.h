@@ -1,7 +1,6 @@
 #pragma once
 #include <string>
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 class GSAFOptions {
 public:
   static bool EnableArithmeticFlow;
@@ -35,5 +34,4 @@ public:
 
   static bool EnableSideEffectSource;
 };
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

@@ -13,8 +13,7 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/Support/raw_ostream.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace std;
 using namespace llvm;
 using namespace gvfg;
@@ -449,5 +448,4 @@ private:
       float callee_unit_confidence, bool is_ignore_phi);
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

@@ -9,8 +9,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Pass.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 /// Engine-specific model view. Contracts and taint selectors are owned by
 /// Lotus's existing annotation stores; this pass provides their analysis life
@@ -73,5 +72,4 @@ public:
                    const std::pair<llvm::Function *, int> &sink) const;
 };
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

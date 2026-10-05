@@ -3,8 +3,7 @@
 #include "Checker/GSAF/API/Models.h"
 #include "IR/GVFG/GuardedValueFlowSolver.h"
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 namespace detail {
 uint64_t encodingTypeSize(const llvm::DataLayout &layout, llvm::Type *type);
@@ -64,5 +63,4 @@ public:
 using GSAFSolver = GSAFSolverEncoding<gvfg::GuardedValueFlowSolver>;
 using DTGSAFSolver = GSAFSolverEncoding<gvfg::DTGuardedValueFlowSolver>;
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf
