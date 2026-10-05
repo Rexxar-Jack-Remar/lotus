@@ -6,12 +6,11 @@
 
 #include <mutex>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 SummaryCacheItem::SummaryCacheItem(SMTExpr *constraints, std::string suffix,
                                    int depth)
-    : constraints(constraints), suffix(suffix), depth(depth) {}
+    : constraints(constraints), suffix(std::move(suffix)), depth(depth) {}
 
 std::pair<SMTExpr, bool>
 SummaryCacheItem::getSMTExprFromCache(SMTFactory *Fctry,
@@ -80,7 +79,7 @@ void SummaryBase::addNonSymDeps(SummaryCacheItem Item) {
   } else {
     auto iter = NonSymSummary.find(Item.suffix);
     if (iter == NonSymSummary.end()) {
-      SMTExpr *NewExpr =
+      auto *NewExpr =
           new SMTExpr(getSummarySMTFactory()->createBoolVal(true));
       NonSymDepsCache.push_back(
           SummaryCacheItem(NewExpr, Item.suffix, Item.depth));
@@ -97,7 +96,7 @@ void SummaryBase::addSymbDeps(SummaryCacheItem Item) {
   SMTWriteLock();
   auto iter = SymbSummary.find(Item.suffix);
   if (iter == SymbSummary.end()) {
-    SMTExpr *NewExpr = new SMTExpr(getSummarySMTFactory()->createBoolVal(true));
+    auto *NewExpr = new SMTExpr(getSummarySMTFactory()->createBoolVal(true));
     SymbDepsCache.push_back(SummaryCacheItem(NewExpr, Item.suffix, Item.depth));
     iter = SymbSummary.insert(std::make_pair(Item.suffix, NewExpr)).first;
   }
@@ -154,9 +153,6 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &Out, const SummaryBase &N) {
   Out << "************************************";
   return Out;
 }
-using namespace llvm;
-using namespace lotus::gvfg;
 
-TraceSummary::~TraceSummary() {}
-} // namespace gsaf
-} // namespace lotus
+TraceSummary::~TraceSummary() = default;
+} // namespace lotus::gsaf

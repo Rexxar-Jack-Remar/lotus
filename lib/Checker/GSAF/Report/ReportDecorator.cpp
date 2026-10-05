@@ -15,8 +15,7 @@
 
 #include <llvm/Support/Debug.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace lotus::reporting;
 using namespace lotus::reporting::ReportDecorator;
 using namespace llvm;
@@ -478,11 +477,9 @@ int DefaultReportDecorator::adjustArgumentIndexForHuman(llvm::CallBase *CS,
 string DefaultReportDecorator::getReadableFunctionName(Function *F) {
   return DIA->getDeclaredFunctionName(F);
 }
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace lotus::reporting;
 using namespace lotus::reporting::ReportDecorator;
 using namespace llvm;
@@ -1444,11 +1441,9 @@ DiagnosticText LLVMValueReportDecorator::getValueEvent(
 
   return std::move(DiagnosticTextUnit(decorator_emph_str(ret)));
 }
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace llvm;
 using namespace std;
 using namespace lotus::reporting;
@@ -2029,5 +2024,4 @@ void GSAFTaintReportDecorator::buildFromTrace(
 
   GSAFReportDecorator::buildFromTrace(SubTrace, IsFinalize);
 }
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

@@ -12,7 +12,7 @@ add_library(GSAF STATIC
   Engine/FunctionAnalyzer.cpp
 
   # Built-in checkers
-  Checkers/TaintAnalysis.cpp
+  Checkers/Taint.cpp
   Checkers/UseAfterFree.cpp
 
   # Report

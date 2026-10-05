@@ -4,19 +4,16 @@
 #include "Checker/GSAF/Support/ObjectOrder.h"
 #include "IR/GVFG/GuardedValueFlowTrace.h"
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace llvm;
 using namespace lotus::gvfg;
 
-VulnerabilityTrace::VulnerabilityTrace() {}
+VulnerabilityTrace::VulnerabilityTrace() = default;
 
 VulnerabilityTrace::VulnerabilityTrace(const VulnerabilityTrace &T)
-    : GuardedValueFlowTrace(T) {
-  Reported = T.Reported;
-}
+    : GuardedValueFlowTrace(T), Reported(T.Reported) {}
 
-VulnerabilityTrace::~VulnerabilityTrace() {}
+VulnerabilityTrace::~VulnerabilityTrace() = default;
 
 VulnerabilityTrace &VulnerabilityTrace::operator=(const VulnerabilityTrace &T) {
   if (this != &T) {
@@ -48,17 +45,13 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &Out,
   }
   return Out;
 }
-using namespace llvm;
-using namespace lotus::gvfg;
 
-VulnerabilityTraceBuilder::VulnerabilityTraceBuilder()
-    : PushPopVector<const GuardedValueFlowObject *>() {}
+VulnerabilityTraceBuilder::VulnerabilityTraceBuilder() = default;
 
 VulnerabilityTraceBuilder::VulnerabilityTraceBuilder(
-    const VulnerabilityTraceBuilder &Builder)
-    : PushPopVector<const GuardedValueFlowObject *>(Builder) {}
+    const VulnerabilityTraceBuilder &) = default;
 
-VulnerabilityTraceBuilder::~VulnerabilityTraceBuilder() {}
+VulnerabilityTraceBuilder::~VulnerabilityTraceBuilder() = default;
 
 void VulnerabilityTraceBuilder::add(std::shared_ptr<VulnerabilityTrace> Trace) {
   for (int I = 0; I < Trace->get_length(); I++) {
@@ -78,5 +71,4 @@ VulnerabilityTraceBuilder::snapshot() const {
   }
   return Ret;
 }
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

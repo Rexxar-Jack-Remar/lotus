@@ -10,8 +10,7 @@
 
 using namespace llvm;
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 char GSAFModels::ID = 0;
 static RegisterPass<GSAFModels>
@@ -246,5 +245,4 @@ bool GSAFModels::isException(const std::pair<Function *, int> &source,
          found->second.count({sink.first->getName().str(), sink.second});
 }
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

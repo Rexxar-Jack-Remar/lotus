@@ -12,9 +12,7 @@
 
 using namespace llvm;
 
-namespace lotus {
-namespace gsaf {
-namespace detail {
+namespace lotus::gsaf::detail {
 
 uint64_t encodingTypeSize(const DataLayout &layout, Type *type) {
   uint64_t width = PackedTypeLayout(layout).getTypeSizeInBits(type);
@@ -59,6 +57,4 @@ SMTExpr encodeScalarConstant(SMTFactory &factory, const Constant *constant,
   return factory.createBitVecVal(0, width);
 }
 
-} // namespace detail
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf::detail

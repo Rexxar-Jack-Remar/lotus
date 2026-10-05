@@ -19,8 +19,7 @@
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace std;
 using namespace llvm;
 using namespace gvfg;
@@ -240,7 +239,7 @@ static int score_with_confidence(int score, float confidence) {
 
   float normalized_confidence = pow(confidence, pow(2, CONFIDENCE_IMPORTANCE));
 
-  int result = score * normalized_confidence;
+  int result = static_cast<int>(static_cast<float>(score) * normalized_confidence);
 
   // Adjust result
   // Distinguishing (1) invalid traces and traces with very low scores
@@ -3399,5 +3398,4 @@ void GSAFTraceScorer::do_dominate_checking_on_gvfg_node() {
     }
   }
 }
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

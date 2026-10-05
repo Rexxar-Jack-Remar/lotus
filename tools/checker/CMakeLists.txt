@@ -25,7 +25,6 @@ target_link_libraries(lotus-check PRIVATE
   Annotation
   CanaryAliasAnalysisWrapper
   CanaryCheckerTooling
-  CanaryFuzzing
   CanaryKint
   CanarySymbolicExecution
   CheckerFramework

@@ -17,7 +17,7 @@ add_library(CheckerFramework STATIC
 
 target_link_libraries(CheckerFramework
   PUBLIC
-    CanaryAliasAnalysisWrapper
+    #CanaryAliasAnalysisWrapper
     CanaryDebugInfo
     CanaryFormats
     LLVMIRReader

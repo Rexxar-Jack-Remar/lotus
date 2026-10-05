@@ -16,8 +16,7 @@
 
 using namespace llvm;
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 
 namespace {
 llvm::Error
@@ -417,5 +416,4 @@ void buildMultiVulnerability(
   builder.buildMultiVulnerability();
 }
 
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf

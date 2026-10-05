@@ -13,8 +13,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
 
-namespace lotus {
-namespace gsaf {
+namespace lotus::gsaf {
 using namespace llvm;
 
 /*==----macros for debugging----==*/
@@ -1388,10 +1387,9 @@ bool FunctionAnalyzer::inlineReturnSymbolicSummary(
   std::list<const GuardedValueFlowCallOutputNode *> CommonCSOCache;
   std::list<const GuardedValueFlowCallOutputNode *> PseudoCSOCache;
 
-  typedef std::pair<
+  using RangeTy = std::pair<
       std::vector<const GuardedValueFlowCallOutputNode *>::iterator,
-      std::vector<const GuardedValueFlowCallOutputNode *>::iterator>
-      RangeTy;
+      std::vector<const GuardedValueFlowCallOutputNode *>::iterator>;
   auto doInitialization = [&CommonCSOCache, &PseudoCSOCache,
                            CurrentSrcSiteOutput, this](RangeTy Range) {
     CommonCSOCache.clear();
@@ -1798,5 +1796,4 @@ void FunctionAnalyzer::inlineCalleeOutSummary(
   popState();
   return;
 }
-} // namespace gsaf
-} // namespace lotus
+} // namespace lotus::gsaf
