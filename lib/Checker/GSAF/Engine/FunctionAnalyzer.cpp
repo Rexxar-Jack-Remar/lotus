@@ -8,6 +8,7 @@
 #include <list>
 #include <utility>
 
+#include <llvm/ADT/ScopeExit.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/Instructions.h>
@@ -405,6 +406,12 @@ void FunctionAnalyzer::search(const GuardedValueFlowNode *Node,
                               const GuardedValueFlowNode *PrevNode,
                               Vulnerability::ValueSitePairType Src,
                               unsigned InlineDepth) {
+  auto key = std::make_tuple(Node, Src.first, Src.second);
+  if (!ActiveForwardSearch.insert(key).second)
+    return;
+  auto active_guard =
+      make_scope_exit([&] { ActiveForwardSearch.erase(key); });
+
   DEBUG_TRACE(dbgs() << "\t >Visiting[dw]: " << *Node << "...\n");
   if (TSV->checkNode(Node, TraceBuilder)) {
     DEBUG_TRACE(dbgs() << "\t " << SKIP_STR << *Node
@@ -525,6 +532,12 @@ void FunctionAnalyzer::search(const GuardedValueFlowNode *Node,
 void FunctionAnalyzer::bottomUpDepthFirstSearch(
     const GuardedValueFlowNode *Node, const GuardedValueFlowNode *PrevNode,
     Vulnerability::ValueSitePairType Src, unsigned InlineDepth) {
+  auto key = std::make_tuple(Node, Src.first, Src.second);
+  if (!ActiveBackwardSearch.insert(key).second)
+    return;
+  auto active_guard =
+      make_scope_exit([&] { ActiveBackwardSearch.erase(key); });
+
   TimeChecker->check();
   DEBUG_TRACE(dbgs() << "\t >Visiting[up]: " << *Node << "...\n");
   DEBUG_CONSTRAINTS(dbgs() << smtText(Solver->assertions()) << "\n");

@@ -1,4 +1,6 @@
 #include "Checker/GSAF/API/Trace.h"
+#include "Checker/GSAF/API/VulnerabilityRegistry.h"
+#include "Checker/GSAF/Engine/Checker.h"
 #include "Checker/GSAF/Engine/Solver.h"
 #include "Checker/GSAF/Engine/Summaries.h"
 #include "Checker/GSAF/Support/MaskMap.h"
@@ -9,10 +11,10 @@
 
 #include <set>
 
-#include <gtest/gtest.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/InitializePasses.h>
 #include <llvm/PassRegistry.h>
+#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus::gvfg;
@@ -79,6 +81,37 @@ TEST_F(GSAFTest, NativeObjectsPreserveIdentityAndTypedSiteQueries) {
   }
 }
 
+TEST_F(GSAFTest, CheckerTerminatesOnCyclicPointerValueFlow) {
+  auto module = parseModule(R"(
+    define i8* @test(i8* %p, i1 %cond) {
+    entry:
+      br label %loop
+    loop:
+      %value = phi i8* [ %p, %entry ], [ %next, %loop ]
+      %offset = getelementptr i8, i8* %value, i64 1
+      %next = select i1 %cond, i8* %offset, i8* %p
+      br i1 %cond, label %loop, label %exit
+    exit:
+      ret i8* %next
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+  initializeBuiltinVulnerabilities();
+  std::shared_ptr<Vulnerability> vulnerability;
+  for (auto *info : registeredVulnerabilities())
+    if (info->id() == "gsaf.use-after-free")
+      vulnerability = info->getVulnerability();
+  ASSERT_NE(vulnerability, nullptr);
+  auto wrapper = std::make_shared<VulnerabilityWrapper>();
+  wrapper->addVulnerability(vulnerability);
+  auto pipeline = build(*module);
+  legacy::PassManager checkerPipeline;
+  auto *checker = new GSAFChecker(wrapper);
+  checkerPipeline.add(checker);
+  checkerPipeline.run(*module);
+  EXPECT_TRUE(checker->traces(vulnerability).empty());
+}
+
 TEST_F(GSAFTest, TraceSnapshotsRetainNullableSourcesAcrossScopePop) {
   auto module = parseModule("define void @test(i32 %x) { ret void }");
   ASSERT_NE(module, nullptr);
@@ -106,6 +139,38 @@ TEST_F(GSAFTest, TraceSnapshotsRetainNullableSourcesAcrossScopePop) {
   snapshot->setReported(true);
   EXPECT_FALSE(copy.reported());
   EXPECT_TRUE(snapshot->reported());
+}
+
+TEST_F(GSAFTest, SummaryCompositionRetainsConstraintsInSharedContext) {
+  auto module = parseModule("define void @test() { ret void }");
+  ASSERT_NE(module, nullptr);
+  SymbolicSummary source(module->getFunction("test"), 1);
+  SymbolicSummary destination(module->getFunction("test"), 2);
+  {
+    SMTFactory factory;
+    auto variable = factory.createBitVecConst("x", 32);
+    auto lower = variable > 3;
+    auto upper = variable < 8;
+    source.addNonSymDeps(SummaryCacheItem(&lower, "", 0));
+    source.addSymbDeps(SummaryCacheItem(&upper, "_CS1", 1));
+  }
+  for (const auto &item : source.getNonSymDepsCache())
+    destination.addNonSymDeps(item);
+  for (const auto &item : source.getSymbDepsCache())
+    destination.addSymbDeps(item);
+  // Repeated composition exercises conjunction with an already stored AST.
+  for (const auto &item : source.getSymbDepsCache())
+    destination.addSymbDeps(item);
+
+  SMTFactory factory;
+  auto solver = factory.createSMTSolver();
+  for (const auto &item : destination.getNonSymDepsCache())
+    solver.add(item.getSMTExprFromCache(&factory).first);
+  for (const auto &item : destination.getSymbDepsCache())
+    solver.add(item.getSMTExprFromCache(&factory).first);
+  EXPECT_EQ(solver.check(), SMTSolver::SMTRT_Sat);
+  solver.add(factory.createBitVecConst("x_CS1", 32) >= 8);
+  EXPECT_EQ(solver.check(), SMTSolver::SMTRT_Unsat);
 }
 
 TEST_F(GSAFTest, TraceMetadataHandlesSparseIndicesAndCopy) {

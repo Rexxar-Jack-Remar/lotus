@@ -10,7 +10,9 @@
 #include "Utils/Parallel/ThreadPool.h"
 #include "Utils/Platform/Timer.h"
 
+#include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace lotus::gsaf {
@@ -54,6 +56,14 @@ private:
 
   /// This field collects traces on the Graph IR.
   VulnerabilityTraceBuilder TraceBuilder;
+
+  // Track each direction separately: search() deliberately starts a backward
+  // search at the same node. A different taint source needs its own traversal.
+  using SearchKey = std::tuple<const GuardedValueFlowNode *,
+                              const GuardedValueFlowNode *,
+                              const GuardedValueFlowSite *>;
+  std::set<SearchKey> ActiveForwardSearch;
+  std::set<SearchKey> ActiveBackwardSearch;
 
   /// This field records the call site output nodes whose
   /// symbolic summary is not necessarily to be inlined.

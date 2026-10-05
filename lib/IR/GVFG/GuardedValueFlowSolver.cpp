@@ -18,6 +18,7 @@
 
 #include <climits>
 
+#include <llvm/ADT/ScopeExit.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/IR/Constants.h>
@@ -735,7 +736,9 @@ std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getCtrlDeps(
     return {ctrl, data};
   }
 
-  if (depth >= GVFGCDMaxDepth) {
+  // Loop control dependencies can be cyclic. Abstract a recursive revisit in
+  // the same way as a depth cutoff, rather than expanding it indefinitely.
+  if (depth >= GVFGCDMaxDepth || ActiveCtrlBlocks.count(block)) {
     SMTExprVec ctrl = Factory->createEmptySMTExprVec();
     SMTExprVec data = Factory->createEmptySMTExprVec();
     ctrl.push_back(Factory->createBoolConst(
@@ -784,6 +787,9 @@ std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getCtrlDeps(
 
   SMTExprVec ctrl = Factory->createEmptySMTExprVec();
   SMTExprVec data = Factory->createEmptySMTExprVec();
+
+  ActiveCtrlBlocks.insert(block);
+  auto active_guard = make_scope_exit([&] { ActiveCtrlBlocks.erase(block); });
 
   auto block_conditions = graph->getBlockConditions(block);
   if (!block_conditions.empty()) {

@@ -158,6 +158,7 @@ private:
   PushPopCache<const GuardedValueFlowCallOutputNode *> CallSiteOutputCache;
 
   std::unordered_map<BasicBlock *, SMTExprVec> CtrlCacheMap;
+  std::unordered_set<BasicBlock *> ActiveCtrlBlocks;
   std::unordered_map<const GuardedValueFlowOpcodeNode *, SMTExpr>
       OpcodeConstraintsCacheMap;
 
