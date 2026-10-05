@@ -10,6 +10,7 @@ llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
 
 add_executable(lotus-check
   lotus-check-generic.cpp
+  lotus-check-gsaf.cpp
   lotus-check-kint.cpp
   lotus-check-taint.cpp
   lotus-check-concur.cpp
@@ -28,6 +29,7 @@ target_link_libraries(lotus-check PRIVATE
   CanaryKint
   CanarySymbolicExecution
   CheckerFramework
+  GSAF
   ConcurrencyChecker
   FiTxChecker
   IFDS

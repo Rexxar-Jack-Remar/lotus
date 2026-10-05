@@ -27,6 +27,7 @@
 #include <vector>
 
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Dominators.h>
 
 namespace lotus {
@@ -130,6 +131,17 @@ public:
 protected:
   PushPopCache<const GuardedValueFlowNode *> ConstraintCache;
   PushPopCache<BasicBlock *> BBCache;
+
+  /// Encoding policy hooks for clients with a different scalar abstraction.
+  /// Default implementations preserve GVFG's LLVM layout and bit patterns.
+  virtual uint64_t getEncodingTypeSize(Type *type) const;
+  virtual std::string getEncodingSymbol(const GuardedValueFlowNode *node) const;
+  virtual SMTExpr encodeScalarConstant(const llvm::Constant *constant,
+                                       uint64_t width);
+  virtual std::pair<uint64_t, uint64_t>
+  getEncodingCastWidths(const GuardedValueFlowOpcodeNode *node) const;
+  virtual bool trackCallOutput(const GuardedValueFlowCallOutputNode *node) const;
+  virtual bool isNonNullTerminal(const GuardedValueFlowNode *node) const;
 
   virtual std::pair<SMTExprVec, SMTExprVec>
   computeCtrlDepsPair(BasicBlock *block, const GuardedValueFlowGraph *graph,

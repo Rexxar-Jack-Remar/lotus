@@ -1,6 +1,7 @@
 add_library(CheckerFramework STATIC
   CheckerTypes.cpp
   CheckerDiagnostic.cpp
+  DiagnosticEvent.cpp
   CheckerRegistry.cpp
   CheckerValidator.cpp
   CheckerSpecLoader.cpp

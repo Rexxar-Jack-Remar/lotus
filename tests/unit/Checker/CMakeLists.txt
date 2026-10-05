@@ -2,6 +2,8 @@ lotus_add_test_group(checker ae AE checker_tests LINK_LIBS AE ${Z3_LIBRARIES})
 lotus_add_test_group(checker concurrency Concurrency checker_tests
   LINK_LIBS ConcurrencyChecker)
 lotus_add_test_group(checker framework Framework checker_tests LINK_LIBS CheckerFramework)
+lotus_add_test_group(checker gsaf GSAF checker_tests
+  LINK_LIBS GSAF LLVMTransformUtils)
 lotus_add_test_group(checker kint KINT checker_tests
   LINK_LIBS CanaryKint CheckerFramework CanaryDebugInfo CanaryFormats
     CanaryLLVMUtils LLVMPasses ${Z3_LIBRARIES})

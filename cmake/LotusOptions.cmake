@@ -125,7 +125,7 @@ foreach(group mhp lockset valueflow thread clocks threadapi threadlocal openmp
               mpi cuda linuxkernel)
   list(APPEND _lotus_test_choices "concurrency/${group}")
 endforeach()
-foreach(group ae concurrency framework kint pulse saber reports)
+foreach(group ae concurrency framework gsaf kint pulse saber reports)
   list(APPEND _lotus_test_choices "checker/${group}")
 endforeach()
 foreach(group ifdside mono wpds apa demandapa npa vasco)
