@@ -10,16 +10,16 @@
 [![C++](https://img.shields.io/badge/c++-14%2F17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 [![LLVM](https://img.shields.io/badge/LLVM-14.x-purple.svg)](https://llvm.org/)
 
-**Lotus** is an advanced, LLVM-based program analysis and verification framework. It provides a comprehensive set of toolkits for alias analysis, bug detection, dataflow analysis, concurrency analysis, abstract interpretation, and model checking. The framework is designed for high modularity, allowing components to be used independently or in combination.
+**Lotus** is an LLVM-based program analysis and verification framework. It provides a comprehensive set of toolkits for alias analysis, dataflow analysis, concurrency analysis, abstract interpretation, and model checking. The framework is designed for high modularity, allowing components to be used independently or in combination.
 
 ## Features
 
 - **Alias Analysis** — Pointer analysis with flow-sensitive, context-sensitive, and context-insensitive variants (e.g., AserPTA, DyckAA, LotusAA, SeaDSA).
-- **Dataflow Analysis** — Distributive (IFDS/IDE), Monotone, Elimination-based (APA), and Weighted Pushdown Systems (WPDS).
+- **Dataflow Analysis** — Distributive (IFDS/IDE), Monotone, Elimination-based (APA), Weighted Pushdown Systems (WPDS), etc.
 - **Intermediate Representations** — Extends LLVM with specialized IRs like ICFG, PDG, SVFG (with sparse MemorySSA), SSI, and GSA.
-- **Bug Detection** — Detects memory safety issues, concurrency bugs (races/deadlocks), integer overflows, taint-style leaks, and typestate violations using engines like Kint, AE, Pulse, and Saber.
+- **Bug Detection** — Detects memory safety issues, concurrency bugs, integer overflows, taint-style issues, and typestate violations using engines like Kint, AE, Pulse, and Saber.
 - **Formal Verification** — Abstract interpretation using CLAM, SeaHorn, and custom symbolic execution backends.
-- **Program Optimization** — Dead store elimination, partial evaluation, and prefetching.
+- **Program Optimization** — Partial evaluation, prefetching, etc.
 
 ## Quick Start
 

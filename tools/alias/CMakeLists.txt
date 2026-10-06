@@ -42,14 +42,6 @@ target_link_libraries(lotus-alias-seadsa-tool PRIVATE
   CanaryAliasCLIUtils
 )
 
-# FPA (Function pointer analysis) Tool
-add_executable(lotus-alias-fpa lotus-alias-fpa.cpp)
-target_link_libraries(lotus-alias-fpa PRIVATE
-  CanaryFPA
-  CanaryAliasCLIUtils
-  ${LLVM_LINK_COMPONENTS}
-)
-
 # LotusAA Pointer Analysis Tool
 add_executable(lotus-alias-lotus-aa lotus-alias-lotus-aa.cpp)
 target_link_libraries(lotus-alias-lotus-aa PRIVATE

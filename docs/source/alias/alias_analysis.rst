@@ -47,7 +47,7 @@ For detailed information about each analysis, see the corresponding documentatio
 * :doc:`dyckaa` - Unification-based alias analysis with Dyck-CFL reachability
 * :doc:`seadsa` - Context-sensitive, field-sensitive alias analysis based on DSA
 * :doc:`sparrowaa` - Inclusion-based points-to analysis
-* :doc:`fpa` - Function pointer analysis with multiple algorithms
+* :doc:`../analysis/fpa` - Function pointer analysis with multiple algorithms
 * :doc:`lotusaa` - Lotus-specific alias analysis framework
 * :doc:`underapproxaa` - Under-approximate must-alias analysis with no false positives
 * :doc:`dynaa` - Dynamic validation of static alias analysis results

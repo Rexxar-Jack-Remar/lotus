@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Dataflow/DemandAPA/Support.h"
+
 class RegEx {
 public:
   // to create a regular expression 0, RegEx(RegEx::ZERO)

@@ -55,7 +55,7 @@ See :doc:`../alias/alias_analysis` for detailed instructions and command example
   See :doc:`../alias/metrics`.
 * **TypeQualifier** – Qualifier-based analysis infrastructure that models
   qualifier-style properties over program values
-  (``lib/Alias/Specialized/TypeQualifier``). See :doc:`../alias/typequalifier`.
+  (``lib/Checker/TypeQualifier``). See :doc:`../checker/typequalifier`.
 
 Intermediate Representations
 ----------------------------
