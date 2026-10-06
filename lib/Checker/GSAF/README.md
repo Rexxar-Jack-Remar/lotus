@@ -7,14 +7,14 @@ Public headers mirror this directory under `include/Checker/GSAF`.
 | `API` | Vulnerability and trace definitions, registration, composition, and the query view over Lotus annotation models. `DefaultModels.h.in` embeds the profiles from `config/gsaf`. |
 | `Engine` | Module/function analysis, taint traversal, SMT encoding, summaries, analysis traces, composite trace matching and graph statistics. |
 | `Checkers` | Built-in vulnerability policies: use after free and taint. |
-| `Report` | Diagnostic builders/decorators and trace scoring. Rendered reports use the shared checker framework. |
+| `Report` | Trace diagnostic decorators for the Lotus bug report framework. |
 | `Support` | Engine options, native GVFG query helpers, checker analysis access, mask containers and graph-object ordering. |
 
 `API/Trace` contains the analysis trace and its scope-aware builder. It is
-shared by the engine and reporting. `Support/MaskMap` and
-`Support/ObjectOrder` expose specific helpers rather than a catch-all utility
-header. The engine contains four header/source pairs: `Checker`,
-`FunctionAnalyzer`, `Solver`, and `Summaries`. Small graph-statistics and composite-orchestration
+shared by the engine and reporting. `Support` provides `GraphQueries` (query helpers and object ordering),
+`CheckerServices` (analysis pass initialization and instruction helpers), `Options`, and `MaskMap`. The engine contains the module driver (`Checker`), the solver wrapper (`Solver`),
+summary representations (`Summaries`), and function analysis split across intra-procedural traversal (`IntraAnalysis.cpp`)
+and inter-procedural summary inlining (`InterAnalysis.cpp`), defined by `FunctionAnalyzer.h`. Small graph-statistics and composite-orchestration
 helpers share the module-pass implementation; symbolic and trace summaries
 share one summary header.
 

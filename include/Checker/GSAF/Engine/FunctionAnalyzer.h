@@ -4,8 +4,6 @@
 #include "Checker/GSAF/Engine/Checker.h"
 #include "Checker/GSAF/Engine/Summaries.h"
 #include "Checker/GSAF/Support/GraphQueries.h"
-#include "Checker/GSAF/Support/MaskMap.h"
-#include "Checker/GSAF/Support/ObjectOrder.h"
 #include "Checker/GSAF/Support/Options.h"
 #include "Utils/Parallel/ThreadPool.h"
 #include "Utils/Platform/Timer.h"
@@ -223,13 +221,6 @@ private:
       const GuardedValueFlowCallSite *CS, OutputSummary *Smry,
       const GuardedValueFlowCallOutputNode *CallSiteOutput,
       Vulnerability::ValueSitePairType Src, unsigned InlineDepth, int Case = 0);
-
-  /// This function reports the trace in the input summary \p Smry if necessary.
-  /// \p Site is the site when the summary is to report.
-  /// \p Race indicates if there are multiple threads that tries to report it at
-  /// the same time.
-  void report(InputSummary *Smry, const GuardedValueFlowSite *Site,
-              Vulnerability::ValueSitePairType Src, bool Race);
 
   // Return true, if a trace, having *Src* as source pair (Value and Site), can
   // be reported

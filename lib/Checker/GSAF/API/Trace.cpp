@@ -1,7 +1,4 @@
 #include "Checker/GSAF/API/Trace.h"
-
-#include "Checker/GSAF/Support/MaskMap.h"
-#include "Checker/GSAF/Support/ObjectOrder.h"
 #include "IR/GVFG/GuardedValueFlowTrace.h"
 
 namespace lotus::gsaf {

@@ -39,7 +39,7 @@ int64_t IRExpressionRenderer::get_inbound_offset(UserTy *inst, int start_id,
                                                  Type *start_type,
                                                  ConstantVarAnalysis *CVA) {
   int64_t offset = 0;
-  int num_indices = inst->getNumOperands();
+  int num_indices = static_cast<int>(inst->getNumOperands());
   int idx = start_id;
   Type *type = start_type;
   Function *f = getEnclosingFunction(inst);
@@ -49,19 +49,19 @@ int64_t IRExpressionRenderer::get_inbound_offset(UserTy *inst, int start_id,
     Constant *const_vidx =
         CVA && f ? CVA->getConstant(vidx, f) : dyn_cast<Constant>(vidx);
 
-    if (const_vidx && isa<ConstantInt>(const_vidx)) {
-      ConstantInt *ci = cast<ConstantInt>(const_vidx);
-      int64_t fieldIdx = ci->getSExtValue();
+    if (auto *CI = dyn_cast<ConstantInt>(const_vidx)) {
+      int64_t fieldIdx = CI->getSExtValue();
       if (Type *sequential_type = sequentialType(type)) {
         // TODO: currently, we collapse all the array fields, can be improved
         // later
         type = sequentialElement(sequential_type);
-        offset += fieldIdx * TSDL->getTypeSizeInBits(type);
+        offset += fieldIdx * static_cast<int64_t>(TSDL->getTypeSizeInBits(type));
       } else if (StructType *struct_type = dyn_cast<StructType>(type)) {
         // getElementOffset works in O(1), it is fast enough and we do not need
         // to cache the result
         int64_t curr_offset =
-            TSDL->getElementOffsetInBits(struct_type, fieldIdx);
+            static_cast<int64_t>(TSDL->getElementOffsetInBits(struct_type,
+                                                              fieldIdx));
         offset += curr_offset;
         type = struct_type->getElementType(fieldIdx);
       } else {
@@ -143,7 +143,7 @@ IRExpressionRenderer::get_gep_offset(GEPOperator *gep_inst,
   // We first collect the pointer offset
   int64_t pointer_offset = get_gep_offset_at(gep_inst, 1, CVA);
   if (pointer_offset != UnknownOffset)
-    pointer_offset *= TSDL->getTypeSizeInBits(base_type);
+    pointer_offset *= static_cast<int64_t>(TSDL->getTypeSizeInBits(base_type));
   else
     // Suggested again by Andy, we treat symbolic array offsets as offset 0
     pointer_offset = 0;
@@ -177,7 +177,8 @@ IRExpressionRenderer::get_gep_offset(GEPOperator *gep_inst,
       Type *elem_type = sequentialElement(seq_type);
       inbound_offset = get_gep_offset_at(gep_inst, 2, CVA);
       if (inbound_offset != UnknownOffset)
-        inbound_offset *= TSDL->getTypeSizeInBits(elem_type);
+        inbound_offset *=
+            static_cast<int64_t>(TSDL->getTypeSizeInBits(elem_type));
       else
         // Suggested by Andy, we treat symbolic array offsets as offset 0
         inbound_offset = 0;
@@ -363,7 +364,7 @@ string IRExpressionRenderer::construct_gep_expr(GEPOperator *gep_inst) {
   }
 
   int idx = 2;
-  int num_indices = gep_inst->getNumOperands();
+  int num_indices = static_cast<int>(gep_inst->getNumOperands());
 
   while (idx < num_indices) {
     Value *vidx = gep_inst->getOperand(idx);
@@ -379,8 +380,8 @@ string IRExpressionRenderer::construct_gep_expr(GEPOperator *gep_inst) {
       } else if (StructType *struct_type = dyn_cast<StructType>(type)) {
         // getElementOffset works in O(1), it is fast enough and we do not need
         // to cache the result
-        int64_t curr_offset =
-            TSDL->getElementOffsetInBits(struct_type, fieldIdx);
+        int64_t curr_offset = static_cast<int64_t>(
+            TSDL->getElementOffsetInBits(struct_type, fieldIdx));
 
         if (!gep_expr.empty())
           gep_expr += ".";
@@ -463,12 +464,13 @@ IRExpressionRenderer::generate_pointer_offset_expr(
           break;
       }
 
+      std::string gep_expr = construct_gep_expr(gep_inst);
       if (!ap_expr.empty()) {
         if (ap_expr[0] != '[')
-          ap_expr = "." + ap_expr;
+          gep_expr += ".";
+        gep_expr += ap_expr;
       }
-
-      ap_expr = construct_gep_expr(gep_inst) + ap_expr;
+      ap_expr = std::move(gep_expr);
 
       if (pointer_offset != UnknownOffset) {
         if (offset_pack.first != UnknownOffset)
@@ -991,7 +993,7 @@ string IRExpressionRenderer::restore_access_path_expr(
       }
     }
 
-    int n_sections = ap_sections.size();
+    int n_sections = static_cast<int>(ap_sections.size());
 
     for (int i = n_sections - 1; i > -1; --i, base_is_pointer = true) {
       auto &ap_tuple = ap_sections[i];
@@ -1000,7 +1002,12 @@ string IRExpressionRenderer::restore_access_path_expr(
       string ap_expr = std::get<2>(ap_tuple);
 
       if (ap_type == APCast) {
-        full_ap = "((" + ap_expr + ")" + full_ap + ")";
+        string cast_expr = "((";
+        cast_expr += ap_expr;
+        cast_expr += ")";
+        cast_expr += full_ap;
+        cast_expr += ")";
+        full_ap = std::move(cast_expr);
       } else {
         if (ap_type == APFieldExpr) {
           if (ap_expr[0] != '[')
@@ -1052,8 +1059,8 @@ IRExpressionRenderer::restore_access_path_expr(const gvfg::AccessPath &ap,
       cur_type = cur_pointer_type->getPointerElementType();
     }
 
-    uint64_t type_size = TSDL->getTypeSizeInBits(cur_type);
-    if (!type_size)
+    int64_t type_size = static_cast<int64_t>(TSDL->getTypeSizeInBits(cur_type));
+    if (type_size <= 0)
       type_size = 1;
 
     int64_t array_idx = offset / type_size;
@@ -1114,7 +1121,7 @@ Type *IRExpressionRenderer::get_field_type(Type *ty, int64_t offset) {
 
   if (aggregate_type->isArrayTy()) {
     Type *result_type = aggregate_type->getArrayElementType();
-    uint64_t result_type_size = TSDL->getTypeSizeInBits(result_type);
+    int64_t result_type_size = (int64_t)TSDL->getTypeSizeInBits(result_type);
     if (result_type_size) {
       offset = offset % result_type_size;
       result_type = get_field_type(result_type, offset);
@@ -1129,7 +1136,7 @@ Type *IRExpressionRenderer::get_field_type(Type *ty, int64_t offset) {
     return Type::getInt64Ty(ty->getContext());
   }
 
-  int64_t type_offset = offset % size;
+  int64_t type_offset = static_cast<int64_t>(offset % size);
 
   unsigned num_fields = aggregate_type->getNumContainedTypes();
   for (unsigned i = 0; i < num_fields; i++) {
@@ -1206,7 +1213,7 @@ static bool is_single_var_name(string &target, int start_idx, int end_idx) {
 
 void IRExpressionRenderer::value_to_address_expr(string &value_string) {
   remove_redundant_brackets(value_string);
-  int length = value_string.size();
+  int length = static_cast<int>(value_string.size());
 
   if (length == 0) {
     return;
@@ -1245,7 +1252,7 @@ void IRExpressionRenderer::value_to_address_expr(string &value_string) {
 void IRExpressionRenderer::address_to_value_expr(string &address_string) {
   remove_redundant_brackets(address_string);
 
-  int length = address_string.size();
+  int length = static_cast<int>(address_string.size());
 
   if (length == 0) {
     return;
@@ -1276,7 +1283,7 @@ void IRExpressionRenderer::address_to_value_expr(string &address_string) {
 
 void IRExpressionRenderer::remove_redundant_brackets(string &to_refactor) {
   int front = 0, end = 0;
-  int size = to_refactor.size();
+  int size = static_cast<int>(to_refactor.size());
   for (front = 0; front < size; front++) {
     if (to_refactor[front] != '(') {
       break;

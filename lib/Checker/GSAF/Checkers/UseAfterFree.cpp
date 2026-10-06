@@ -1,6 +1,8 @@
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include "Checker/Framework/Subcommands.h"
 #include "Checker/GSAF/API/Vulnerability.h"
 #include "Checker/GSAF/API/VulnerabilityRegistry.h"
+#include "Checker/GSAF/Engine/Checker.h"
 #include "Checker/GSAF/Report/ReportDecorator.h"
 #include "Checker/GSAF/Support/CheckerServices.h"
 
@@ -151,20 +153,6 @@ void UseAfterFree::setPrerequisites(
 bool UseAfterFree::checkNode(const GuardedValueFlowNode *Node,
                              const VulnerabilityTraceBuilder &TraceHistory) {
   assert(Node);
-  // if (nodeOfKind<GuardedValueFlowNode::Kind::CommonArgument,
-  // GuardedValueFlowNode>(Node)) {
-  //   const GuardedValueFlowNode *OpNode = operandNode(Node);
-  //   assert(OpNode);
-  //   Value *sValue = OpNode->getLLVMValue();
-  //   if (sValue) {
-  //     if (!(sValue && sValue->getType()->isPointerTy()) ||
-  //     (!DisableHeapPtrAnalysis.getValue() &&
-  //                                      !HPA->mayHeapPtr(sValue)))
-  //                                      {
-  //       return true;
-  //     }
-  //   }
-  // }
   return false;
 }
 
@@ -221,8 +209,6 @@ UseAfterFree::checkSite(const GuardedValueFlowSite *CurSite,
              !isa<GuardedValueFlowReturnSite>(CurSite));
       return ST_Sink;
     }
-    // } else if (SrcSite->getParentBasicBlock()->getParent() !=
-    // CurSite->getParentBasicBlock()->getParent()) {
   } else if (SrcSite->getParentFunction() != CurSite->getParentFunction()) {
     // search from a pseudo output node with an output summary
     if (auto *GraphCS = dyn_cast<GuardedValueFlowCallSite>(CurSite)) {

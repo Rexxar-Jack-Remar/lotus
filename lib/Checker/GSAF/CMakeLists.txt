@@ -9,18 +9,19 @@ add_library(GSAF STATIC
   Engine/Checker.cpp
   Engine/Solver.cpp
   Engine/Summaries.cpp
-  Engine/FunctionAnalyzer.cpp
+  Engine/IntraAnalysis.cpp
+  Engine/InterAnalysis.cpp
 
   # Built-in checkers
   Checkers/Taint.cpp
   Checkers/UseAfterFree.cpp
 
   # Report
-  Report/ReportBuilder.cpp
   Report/ReportDecorator.cpp
-  Report/TraceScorer.cpp
 
   # Support
+  Support/CheckerServices.cpp
+  Support/GraphQueries.cpp
   Support/Options.cpp
 )
 

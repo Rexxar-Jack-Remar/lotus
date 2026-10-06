@@ -2,7 +2,6 @@
 
 #include "Checker/GSAF/Engine/FunctionAnalyzer.h"
 #include "Checker/GSAF/Report/ReportDecorator.h"
-#include "Checker/GSAF/Report/TraceScorer.h"
 #include "Utils/ADT/PushPopCache.h"
 #include "Utils/Parallel/Scheduler/PipelineScheduler.h"
 
@@ -173,26 +172,14 @@ bool GSAFChecker::runOnModule(llvm::Module &module) {
           tracesByMask[bit].push_back(item.second);
     }
   for (auto &entry : tracesByMask) {
-    auto vulnerability = Vuln->getVulnerability(entry.first);
-    std::vector<gvfg::GuardedValueFlowTrace *> rawTraces;
     for (auto &trace : entry.second) {
       trace->set_bug_type_importance(100);
+      trace->set_score(100);
       trace->set_trace_type(lotus::trace::TraceType::SOURCE_SINK);
-      rawTraces.push_back(trace.get());
-    }
-    auto tactic = GSAFTraceScorer::TACTIC_FLAGS::GSAF_WITH_SYMBOLIC_SUMMARY |
-                  GSAFTraceScorer::TACTIC_FLAGS::DOMINATION;
-    if (StringRef(vulnerability->getName()) == "UAF" ||
-        vulnerability->getCategoryType() == Vulnerability::VCT_Taint)
-      tactic |= GSAFTraceScorer::TACTIC_FLAGS::CONTEXT_COND_ONLY;
-    GSAFTraceScorer scorer(rawTraces, DL.get(), &DebugInfo, this, this, Models,
-                           Models, Models, tactic);
-    scorer.check_all();
-    for (auto &trace : entry.second) {
       auto *report = Vuln->buildReport(trace, &DebugInfo, entry.first);
       report->set_conf_score(trace->get_score());
-      report->set_dominated(scorer.is_dominated(trace.get()));
-      report->set_valid(scorer.is_valid(trace.get()));
+      report->set_dominated(false);
+      report->set_valid(true);
       manager.insert_report(report->get_bug_type_id(), report, true);
     }
   }

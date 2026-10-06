@@ -47,12 +47,12 @@ int DebugInfoAnalysis::getPhiOperandSourceLine(const llvm::PHINode *Phi,
     if (locations && index < locations->getNumOperands())
       if (auto *location = llvm::dyn_cast_or_null<llvm::DILocation>(
               locations->getOperand(index)))
-        return location->getLine();
+        return static_cast<int>(location->getLine());
     auto findLocation = [&](const llvm::BasicBlock &block) -> int {
       for (const auto &instruction : block)
         if (auto *debug = llvm::dyn_cast<llvm::DbgValueInst>(&instruction))
           if (debug->getValue() == Operand && debug->getDebugLoc())
-            return debug->getDebugLoc().getLine();
+            return static_cast<int>(debug->getDebugLoc().getLine());
       return 0;
     };
     if (int line = findLocation(*Phi->getIncomingBlock(index)))
@@ -141,7 +141,8 @@ std::string DebugInfoAnalysis::getFieldName(llvm::Type *type, int64_t offset,
   }
   if (name.empty())
     name = "!" + std::to_string(offset / 8);
-  offset -= layout.getElementOffsetInBits(structure, index);
+  offset -= static_cast<int64_t>(layout.getElementOffsetInBits(structure,
+                                                               index));
   if ((offset > 0 || recursiveDepth != 0) &&
       structure->getElementType(index)->isStructTy())
     name += "." + getFieldName(structure->getElementType(index), offset,

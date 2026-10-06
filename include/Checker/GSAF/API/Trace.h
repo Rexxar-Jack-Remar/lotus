@@ -1,7 +1,6 @@
 #pragma once
 
-#include "Checker/GSAF/Support/MaskMap.h"
-#include "Checker/GSAF/Support/ObjectOrder.h"
+#include "Checker/GSAF/Support/GraphQueries.h"
 #include "IR/GVFG/GuardedValueFlowTrace.h"
 #include "Utils/ADT/PushPopCache.h"
 

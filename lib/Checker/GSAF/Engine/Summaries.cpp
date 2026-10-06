@@ -1,7 +1,4 @@
 #include "Checker/GSAF/Engine/Summaries.h"
-
-#include "Checker/GSAF/Support/MaskMap.h"
-#include "Checker/GSAF/Support/ObjectOrder.h"
 #include "IR/GVFG/GuardedValueFlowTrace.h"
 
 #include <mutex>

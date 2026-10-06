@@ -1,8 +1,7 @@
 #pragma once
 
 #include "Checker/GSAF/API/Trace.h"
-#include "Checker/GSAF/Support/MaskMap.h"
-#include "Checker/GSAF/Support/ObjectOrder.h"
+#include "Checker/GSAF/Support/GraphQueries.h"
 #include "IR/GVFG/GuardedValueFlowNodes.h"
 #include "IR/GVFG/GuardedValueFlowTrace.h"
 #include "Solvers/SMT/LIBSMT/SMTExpr.h"

@@ -553,11 +553,6 @@ LLVMValueReportDecorator::~LLVMValueReportDecorator() {}
 
 void LLVMValueReportDecorator::procInstruction(
     const DiagnosticLocation &dbg_loc, Instruction *inst, Value *val) {
-  // if (dbg_loc.getDbgLine() <= 0) {
-  //     // Instruction with no debug info has no value in the report
-  //     return;
-  // }
-
   assert(inst && "Are you sure to build reports for a nullptr instruction?");
   assert(val && "You do not indicate what value is used in the instruction!");
   bool value_is_operand = false;
@@ -736,11 +731,6 @@ void LLVMValueReportDecorator::procStoreInst(const DiagnosticLocation &dbg_loc,
   DiagnosticTextUnit target_ptr_expr(decorator_emph_str(store_expr));
   DiagnosticText store_val_event = getValueEvent(store_val);
 
-  //    if (target_ptr_expr.makeTip() == store_val_event.makeTip()) {
-  //        // Eliminating store A to A;
-  //        return;
-  //    }
-
   pushDecoratorEvent(dbg_loc, DefaultStoreValue,
                      getValueEvent(store_val, &dbg_loc), target_ptr_expr);
 }
@@ -787,24 +777,6 @@ LLVMValueReportDecorator::procPhiAction(PHINode *phi, Value *val,
   int val_line = isa<Constant>(val) ? DIA->getPhiOperandSourceLine(phi, val)
                                     : DIA->getSourceLine(val);
   bool new_step = false;
-
-  // TODO: Do not know how to safely put such info, should make better design
-  //    if (dbg_loc && val_line > 0) {
-  //        if (back() && back()->getIRSource() == trackValueSource(val)) {
-  //            // Def already exist in the last step, do nothing
-  //        } else if (isa<PHINode>(val)) {
-  //            // We do not add events for PHINode definition
-  //        } else {
-  //            // Create event
-  //            DiagnosticLocation new_dbg_loc(*dbg_loc);
-  //            new_dbg_loc.setDbgLine(val_line);
-  //            new_dbg_loc.setIRSource(val);
-  //            pushDecoratorEvent(new_dbg_loc, DefaultConstValueInit,
-  //            getValueEvent(val));
-  //
-  //            new_step = true;
-  //        }
-  //    }
 
   if (isa<Constant>(val)) {
     if (DIA->hasVariableDebugName(phi)) {
@@ -1436,10 +1408,6 @@ DiagnosticText LLVMValueReportDecorator::getValueEvent(
 
   string ret = inst_resolver->restore_value_expr(val, &phi_select_record);
 
-  //    if (is_deref_val) {
-  //        ir_expression::IRExpressionRenderer::address_to_value_expr(ret);
-  //    }
-
   return std::move(DiagnosticTextUnit(decorator_emph_str(ret)));
 }
 } // namespace lotus::gsaf
@@ -1499,8 +1467,6 @@ void GSAFReportDecorator::buildFromTrace(
   };
 
   auto SrcIndexPair = Trace->find(0, HasDebugInfo);
-  // assert(std::get<INDEX>(SrcIndexPair) == 0 && "The first
-  // GuardedValueFlowObject in the trace must contain debug information");
 
   LLVM_DEBUG(errs() << "\n\n");
 
@@ -1705,13 +1671,6 @@ void GSAFReportDecorator::procCallSiteOutput(
               ArgIdx = adjustArgumentIndexForHuman(
                   cast<CallBase>(CS->getInstruction()), Idx);
               FormalArgName = decorator_emph_str(DIA->getVariableName(BaseArg));
-
-              //                            ArgIdx = Idx + Offset4Reading - 1;
-              //                            if (Idx + Offset4Reading > 0) {
-              //
-              //                            } else {
-              //                                ArgIdx = ARG_IDX_THIS_POINTER;
-              //                            }
               break;
             }
             Idx++;

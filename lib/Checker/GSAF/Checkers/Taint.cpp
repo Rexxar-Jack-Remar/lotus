@@ -1,6 +1,7 @@
 #include "Checker/Framework/Subcommands.h"
 #include "Checker/GSAF/API/Vulnerability.h"
 #include "Checker/GSAF/API/VulnerabilityRegistry.h"
+#include "Checker/GSAF/Engine/Checker.h"
 #include "Checker/GSAF/Report/ReportDecorator.h"
 #include "Checker/GSAF/Support/CheckerServices.h"
 
@@ -118,13 +119,10 @@ public:
   virtual bool checkTrace(std::shared_ptr<VulnerabilityTrace> &Trace) override;
 
   virtual void getAnalysisUsage(AnalysisUsage &AU) override {
-
-    AU.addRequired<GSAFModels>();
     AU.addRequired<GSAFModels>();
   }
 
   virtual void initializeAnalysis(Pass *P) override {
-    // Falcon = &P->getAnalysis<FalconAA>();
     CRA = static_cast<GSAFChecker *>(P);
     TaintSpec = &P->getAnalysis<GSAFModels>();
     MemorySpec = &P->getAnalysis<GSAFModels>();
@@ -326,9 +324,6 @@ TaintAnalysis::checkSite(const GuardedValueFlowSite *CurSite,
     auto *RecentNode = TraceHistory.recentObjAs<GuardedValueFlowNode>();
     Value *sValueRecent = RecentNode->getLLVMValue();
     Value *sValueCS = CS->getInstruction();
-    // auto *RecentValue = RecentNode ? RecentNode->getLLVMValue() : nullptr;
-    // if (RecentValue && isSink(cast<CallBase>(CS->getInstruction()),
-    // RecentValue)) {
     if (sValueRecent && sValueCS && isSink(sValueCS, sValueRecent)) {
       // if source site and cur site are not in the same func
       // it should be search from a pseudo output node with
