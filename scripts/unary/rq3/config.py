@@ -14,24 +14,23 @@ BINARIES = {
     "unary": INTERLEAVED_DYCK_BINARY,
 }
 
-# Value-flow uses an analysis-specific endpoint language in StagedBounds.  Keep
-# it disabled until the same query universe is explicitly applied to MCFL and
-# ACF.  Enabling a suite is otherwise the only dataset-policy change needed by
-# the runner.
+# RQ3 uses the C/C++ value-flow corpus.  StagedBounds defines the client-aware
+# endpoint universe; Union-Dyck supplies the lower bound and ACF tightens the
+# final StagedBounds upper bound within that universe.
 BENCHMARK_SUITES = [
     {
         "name": "taint",
         "directory": REPOSITORY_ROOT
         / "benchmarks/real-world/CFL/InterleavedDyck/taint",
         "analysis": "taint",
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "valueflow",
         "directory": REPOSITORY_ROOT
         / "benchmarks/real-world/CFL/InterleavedDyck/valueflow",
         "analysis": "value-flow",
-        "enabled": False,
+        "enabled": True,
     },
 ]
 DOT_GLOB = "*.dot"
@@ -39,8 +38,8 @@ SEARCH_RECURSIVELY = True
 
 # Arguments may use {analysis}, which is replaced from BENCHMARK_SUITES.
 # artifact_kind controls the machine-readable output captured on the first
-# successful measured run.  G_3 variants are attempted under the same timeout
-# and memory limits; a timeout or memory failure records their exclusion.
+# successful measured run.  MCFL remains configured for future experiments but
+# is disabled because it does not yet implement the value-flow endpoint model.
 EXPERIMENTS = [
     {
         "name": "union-dyck",
@@ -84,7 +83,7 @@ EXPERIMENTS = [
         "artifact_kind": "mcfl",
         "family": "plus",
         "dimension": 1,
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "mcfl-plus-d2",
@@ -93,7 +92,7 @@ EXPERIMENTS = [
         "artifact_kind": "mcfl",
         "family": "plus",
         "dimension": 2,
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "mcfl-plus-d3",
@@ -103,7 +102,7 @@ EXPERIMENTS = [
         "family": "plus",
         "dimension": 3,
         "required": False,
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "mcfl-circ-d1",
@@ -112,7 +111,7 @@ EXPERIMENTS = [
         "artifact_kind": "mcfl",
         "family": "circ",
         "dimension": 1,
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "mcfl-circ-d2",
@@ -121,7 +120,7 @@ EXPERIMENTS = [
         "artifact_kind": "mcfl",
         "family": "circ",
         "dimension": 2,
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "mcfl-circ-d3",
@@ -131,7 +130,7 @@ EXPERIMENTS = [
         "family": "circ",
         "dimension": 3,
         "required": False,
-        "enabled": True,
+        "enabled": False,
     },
 ]
 

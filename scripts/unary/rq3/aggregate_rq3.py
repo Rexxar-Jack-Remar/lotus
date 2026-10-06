@@ -21,17 +21,17 @@ BOUNDS_COLUMNS = [
     "dataset",
     "dot_name",
     "dot_path",
-    "dimension",
     "status",
-    "union_size",
-    "mcfl_plus_size",
-    "mcfl_circ_size",
-    "approx_final_size",
-    "acf_upper_size",
     "lower_size",
-    "gap_size",
-    "certification_ratio",
+    "staged_upper_size",
+    "acf_upper_size",
+    "staged_gap_size",
+    "acf_gap_size",
+    "staged_certification_ratio",
+    "acf_certification_ratio",
     "upper_reduction",
+    "gap_reduction",
+    "newly_excluded_size",
     "violations",
 ]
 
@@ -196,27 +196,6 @@ def method_status(row: dict[str, str]) -> str:
   return statuses[0] if statuses else "not-run"
 
 
-def resource_excluded(row: dict[str, str] | None) -> bool:
-  if row is None or successful(row):
-    return False
-  statuses = json.loads(row["statuses"])
-  return (
-      int(row["successful_repetitions"] or 0) == 0
-      and int(row["configured_repetitions"] or 0) == config.MEASURED_REPETITIONS
-      and bool(statuses)
-      and statuses[0] in {"timeout", "memory-limit"}
-      and row.get("warmup_repetitions") == str(config.WARMUP_REPETITIONS)
-      and row.get("timeout_seconds")
-      == ("" if config.TIMEOUT_SECONDS is None else str(config.TIMEOUT_SECONDS))
-      and row.get("memory_limit_bytes")
-      == (
-          ""
-          if config.MEMORY_LIMIT_GIB is None
-          else str(int(config.MEMORY_LIMIT_GIB * 1024**3))
-      )
-  )
-
-
 def configuration_matches(
     row: dict[str, str] | None, experiment: dict[str, Any]
 ) -> bool:
@@ -275,21 +254,11 @@ def main() -> int:
   required_names = {
       str(item["name"]) for item in enabled if item.get("required", True)
   }
-  circ_by_dimension = {
-      int(item["dimension"]): str(item["name"])
-      for item in enabled
-      if item.get("family") == "circ"
-  }
-  plus_experiments = sorted(
-      (
-          int(item["dimension"]),
-          str(item["name"]),
-          circ_by_dimension.get(int(item["dimension"]), ""),
-          bool(item.get("required", True)),
-      )
-      for item in enabled
-      if item.get("family") == "plus"
-  )
+  core_names = {"union-dyck", "staged-on-demand", "acf"}
+  if expected_names != core_names:
+    raise ValueError(
+        "reduced RQ3 requires exactly union-dyck, staged-on-demand, and acf"
+    )
   missing_methods = 0
   failed_methods = 0
   bounds_rows: list[dict[str, Any]] = []
@@ -327,6 +296,8 @@ def main() -> int:
     approx: set[Pair] = set()
     components: dict[int, int] = {}
     upper: set[Pair] = set()
+    violations: dict[str, Any] = {}
+    status = "success" if common_ready else "incomplete"
     if common_ready:
       union = load_pairs(relation_path(staged, "union.pairs"))
       approx = load_pairs(relation_path(staged, "on-demand.pairs"))
@@ -348,136 +319,74 @@ def main() -> int:
             f"{staged['dot_path']}: standalone and pipeline Union-Dyck differ"
         )
 
-    previous_plus: set[Pair] | None = None
+      checks = {
+          "lower_not_in_staged_upper": union - approx,
+          "lower_not_in_acf": {
+              pair
+              for pair in union
+              if components.get(pair[0]) != components.get(pair[1])
+          },
+      }
+      for name, bad in checks.items():
+        if bad:
+          violations[name] = {"count": len(bad), "sample": samples(bad)}
+      if violations:
+        status = "invalid"
+
+    staged_gap = approx - union if common_ready else set()
+    acf_gap = upper - union if common_ready else set()
     representative = next(iter(rows.values()))
-    for dimension, plus_name, circ_name, required in plus_experiments:
-      plus_row = rows.get(plus_name)
-      circ_row = rows.get(circ_name)
-      plus_configuration = experiment_by_name[plus_name]
-      circ_configuration = experiment_by_name.get(circ_name)
-      violations: dict[str, Any] = {}
-      status = "success"
-      plus: set[Pair] = set()
-      circ: set[Pair] | None = None
-      plus_ready = (
-          plus_row is not None
-          and successful(plus_row)
-          and configuration_matches(plus_row, plus_configuration)
-      )
-      circ_ready = (
-          circ_row is not None
-          and circ_configuration is not None
-          and successful(circ_row)
-          and configuration_matches(circ_row, circ_configuration)
-      )
-      if plus_ready:
-        plus = load_pairs(relation_path(plus_row, f"g-plus-{dimension}.pairs"))
-      if circ_ready:
-        circ = load_pairs(relation_path(circ_row, f"g-circ-{dimension}.pairs"))
-      if (
-          not required
-          and plus_row is not None
-          and circ_row is not None
-          and circ_configuration is not None
-          and configuration_matches(plus_row, plus_configuration)
-          and configuration_matches(circ_row, circ_configuration)
-          and (resource_excluded(plus_row) or resource_excluded(circ_row))
-          and (
-              successful(plus_row) or resource_excluded(plus_row)
-          )
-          and (
-              successful(circ_row) or resource_excluded(circ_row)
-          )
-      ):
-        status = "excluded"
-      elif (
-          not common_ready
-          or not plus_ready
-          or not circ_ready
-      ):
-        status = "incomplete"
-      else:
-        assert circ is not None
-
-        checks = {
-            "union_not_in_approx": union - approx,
-            "plus_not_in_approx": plus - approx,
-            "union_not_in_acf": {
-                pair
-                for pair in union
-                if components.get(pair[0]) != components.get(pair[1])
-            },
-            "plus_not_in_acf": {
-                pair
-                for pair in plus
-                if components.get(pair[0]) != components.get(pair[1])
-            },
+    bounds_rows.append(
+        {
+            "dataset": representative["dataset"],
+            "dot_name": representative["dot_name"],
+            "dot_path": representative["dot_path"],
+            "status": status,
+            "lower_size": len(union) if common_ready else None,
+            "staged_upper_size": len(approx) if common_ready else None,
+            "acf_upper_size": len(upper) if common_ready else None,
+            "staged_gap_size": len(staged_gap) if common_ready else None,
+            "acf_gap_size": len(acf_gap) if common_ready else None,
+            "staged_certification_ratio": (
+                1.0 if not approx else len(union) / len(approx)
+            )
+            if common_ready
+            else None,
+            "acf_certification_ratio": (
+                1.0 if not upper else len(union) / len(upper)
+            )
+            if common_ready
+            else None,
+            "upper_reduction": (
+                None if not approx else 1.0 - len(upper) / len(approx)
+            )
+            if common_ready
+            else None,
+            "gap_reduction": (
+                None
+                if not staged_gap
+                else 1.0 - len(acf_gap) / len(staged_gap)
+            )
+            if common_ready
+            else None,
+            "newly_excluded_size": (
+                len(approx - upper) if common_ready else None
+            ),
+            "violations": json.dumps(
+                violations, ensure_ascii=False, separators=(",", ":")
+            ),
         }
-        checks["circ_not_in_plus"] = circ - plus
-        if previous_plus is not None:
-          checks["previous_dimension_not_in_plus"] = previous_plus - plus
-        for name, bad in checks.items():
-          if bad:
-            violations[name] = {"count": len(bad), "sample": samples(bad)}
-        if violations:
-          status = "invalid"
-
-      complete_bound = status not in {"incomplete", "excluded"}
-      lower = union | plus if complete_bound else set()
-      gap = upper - lower if complete_bound else set()
-      if complete_bound:
-        outside = lower - upper
-        if outside:
-          violations["lower_not_in_upper"] = {
-              "count": len(outside),
-              "sample": samples(outside),
-          }
-          status = "invalid"
-
-      bounds_rows.append(
-          {
-              "dataset": representative["dataset"],
-              "dot_name": representative["dot_name"],
-              "dot_path": representative["dot_path"],
-              "dimension": dimension,
-              "status": status,
-              "union_size": len(union) if common_ready else None,
-              "mcfl_plus_size": (
-                  len(plus) if plus_ready else None
-              ),
-              "mcfl_circ_size": len(circ) if circ_ready and circ is not None else None,
-              "approx_final_size": len(approx) if common_ready else None,
-              "acf_upper_size": len(upper) if common_ready else None,
-              "lower_size": len(lower) if complete_bound else None,
-              "gap_size": len(gap) if complete_bound else None,
-              "certification_ratio": (
-                  1.0 if not upper else len(lower) / len(upper)
-              )
-              if complete_bound
-              else None,
-              "upper_reduction": (
-                  None if not approx else 1.0 - len(upper) / len(approx)
-              )
-              if common_ready
-              else None,
-              "violations": json.dumps(
-                  violations, ensure_ascii=False, separators=(",", ":")
-              ),
-          }
-      )
-      if plus_ready:
-        previous_plus = plus
+    )
 
   write_rows(arguments.methods.resolve(), METHOD_COLUMNS, method_rows)
   write_rows(arguments.bounds.resolve(), BOUNDS_COLUMNS, bounds_rows)
   invalid = sum(row["status"] == "invalid" for row in bounds_rows)
   incomplete = sum(row["status"] == "incomplete" for row in bounds_rows)
-  excluded = sum(row["status"] == "excluded" for row in bounds_rows)
   print(f"Methods: {arguments.methods.resolve()}")
   print(f"Bounds: {arguments.bounds.resolve()}")
   print(
       f"Bound rows: {len(bounds_rows)}; invalid: {invalid}; "
-      f"incomplete: {incomplete}; excluded: {excluded}; "
+      f"incomplete: {incomplete}; "
       f"missing methods: {missing_methods}; "
       f"failed methods: {failed_methods}; unexpected methods: "
       f"{unexpected_methods}"

@@ -39,7 +39,7 @@ class RQ3Test(unittest.TestCase):
     row.update(
         {
             "dataset": "test",
-            "analysis": "taint",
+            "analysis": "value-flow",
             "dot_name": "input.dot",
             "dot_path": "input.dot",
             "experiment": str(experiment["name"]),
@@ -111,25 +111,11 @@ class RQ3Test(unittest.TestCase):
         retained = list(csv.DictReader(stream))
       self.assertEqual([row["experiment"] for row in retained], ["mcfl-plus-d3"])
 
-  def test_missing_circ_makes_aggregation_incomplete(self) -> None:
+  def test_missing_acf_makes_aggregation_incomplete(self) -> None:
     experiments: list[dict[str, object]] = [
         {"name": "union-dyck", "tool": "staged", "artifact_kind": "union"},
         {"name": "staged-on-demand", "tool": "staged", "artifact_kind": "staged"},
         {"name": "acf", "tool": "unary", "artifact_kind": "components"},
-        {
-            "name": "mcfl-plus-d1",
-            "tool": "mcfl",
-            "artifact_kind": "mcfl",
-            "family": "plus",
-            "dimension": 1,
-        },
-        {
-            "name": "mcfl-circ-d1",
-            "tool": "mcfl",
-            "artifact_kind": "mcfl",
-            "family": "circ",
-            "dimension": 1,
-        },
     ]
     with tempfile.TemporaryDirectory() as directory:
       root = Path(directory)
@@ -137,18 +123,18 @@ class RQ3Test(unittest.TestCase):
       for name, names in {
           "union-dyck": ["union.pairs"],
           "staged-on-demand": ["union.pairs", "on-demand.pairs"],
-          "acf": ["components.map"],
-          "mcfl-plus-d1": ["g-plus-1.pairs"],
       }.items():
         base = root / name
         base.mkdir()
         files[name] = []
         for filename in names:
           path = base / filename
-          contents = "1 2\n" if name == "mcfl-plus-d1" else ""
-          path.write_text(contents, encoding="utf-8")
+          path.write_text("", encoding="utf-8")
           files[name].append(path)
-      rows = [self.make_row(item, files[str(item["name"])]) for item in experiments[:-1]]
+      rows = [
+          self.make_row(item, files[str(item["name"])])
+          for item in experiments[:2]
+      ]
       runs = root / "runs.csv"
       with runs.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=run_rq3.CSV_COLUMNS)
@@ -172,7 +158,74 @@ class RQ3Test(unittest.TestCase):
       with (root / "bounds.csv").open("r", encoding="utf-8", newline="") as stream:
         bounds = list(csv.DictReader(stream))
       self.assertEqual(bounds[0]["status"], "incomplete")
-      self.assertEqual(bounds[0]["mcfl_plus_size"], "1")
+      self.assertEqual(bounds[0]["acf_upper_size"], "")
+
+  def test_reduced_bounds_measure_acf_tightening(self) -> None:
+    experiments: list[dict[str, object]] = [
+        {"name": "union-dyck", "tool": "staged", "artifact_kind": "union"},
+        {"name": "staged-on-demand", "tool": "staged", "artifact_kind": "staged"},
+        {"name": "acf", "tool": "unary", "artifact_kind": "components"},
+    ]
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      contents = {
+          "union-dyck": {"union.pairs": "1 2\n"},
+          "staged-on-demand": {
+              "union.pairs": "1 2\n",
+              "on-demand.pairs": "1 2\n2 3\n3 4\n",
+          },
+          "acf": {"components.map": "1 7\n2 7\n3 7\n4 8\n"},
+      }
+      files: dict[str, list[Path]] = {}
+      for experiment_name, artifacts in contents.items():
+        base = root / experiment_name
+        base.mkdir()
+        files[experiment_name] = []
+        for filename, text in artifacts.items():
+          path = base / filename
+          path.write_text(text, encoding="utf-8")
+          files[experiment_name].append(path)
+      rows = [
+          self.make_row(experiment, files[str(experiment["name"])])
+          for experiment in experiments
+      ]
+      runs = root / "runs.csv"
+      with runs.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=run_rq3.CSV_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+      arguments = [
+          "aggregate_rq3.py",
+          "--runs",
+          str(runs),
+          "--bounds",
+          str(root / "bounds.csv"),
+          "--methods",
+          str(root / "methods.csv"),
+      ]
+      with (
+          mock.patch.object(config, "EXPERIMENTS", experiments),
+          mock.patch.object(config, "MEASURED_REPETITIONS", 1),
+          mock.patch.object(sys, "argv", arguments),
+      ):
+        self.assertEqual(aggregate_rq3.main(), 0)
+      with (root / "bounds.csv").open("r", encoding="utf-8", newline="") as stream:
+        bounds = list(csv.DictReader(stream))
+      self.assertEqual(len(bounds), 1)
+      row = bounds[0]
+      self.assertEqual(row["status"], "success")
+      self.assertEqual(row["lower_size"], "1")
+      self.assertEqual(row["staged_upper_size"], "3")
+      self.assertEqual(row["acf_upper_size"], "2")
+      self.assertEqual(row["staged_gap_size"], "2")
+      self.assertEqual(row["acf_gap_size"], "1")
+      self.assertEqual(row["newly_excluded_size"], "1")
+      self.assertAlmostEqual(float(row["upper_reduction"]), 1.0 / 3.0)
+      self.assertAlmostEqual(float(row["gap_reduction"]), 0.5)
+      self.assertAlmostEqual(
+          float(row["staged_certification_ratio"]), 1.0 / 3.0
+      )
+      self.assertAlmostEqual(float(row["acf_certification_ratio"]), 0.5)
 
   def test_relation_hash_is_verified(self) -> None:
     experiment = {
