@@ -118,7 +118,7 @@ def make_command(binary: Path, benchmark: base_runner.Benchmark) -> list[str]:
 
 def check_phase_timing_support(binary: Path) -> None:
   completed = subprocess.run(
-      [str(binary), "--help"],
+      [str(binary), str(config.ENGINE), "--help"],
       stdout=subprocess.PIPE,
       stderr=subprocess.PIPE,
       text=True,
@@ -130,7 +130,8 @@ def check_phase_timing_support(binary: Path) -> None:
   if completed.returncode != 0 or "--phase-timing" not in output:
     raise RuntimeError(
         "the benchmark binary does not support --phase-timing; "
-        "implement the C++ timing switch and rebuild the unary target first"
+        "implement the C++ timing switch and rebuild the "
+        "lotus-cfl-interleaved-dyck target first"
     )
 
 

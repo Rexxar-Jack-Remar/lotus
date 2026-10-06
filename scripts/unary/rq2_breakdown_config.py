@@ -6,6 +6,7 @@ import config as base_config
 # Reuse the benchmark inputs and execution limits from the main experiment.
 REPOSITORY_ROOT = base_config.REPOSITORY_ROOT
 BINARY_PATH = base_config.BINARY_PATH
+ENGINE = base_config.ENGINE
 TESTSET_DIRECTORIES = base_config.TESTSET_DIRECTORIES
 DOT_GLOB = base_config.DOT_GLOB
 SEARCH_RECURSIVELY = base_config.SEARCH_RECURSIVELY
@@ -16,6 +17,7 @@ MEMORY_LIMIT_GIB = base_config.MEMORY_LIMIT_GIB
 STOP_REPETITIONS_AFTER_FAILURE = base_config.STOP_REPETITIONS_AFTER_FAILURE
 
 COMMAND_ARGUMENTS = [
+    ENGINE,
     "--algorithm",
     "adaptive",
     "--bidirect",

@@ -200,6 +200,7 @@ def make_command(
 ) -> list[str]:
   return [
       str(binary),
+      str(config.ENGINE),
       "--algorithm",
       str(experiment["algorithm"]),
       *map(str, config.COMMON_ARGUMENTS),
@@ -496,4 +497,3 @@ if __name__ == "__main__":
   except (OSError, RuntimeError, TypeError, ValueError) as error:
     print(f"run_experiments.py: {error}", file=sys.stderr)
     sys.exit(1)
-

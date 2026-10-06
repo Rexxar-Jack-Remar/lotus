@@ -5,7 +5,8 @@ from pathlib import Path
 
 # Repository paths.  All other default paths are derived from REPOSITORY_ROOT.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-BINARY_PATH = REPOSITORY_ROOT / "build/bin/lotus-cfl-interleaved-dyck-unary"
+BINARY_PATH = REPOSITORY_ROOT / "build/bin/lotus-cfl-interleaved-dyck"
+ENGINE = "unary"
 
 # Every .dot file below each directory is treated as one benchmark project.
 TESTSET_DIRECTORIES = [
@@ -49,4 +50,3 @@ RESUME_EXISTING_CSV = True
 # Extra environment variables for the benchmark process, e.g. thread controls.
 # Existing environment variables are retained.
 EXTRA_ENVIRONMENT = {}
-
