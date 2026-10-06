@@ -258,11 +258,11 @@ void dumpRelations(const std::string &directory, approximation::Method method,
 }
 
 std::optional<std::uint64_t> peakRssBytes() {
-#if defined(__APPLE__) || defined(__linux__)
+#if defined(__unix__) || defined(__APPLE__)
   struct rusage usage {};
   if (getrusage(RUSAGE_SELF, &usage) == 0) {
     std::uint64_t bytes = static_cast<std::uint64_t>(usage.ru_maxrss);
-#if defined(__linux__)
+#if defined(__unix__)
     bytes *= 1024;
 #endif
     return bytes;
