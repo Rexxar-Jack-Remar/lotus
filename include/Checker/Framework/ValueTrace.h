@@ -23,7 +23,7 @@ enum TraceType {
 };
 
 /*
- * Trace is an ordered list of values.
+ * Trace is an ordered list of values with checker reporting metadata.
  * Trace is designed as a lightweight data structure that can be frequently
  * created and dropped without much performance penalty. The base class of Trace
  * does not assign any semantics to the trace, use the derived classes for

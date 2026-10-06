@@ -4,7 +4,7 @@ namespace llvm {
 class Value;
 } // namespace llvm
 
-#include "Utils/Trace/ValueTrace.h"
+#include "Checker/Framework/ValueTrace.h"
 
 #include <utility>
 

@@ -7,6 +7,8 @@
 
 #include <llvm/IR/Function.h>
 
+#include <stack>
+
 namespace lotus {
 namespace gsaf {
 using namespace llvm;

@@ -22,8 +22,10 @@ Reusable facilities belong to their Lotus subsystems: library facts in
 `Annotation`, heap analysis in `Analysis/Memory`, debug expression rendering in `Analysis/DebugInfo`,
 diagnostic templates/composition in `Checker/Framework/DiagnosticEvent` and
 `CheckerDiagnostic`, and graph/solver APIs
-in `IR/GVFG`. Shared trace containers live in `Utils/Trace`; graph-specific
-trace conversion stays in GVFG. LLVM/GVFG narrative rendering stays in
+in `IR/GVFG`. Checker trace containers and reporting metadata live in
+`Checker/Framework/ValueTrace.h`; `Checker/Framework/LLVMValueTrace.h` provides
+the LLVM value-pair representation. Graph-specific traces and conversion stay
+in GVFG. LLVM/GVFG narrative rendering stays in
 `GSAF/Report`; final steps and metadata use the shared `BugReport` implementation.
 GSAF does not maintain a second graph representation.
 

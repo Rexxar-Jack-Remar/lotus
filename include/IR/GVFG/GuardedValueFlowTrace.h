@@ -1,8 +1,7 @@
 #pragma once
 
+#include "Checker/Framework/LLVMValueTrace.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
-#include "Utils/Trace/LLVMValueTrace.h"
-#include "Utils/Trace/ValueTrace.h"
 
 namespace lotus {
 namespace gvfg {

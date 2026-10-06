@@ -31,5 +31,7 @@ Reusable analyses and reporting primitives live in their respective Lotus
 subsystems. Framework diagnostic events and composition extend
 ``DiagnosticEvent`` and ``CheckerDiagnostic``; all report steps use ``BugReport``.
 LLVM/GVFG narrative rendering belongs to GSAF. See ``lib/Checker/GSAF/README.md`` for the dependency boundaries.
-The per-function engine is ``Engine/FunctionAnalyzer``. Shared trace containers
-live in ``Utils/Trace``, with GVFG-specific conversion in the GVFG module.
+The per-function engine is ``Engine/FunctionAnalyzer``. Checker trace containers,
+reporting metadata, and the LLVM value-pair representation live in
+``Checker/Framework/ValueTrace.h`` and ``Checker/Framework/LLVMValueTrace.h``.
+Graph-specific traces and conversion live in ``IR/GVFG``.
