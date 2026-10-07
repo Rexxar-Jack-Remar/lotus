@@ -1,17 +1,21 @@
 #include "CFL/InterleavedDyck/Core/Graph.h"
 #include "CFL/InterleavedDyck/StagedBounds/Solver.h"
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/resource.h>
@@ -27,6 +31,7 @@ enum class PrintedPairs { None, Lower, Result };
 struct CommandLine {
   std::string input;
   std::string output;
+  std::string relation_directory;
   approximation::Method method = approximation::Method::All;
   approximation::BenchmarkKind analysis = approximation::BenchmarkKind::Taint;
   unsigned parity_groups = 2;
@@ -78,6 +83,9 @@ void usage(std::ostream &output) {
          "                     not reset between stages).\n"
          "  --print-lower      print certified lower-bound pairs\n"
          "  --print-result     print pairs produced by the selected method\n"
+         "  --dump-relations DIR\n"
+         "                     write sorted union.pairs and, for a final\n"
+         "                     run, on-demand.pairs\n"
          "  -o FILE            write output to FILE\n"
          "  -h, --help         show this help\n"
          "\n"
@@ -179,6 +187,13 @@ CommandLine parseCommandLine(int argc, char **argv) {
       result.printed_pairs = PrintedPairs::Result;
       continue;
     }
+    if (argument == "--dump-relations") {
+      if (++i == argc) {
+        throw std::invalid_argument("missing value for --dump-relations");
+      }
+      result.relation_directory = argv[i];
+      continue;
+    }
     if (argument == "-o") {
       if (++i == argc) {
         throw std::invalid_argument("missing value for -o");
@@ -197,7 +212,63 @@ CommandLine parseCommandLine(int argc, char **argv) {
   if (result.input.empty()) {
     throw std::invalid_argument("no input graph was provided");
   }
+  if (!result.relation_directory.empty() &&
+      result.method != approximation::Method::All &&
+      result.method != approximation::Method::OnDemand &&
+      result.method != approximation::Method::Underapproximation) {
+    throw std::invalid_argument(
+        "--dump-relations requires --method underapproximation, all, or "
+        "--method on-demand");
+  }
   return result;
+}
+
+void writePairs(const std::filesystem::path &path,
+                const approximation::PairSet &pairs) {
+  std::vector<approximation::Pair> ordered(pairs.begin(), pairs.end());
+  std::sort(
+      ordered.begin(), ordered.end(), [](const auto &left, const auto &right) {
+        return left.source < right.source ||
+               (left.source == right.source && left.target < right.target);
+      });
+  std::ofstream output(path);
+  if (!output) {
+    throw std::runtime_error("cannot open relation file: " + path.string());
+  }
+  for (const auto &pair : ordered) {
+    output << pair.source << ' ' << pair.target << '\n';
+  }
+  output.flush();
+  if (!output) {
+    throw std::runtime_error("cannot write relation file: " + path.string());
+  }
+}
+
+void dumpRelations(const std::string &directory, approximation::Method method,
+                   const approximation::ApproximationResult &result) {
+  if (directory.empty()) {
+    return;
+  }
+  const std::filesystem::path path(directory);
+  std::filesystem::create_directories(path);
+  writePairs(path / "union.pairs", result.underapproximation);
+  if (method != approximation::Method::Underapproximation) {
+    writePairs(path / "on-demand.pairs", result.on_demand);
+  }
+}
+
+std::optional<std::uint64_t> peakRssBytes() {
+#if defined(__unix__) || defined(__APPLE__)
+  struct rusage usage {};
+  if (getrusage(RUSAGE_SELF, &usage) == 0) {
+    std::uint64_t bytes = static_cast<std::uint64_t>(usage.ru_maxrss);
+#if defined(__unix__)
+    bytes *= 1024;
+#endif
+    return bytes;
+  }
+#endif
+  return std::nullopt;
 }
 
 const char *methodLabel(approximation::Method method) {
@@ -312,6 +383,7 @@ int runInterleavedDyckStagedBounds(int argc, char **argv) {
         approximation::Solver{}.analyze(graph, command_line.analysis, options);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start);
+    const std::optional<std::uint64_t> peak_rss = peakRssBytes();
 
     std::ofstream output_file;
     std::ostream *output = &std::cout;
@@ -323,7 +395,11 @@ int runInterleavedDyckStagedBounds(int argc, char **argv) {
       }
       output = &output_file;
     }
+    dumpRelations(command_line.relation_directory, command_line.method, result);
     printResult(*output, command_line, result, elapsed.count());
+    if (peak_rss) {
+      *output << "process peak RSS (bytes): " << *peak_rss << '\n';
+    }
     return 0;
   } catch (const std::exception &error) {
     std::cerr << "lotus-cfl-interleaved-dyck staged-bounds: " << error.what()
