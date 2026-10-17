@@ -94,7 +94,7 @@ Function* Function::create(Bundle* bundle,
                            std::string name,
                            bool is_definition,
                            Intrinsic::ID intrinsic_id) {
-  auto fun =
+  auto *fun =
       new Function(bundle, type, std::move(name), is_definition, intrinsic_id);
   bundle->add_function(std::unique_ptr< Function >(fun));
   return fun;

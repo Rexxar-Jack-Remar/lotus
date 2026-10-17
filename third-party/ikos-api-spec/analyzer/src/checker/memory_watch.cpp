@@ -421,7 +421,7 @@ void MemoryWatchChecker::check_unknown_call(ar::CallBase* call,
       continue;
     }
 
-    auto iv = cast< ar::InternalVariable >(arg);
+    auto *iv = cast< ar::InternalVariable >(arg);
     Variable* ptr = _ctx.var_factory->get_internal(iv);
 
     this->init_global_ptr(inv, arg);

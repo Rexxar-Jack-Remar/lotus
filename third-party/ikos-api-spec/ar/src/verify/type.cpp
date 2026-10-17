@@ -265,7 +265,7 @@ private:
   /// Checks that the type is equivalent to {ui8*, ui32}
   bool check_exception_struct(Statement* s, Type* ty, const char* desc) {
     if (ty->is_struct()) {
-      auto sty = cast< StructType >(ty);
+      auto *sty = cast< StructType >(ty);
       if (sty->num_fields() == 2) {
         auto it = sty->field_begin();
         Type* first_ty = it->type;
@@ -303,8 +303,8 @@ public:
             !this->check_unsigned_int(s, operand_ty, "operand")) {
           return false;
         }
-        auto int_result_ty = cast< IntegerType >(result_ty);
-        auto int_operand_ty = cast< IntegerType >(operand_ty);
+        auto *int_result_ty = cast< IntegerType >(result_ty);
+        auto *int_operand_ty = cast< IntegerType >(operand_ty);
         if (int_result_ty->bit_width() >= int_operand_ty->bit_width()) {
           err << "error: the result type of statement '";
           TextFormatter().format(err, s);
@@ -320,8 +320,8 @@ public:
             !this->check_signed_int(s, operand_ty, "operand")) {
           return false;
         }
-        auto int_result_ty = cast< IntegerType >(result_ty);
-        auto int_operand_ty = cast< IntegerType >(operand_ty);
+        auto *int_result_ty = cast< IntegerType >(result_ty);
+        auto *int_operand_ty = cast< IntegerType >(operand_ty);
         if (int_result_ty->bit_width() >= int_operand_ty->bit_width()) {
           err << "error: the result type of statement '";
           TextFormatter().format(err, s);
@@ -337,8 +337,8 @@ public:
             !this->check_unsigned_int(s, operand_ty, "operand")) {
           return false;
         }
-        auto int_result_ty = cast< IntegerType >(result_ty);
-        auto int_operand_ty = cast< IntegerType >(operand_ty);
+        auto *int_result_ty = cast< IntegerType >(result_ty);
+        auto *int_operand_ty = cast< IntegerType >(operand_ty);
         if (int_result_ty->bit_width() <= int_operand_ty->bit_width()) {
           err << "error: the result type of statement '";
           TextFormatter().format(err, s);
@@ -354,8 +354,8 @@ public:
             !this->check_signed_int(s, operand_ty, "operand")) {
           return false;
         }
-        auto int_result_ty = cast< IntegerType >(result_ty);
-        auto int_operand_ty = cast< IntegerType >(operand_ty);
+        auto *int_result_ty = cast< IntegerType >(result_ty);
+        auto *int_operand_ty = cast< IntegerType >(operand_ty);
         if (int_result_ty->bit_width() <= int_operand_ty->bit_width()) {
           err << "error: the result type of statement '";
           TextFormatter().format(err, s);
@@ -371,8 +371,8 @@ public:
             !this->check_float(s, operand_ty, "operand")) {
           return false;
         }
-        auto float_result_ty = cast< FloatType >(result_ty);
-        auto float_operand_ty = cast< FloatType >(operand_ty);
+        auto *float_result_ty = cast< FloatType >(result_ty);
+        auto *float_operand_ty = cast< FloatType >(operand_ty);
         if (float_result_ty->bit_width() >= float_operand_ty->bit_width()) {
           err << "error: the result type of statement '";
           TextFormatter().format(err, s);
@@ -388,8 +388,8 @@ public:
             !this->check_float(s, operand_ty, "operand")) {
           return false;
         }
-        auto float_result_ty = cast< FloatType >(result_ty);
-        auto float_operand_ty = cast< FloatType >(operand_ty);
+        auto *float_result_ty = cast< FloatType >(result_ty);
+        auto *float_operand_ty = cast< FloatType >(operand_ty);
         if (float_result_ty->bit_width() <= float_operand_ty->bit_width()) {
           err << "error: the result type of statement '";
           TextFormatter().format(err, s);
@@ -603,7 +603,7 @@ public:
     if (!this->check_pointer(s, operand_ty, "operand")) {
       return false;
     }
-    auto ptr_operand_ty = cast< PointerType >(operand_ty);
+    auto *ptr_operand_ty = cast< PointerType >(operand_ty);
     return this->check_equals(s,
                               result_ty,
                               ptr_operand_ty->pointee(),
@@ -616,7 +616,7 @@ public:
     if (!this->check_pointer(s, pointer_ty, "first operand")) {
       return false;
     }
-    auto ptr_pointer_ty = cast< PointerType >(pointer_ty);
+    auto *ptr_pointer_ty = cast< PointerType >(pointer_ty);
     return this->check_equals(s,
                               value_ty,
                               ptr_pointer_ty->pointee(),
@@ -658,7 +658,7 @@ public:
       return false;
     }
 
-    auto ptr_called_ty = cast< PointerType >(called_ty);
+    auto *ptr_called_ty = cast< PointerType >(called_ty);
 
     if (!ptr_called_ty->pointee()->is_function()) {
       err << "error: called value of statement '";
@@ -667,7 +667,7 @@ public:
       return false;
     }
 
-    auto fun_ty = cast< FunctionType >(ptr_called_ty->pointee());
+    auto *fun_ty = cast< FunctionType >(ptr_called_ty->pointee());
 
     // Check the result type
     if (isa< FunctionPointerConstant >(s->called()) &&

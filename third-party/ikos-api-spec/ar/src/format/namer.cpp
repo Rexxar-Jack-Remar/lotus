@@ -114,7 +114,7 @@ void Namer::init(Code* code) {
       for (auto op_it = stmt->op_begin(), op_et = stmt->op_end();
            op_it != op_et;
            ++op_it) {
-        if (auto op = dyn_cast< Variable >(*op_it)) {
+        if (auto *op = dyn_cast< Variable >(*op_it)) {
           if (!op->has_name() &&
               this->_variables.find(op) == this->_variables.end()) {
             this->_variables.emplace(op, std::to_string(++var_idx));

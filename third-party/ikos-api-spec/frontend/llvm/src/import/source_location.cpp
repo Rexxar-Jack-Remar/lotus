@@ -96,9 +96,9 @@ SourceLocation source_location(ar::Statement* stmt) {
     return {}; // null location
   }
 
-  auto value = stmt->frontend< llvm::Value >();
+  auto *value = stmt->frontend< llvm::Value >();
 
-  if (auto inst = llvm::dyn_cast< llvm::Instruction >(value)) {
+  if (auto *inst = llvm::dyn_cast< llvm::Instruction >(value)) {
     SourceLocation loc = source_location(inst);
 
     if (loc) {
@@ -119,7 +119,7 @@ SourceLocation source_location(ar::Statement* stmt) {
       ar::Statement* s = *it;
 
       if (s->has_frontend()) {
-        if (auto inst = llvm::dyn_cast< llvm::Instruction >(
+        if (auto *inst = llvm::dyn_cast< llvm::Instruction >(
                 s->frontend< llvm::Value >())) {
           SourceLocation loc = source_location(inst);
 
@@ -151,7 +151,7 @@ SourceLocation source_location(ar::Statement* stmt) {
         ar::Statement* s = bb->front();
 
         if (ar::isa< ar::Comparison >(s) && s->has_frontend()) {
-          if (auto inst = llvm::dyn_cast< llvm::Instruction >(
+          if (auto *inst = llvm::dyn_cast< llvm::Instruction >(
                   s->frontend< llvm::Value >())) {
             SourceLocation loc = source_location(inst);
 

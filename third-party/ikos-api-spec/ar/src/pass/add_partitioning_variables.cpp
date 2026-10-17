@@ -109,7 +109,7 @@ bool AddPartitioningVariablesPass::run_on_function(Function* fun) {
 
   Bundle* bundle = fun->bundle();
 
-  auto return_type = dyn_cast< IntegerType >(fun->type()->return_type());
+  auto *return_type = dyn_cast< IntegerType >(fun->type()->return_type());
   if (return_type == nullptr) {
     // Return type is not an integer
     return false;
@@ -164,7 +164,7 @@ bool AddPartitioningVariablesPass::run_on_function(Function* fun) {
     return false;
   }
 
-  auto return_stmt = dyn_cast< ReturnValue >(return_block->back());
+  auto *return_stmt = dyn_cast< ReturnValue >(return_block->back());
   if (return_stmt == nullptr) {
     // Return block does not end with a return
     return false;
@@ -175,7 +175,7 @@ bool AddPartitioningVariablesPass::run_on_function(Function* fun) {
     return false;
   }
 
-  auto return_var = dyn_cast< InternalVariable >(return_stmt->operand());
+  auto *return_var = dyn_cast< InternalVariable >(return_stmt->operand());
   if (return_var == nullptr) {
     // Function does not return a variable
     return false;

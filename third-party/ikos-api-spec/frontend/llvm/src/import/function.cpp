@@ -97,8 +97,8 @@ void FunctionImporter::translate_parameters() {
   // Internal variables for parameters are automatically created by
   // ar::Function::create(). Here, we just need to store the mapping with
   // mark_variable_mapping.
-  auto param_it = this->_llvm_fun->arg_begin();
-  auto param_et = this->_llvm_fun->arg_end();
+  auto *param_it = this->_llvm_fun->arg_begin();
+  auto *param_et = this->_llvm_fun->arg_end();
   auto ar_param_it = this->_ar_fun->param_begin();
   for (; param_it != param_et; ++param_it, ++ar_param_it) {
     llvm::Argument* llvm_param = &*param_it;
@@ -193,7 +193,7 @@ void FunctionImporter::translate_phi_nodes() {
 void FunctionImporter::translate_phi_nodes(
     BasicBlockTranslation* bb_translation, llvm::BasicBlock* bb) {
   for (llvm::Instruction& inst : *bb) {
-    if (auto phi = llvm::dyn_cast< llvm::PHINode >(&inst)) {
+    if (auto *phi = llvm::dyn_cast< llvm::PHINode >(&inst)) {
       this->translate_phi_late(bb_translation, phi);
     }
   }
@@ -323,51 +323,51 @@ void FunctionImporter::translate_instruction(
     bb_translation->merge_outputs();
   }
 
-  if (auto alloca = llvm::dyn_cast< llvm::AllocaInst >(inst)) {
+  if (auto *alloca = llvm::dyn_cast< llvm::AllocaInst >(inst)) {
     this->translate_alloca(bb_translation, alloca);
-  } else if (auto store = llvm::dyn_cast< llvm::StoreInst >(inst)) {
+  } else if (auto *store = llvm::dyn_cast< llvm::StoreInst >(inst)) {
     this->translate_store(bb_translation, store);
-  } else if (auto load = llvm::dyn_cast< llvm::LoadInst >(inst)) {
+  } else if (auto *load = llvm::dyn_cast< llvm::LoadInst >(inst)) {
     this->translate_load(bb_translation, load);
-  } else if (auto call = llvm::dyn_cast< llvm::CallInst >(inst)) {
+  } else if (auto *call = llvm::dyn_cast< llvm::CallInst >(inst)) {
     this->translate_call(bb_translation, call);
-  } else if (auto invoke = llvm::dyn_cast< llvm::InvokeInst >(inst)) {
+  } else if (auto *invoke = llvm::dyn_cast< llvm::InvokeInst >(inst)) {
     this->translate_invoke(bb_translation, invoke);
-  } else if (auto bitcast = llvm::dyn_cast< llvm::BitCastInst >(inst)) {
+  } else if (auto *bitcast = llvm::dyn_cast< llvm::BitCastInst >(inst)) {
     this->translate_bitcast(bb_translation, bitcast);
-  } else if (auto cast = llvm::dyn_cast< llvm::CastInst >(inst)) {
+  } else if (auto *cast = llvm::dyn_cast< llvm::CastInst >(inst)) {
     this->translate_cast(bb_translation, cast);
-  } else if (auto gep = llvm::dyn_cast< llvm::GetElementPtrInst >(inst)) {
+  } else if (auto *gep = llvm::dyn_cast< llvm::GetElementPtrInst >(inst)) {
     this->translate_getelementptr(bb_translation, gep);
-  } else if (auto binary_op = llvm::dyn_cast< llvm::BinaryOperator >(inst)) {
+  } else if (auto *binary_op = llvm::dyn_cast< llvm::BinaryOperator >(inst)) {
     this->translate_binary_operator(bb_translation, binary_op);
-  } else if (auto cmp = llvm::dyn_cast< llvm::CmpInst >(inst)) {
+  } else if (auto *cmp = llvm::dyn_cast< llvm::CmpInst >(inst)) {
     this->translate_cmp(bb_translation, cmp);
-  } else if (auto br = llvm::dyn_cast< llvm::BranchInst >(inst)) {
+  } else if (auto *br = llvm::dyn_cast< llvm::BranchInst >(inst)) {
     this->translate_branch(bb_translation, br);
-  } else if (auto ret = llvm::dyn_cast< llvm::ReturnInst >(inst)) {
+  } else if (auto *ret = llvm::dyn_cast< llvm::ReturnInst >(inst)) {
     this->translate_return(bb_translation, ret);
-  } else if (auto phi = llvm::dyn_cast< llvm::PHINode >(inst)) {
+  } else if (auto *phi = llvm::dyn_cast< llvm::PHINode >(inst)) {
     this->translate_phi(bb_translation, phi);
-  } else if (auto extractvalue =
+  } else if (auto *extractvalue =
                  llvm::dyn_cast< llvm::ExtractValueInst >(inst)) {
     this->translate_extractvalue(bb_translation, extractvalue);
-  } else if (auto insertvalue = llvm::dyn_cast< llvm::InsertValueInst >(inst)) {
+  } else if (auto *insertvalue = llvm::dyn_cast< llvm::InsertValueInst >(inst)) {
     this->translate_insertvalue(bb_translation, insertvalue);
-  } else if (auto extractelement =
+  } else if (auto *extractelement =
                  llvm::dyn_cast< llvm::ExtractElementInst >(inst)) {
     this->translate_extractelement(bb_translation, extractelement);
-  } else if (auto insertelement =
+  } else if (auto *insertelement =
                  llvm::dyn_cast< llvm::InsertElementInst >(inst)) {
     this->translate_insertelement(bb_translation, insertelement);
-  } else if (auto shufflevector =
+  } else if (auto *shufflevector =
                  llvm::dyn_cast< llvm::ShuffleVectorInst >(inst)) {
     this->translate_shufflevector(bb_translation, shufflevector);
-  } else if (auto unreachable = llvm::dyn_cast< llvm::UnreachableInst >(inst)) {
+  } else if (auto *unreachable = llvm::dyn_cast< llvm::UnreachableInst >(inst)) {
     this->translate_unreachable(bb_translation, unreachable);
-  } else if (auto landingpad = llvm::dyn_cast< llvm::LandingPadInst >(inst)) {
+  } else if (auto *landingpad = llvm::dyn_cast< llvm::LandingPadInst >(inst)) {
     this->translate_landingpad(bb_translation, landingpad);
-  } else if (auto resume = llvm::dyn_cast< llvm::ResumeInst >(inst)) {
+  } else if (auto *resume = llvm::dyn_cast< llvm::ResumeInst >(inst)) {
     this->translate_resume(bb_translation, resume);
   } else if (llvm::isa< llvm::SelectInst >(inst)) {
     // The preprocessor should use the -lower-select pass
@@ -398,7 +398,7 @@ void FunctionImporter::translate_alloca(BasicBlockTranslation* bb_translation,
   check_import(alloca->getType()->getPointerElementType() ==
                    alloca->getAllocatedType(),
                "unexpected allocated type in llvm alloca");
-  auto var_type = ar::cast< ar::PointerType >(this->infer_type(alloca));
+  auto *var_type = ar::cast< ar::PointerType >(this->infer_type(alloca));
   ar::Type* allocated_type = var_type->pointee();
 
   // Translate local variable
@@ -409,8 +409,8 @@ void FunctionImporter::translate_alloca(BasicBlockTranslation* bb_translation,
   this->mark_variable_mapping(alloca, var);
 
   // Translate array size
-  auto array_size_type = ar::IntegerType::size_type(this->_bundle);
-  auto array_size = this->translate_cast_integer_value(bb_translation,
+  auto *array_size_type = ar::IntegerType::size_type(this->_bundle);
+  auto *array_size = this->translate_cast_integer_value(bb_translation,
                                                        alloca->getArraySize(),
                                                        array_size_type);
 
@@ -425,7 +425,7 @@ void FunctionImporter::translate_store(BasicBlockTranslation* bb_translation,
   ar::Value* pointer = this->translate_value(bb_translation,
                                              store->getPointerOperand(),
                                              nullptr);
-  auto ptr_type = ar::cast< ar::PointerType >(pointer->type());
+  auto *ptr_type = ar::cast< ar::PointerType >(pointer->type());
 
   // Translate stored value
   ar::Value* value = this->translate_value(bb_translation,
@@ -464,7 +464,7 @@ void FunctionImporter::translate_load(BasicBlockTranslation* bb_translation,
 
 /// \brief Eliminate any intermediate alias by returning the aliasee
 static llvm::Value* unalias(llvm::Value* value) {
-  while (auto alias = llvm::dyn_cast< llvm::GlobalAlias >(value)) {
+  while (auto *alias = llvm::dyn_cast< llvm::GlobalAlias >(value)) {
     value = alias->getAliasee();
   }
   return value;
@@ -472,7 +472,7 @@ static llvm::Value* unalias(llvm::Value* value) {
 
 void FunctionImporter::translate_call(BasicBlockTranslation* bb_translation,
                                       llvm::CallInst* call) {
-  if (auto intrinsic = llvm::dyn_cast< llvm::IntrinsicInst >(call)) {
+  if (auto *intrinsic = llvm::dyn_cast< llvm::IntrinsicInst >(call)) {
     this->translate_intrinsic_call(bb_translation, intrinsic);
     return;
   }
@@ -528,7 +528,7 @@ void FunctionImporter::translate_intrinsic_call(
                                        memcpy->isVolatile());
     stmt->set_frontend< llvm::Value >(memcpy);
     bb_translation->add_statement(std::move(stmt));
-  } else if (auto memmove = llvm::dyn_cast< llvm::MemMoveInst >(call)) {
+  } else if (auto *memmove = llvm::dyn_cast< llvm::MemMoveInst >(call)) {
     ar::Value* dest = this->translate_value(bb_translation,
                                             memmove->getRawDest(),
                                             void_ptr_ty);
@@ -549,7 +549,7 @@ void FunctionImporter::translate_intrinsic_call(
                                        memmove->isVolatile());
     stmt->set_frontend< llvm::Value >(memmove);
     bb_translation->add_statement(std::move(stmt));
-  } else if (auto memset = llvm::dyn_cast< llvm::MemSetInst >(call)) {
+  } else if (auto *memset = llvm::dyn_cast< llvm::MemSetInst >(call)) {
     ar::Value* dest = this->translate_value(bb_translation,
                                             memset->getRawDest(),
                                             void_ptr_ty);
@@ -659,8 +659,8 @@ void FunctionImporter::translate_call_helper(
   // Translate called value
   ar::Value* called =
       this->translate_value(bb_translation, call->getCalledOperand(), nullptr);
-  auto called_type = ar::cast< ar::PointerType >(called->type());
-  auto fun_type = ar::cast< ar::FunctionType >(called_type->pointee());
+  auto *called_type = ar::cast< ar::PointerType >(called->type());
+  auto *fun_type = ar::cast< ar::FunctionType >(called_type->pointee());
 
   const bool has_return_value = !call->getType()->isVoidTy();
 
@@ -900,7 +900,7 @@ void FunctionImporter::translate_getelementptr(
   terms.reserve(gep->getNumOperands() - 1);
 
   // Preferred type for operands
-  auto size_type = ar::IntegerType::size_type(this->_bundle);
+  auto *size_type = ar::IntegerType::size_type(this->_bundle);
 
   for (auto it = llvm::gep_type_begin(gep), et = llvm::gep_type_end(gep);
        it != et;
@@ -1135,7 +1135,7 @@ void FunctionImporter::translate_binary_operator(
 
     // Add the no-wrap flag
     bool no_wrap = false;
-    if (auto wrapping_inst =
+    if (auto *wrapping_inst =
             llvm::dyn_cast< llvm::OverflowingBinaryOperator >(inst)) {
       no_wrap = wrapping_inst->hasNoSignedWrap() ||
                 wrapping_inst->hasNoUnsignedWrap();
@@ -1143,7 +1143,7 @@ void FunctionImporter::translate_binary_operator(
 
     // Add the exact flag
     bool exact = false;
-    if (auto exact_inst = llvm::dyn_cast< llvm::PossiblyExactOperator >(inst)) {
+    if (auto *exact_inst = llvm::dyn_cast< llvm::PossiblyExactOperator >(inst)) {
       exact = exact_inst->isExact();
     }
 
@@ -1394,11 +1394,11 @@ void FunctionImporter::translate_branch(BasicBlockTranslation* bb_translation,
       auto it = this->_variables.find(condition);
       ikos_assert_msg(it != this->_variables.end(),
                       "condition hasn't been translated yet");
-      auto var = ar::cast< ar::InternalVariable >(it->second);
+      auto *var = ar::cast< ar::InternalVariable >(it->second);
 
       // Add branch
       bb_translation->add_conditional_branching(br, var);
-    } else if (auto cst = llvm::dyn_cast< llvm::ConstantInt >(condition)) {
+    } else if (auto *cst = llvm::dyn_cast< llvm::ConstantInt >(condition)) {
       bb_translation->add_unconditional_branching(br,
                                                   br->getSuccessor(
                                                       cst->isZero() ? 1 : 0));
@@ -1446,7 +1446,7 @@ static bool is_valid_bitcast(ar::Type* from, ar::Type* to) {
 
 void FunctionImporter::translate_phi_late(BasicBlockTranslation* bb_translation,
                                           llvm::PHINode* phi) {
-  auto result = ar::cast< ar::InternalVariable >(this->_variables[phi]);
+  auto *result = ar::cast< ar::InternalVariable >(this->_variables[phi]);
 
   for (unsigned i = 0; i < phi->getNumIncomingValues(); i++) {
     llvm::Value* llvm_value = phi->getIncomingValue(i);
@@ -1541,19 +1541,19 @@ ar::IntegerConstant* FunctionImporter::translate_indexes(
     llvm::ExtractValueInst::idx_iterator end) {
   ar::ZNumber offset(0);
 
-  for (auto it = begin; it != end; ++it) {
+  for (const auto *it = begin; it != end; ++it) {
     unsigned idx = *it;
 
-    if (auto struct_type = llvm::dyn_cast< llvm::StructType >(indexed_type)) {
+    if (auto *struct_type = llvm::dyn_cast< llvm::StructType >(indexed_type)) {
       offset += this->_llvm_data_layout.getStructLayout(struct_type)
                     ->getElementOffset(idx);
-    } else if (auto array_type =
+    } else if (auto *array_type =
                    llvm::dyn_cast< llvm::ArrayType >(indexed_type)) {
       ar::ZNumber element_size(
           this->_llvm_data_layout.getTypeAllocSize(array_type->getElementType())
               .getFixedSize());
       offset += element_size * idx;
-    } else if (auto vector_type =
+    } else if (auto *vector_type =
                    llvm::dyn_cast< llvm::VectorType >(indexed_type)) {
       ar::ZNumber element_size(
           this->_llvm_data_layout
@@ -1567,7 +1567,7 @@ ar::IntegerConstant* FunctionImporter::translate_indexes(
     indexed_type = llvm::GetElementPtrInst::getTypeAtIndex(indexed_type, idx);
   }
 
-  auto size_type = ar::IntegerType::size_type(this->_bundle);
+  auto *size_type = ar::IntegerType::size_type(this->_bundle);
   return ar::IntegerConstant::get(this->_context,
                                   size_type,
                                   ar::MachineInt(offset,
@@ -1587,11 +1587,11 @@ void FunctionImporter::translate_extractelement(
       this->translate_value(bb_translation, inst->getVectorOperand(), nullptr);
 
   // Translate offset
-  auto index = llvm::dyn_cast< llvm::ConstantInt >(inst->getIndexOperand());
+  auto *index = llvm::dyn_cast< llvm::ConstantInt >(inst->getIndexOperand());
   if (index == nullptr) {
     throw ImportError("unsupported operand to llvm extractelement");
   }
-  auto size_type = ar::IntegerType::size_type(this->_bundle);
+  auto *size_type = ar::IntegerType::size_type(this->_bundle);
   ar::ZNumber element_size(
       this->_llvm_data_layout
           .getTypeAllocSize(inst->getVectorOperandType()->getElementType())
@@ -1621,17 +1621,17 @@ void FunctionImporter::translate_insertelement(
       this->translate_value(bb_translation, inst->getOperand(0), nullptr);
 
   // Translate offset
-  auto index = llvm::dyn_cast< llvm::ConstantInt >(inst->getOperand(2));
+  auto *index = llvm::dyn_cast< llvm::ConstantInt >(inst->getOperand(2));
   if (index == nullptr) {
     throw ImportError("unsupported operand to llvm insertelement");
   }
-  auto size_type = ar::IntegerType::size_type(this->_bundle);
+  auto *size_type = ar::IntegerType::size_type(this->_bundle);
   ar::ZNumber element_size(
       this->_llvm_data_layout
           .getTypeAllocSize(inst->getType()->getElementType())
           .getFixedSize());
   ar::ZNumber offset_value = index->getZExtValue() * element_size;
-  auto offset = ar::IntegerConstant::get(this->_context,
+  auto *offset = ar::IntegerConstant::get(this->_context,
                                          size_type,
                                          ar::MachineInt(offset_value,
                                                         size_type->bit_width(),
@@ -1693,7 +1693,7 @@ void FunctionImporter::translate_landingpad(
 void FunctionImporter::translate_resume(BasicBlockTranslation* bb_translation,
                                         llvm::ResumeInst* resume) {
   // Translate operand
-  auto operand = ar::cast< ar::InternalVariable >(
+  auto *operand = ar::cast< ar::InternalVariable >(
       this->translate_value(bb_translation, resume->getOperand(0), nullptr));
 
   // Create statement
@@ -1711,7 +1711,7 @@ ar::Value* FunctionImporter::translate_constant(
 
 ar::Value* FunctionImporter::translate_value(
     BasicBlockTranslation* bb_translation, llvm::Value* value, ar::Type* type) {
-  if (auto cst = llvm::dyn_cast< llvm::Constant >(value)) {
+  if (auto *cst = llvm::dyn_cast< llvm::Constant >(value)) {
     return this->translate_constant(bb_translation, cst, type);
   } else if (llvm::isa< llvm::Instruction >(value) ||
              llvm::isa< llvm::Argument >(value)) {
@@ -1728,7 +1728,7 @@ ar::Value* FunctionImporter::translate_value(
       // Add a cast from var->type() to type
       return this->add_bitcast(bb_translation, var, type);
     }
-  } else if (auto inline_asm = llvm::dyn_cast< llvm::InlineAsm >(value)) {
+  } else if (auto *inline_asm = llvm::dyn_cast< llvm::InlineAsm >(value)) {
     return this->translate_inline_asm(inline_asm, type);
   } else {
     throw ImportError("unsupported llvm value [1]");
@@ -1752,7 +1752,7 @@ ar::InternalVariable* FunctionImporter::add_bitcast(
   ikos_assert(type != nullptr);
 
   // Create an internal variable containing the result of the cast
-  auto result = ar::InternalVariable::create(this->_body, type);
+  auto *result = ar::InternalVariable::create(this->_body, type);
   result->set_frontend(*var);
 
   return this->add_bitcast(bb_translation, result, var);
@@ -1784,7 +1784,7 @@ ar::Value* FunctionImporter::translate_cast_integer_value(
     ar::IntegerType* type) {
   ikos_assert(type != nullptr);
 
-  if (auto cst = llvm::dyn_cast< llvm::Constant >(value)) {
+  if (auto *cst = llvm::dyn_cast< llvm::Constant >(value)) {
     return _ctx.constant_imp->translate_cast_integer_constant(cst, type);
   } else if (llvm::isa< llvm::Instruction >(value) ||
              llvm::isa< llvm::Argument >(value)) {
@@ -1813,14 +1813,14 @@ ar::InternalVariable* FunctionImporter::add_integer_casts(
   ikos_assert(type != nullptr);
 
   ar::Value* cur_var = var;
-  auto cur_type = ar::cast< ar::IntegerType >(cur_var->type());
+  auto *cur_type = ar::cast< ar::IntegerType >(cur_var->type());
 
   // Truncate or extend
   if (cur_type->bit_width() != type->bit_width()) {
-    auto res_type = ar::IntegerType::get(this->_context,
+    auto *res_type = ar::IntegerType::get(this->_context,
                                          type->bit_width(),
                                          cur_type->sign());
-    auto res_var = ar::InternalVariable::create(this->_body, res_type);
+    auto *res_var = ar::InternalVariable::create(this->_body, res_type);
     res_var->set_frontend(*var);
 
     ar::UnaryOperation::Operator op;
@@ -1847,8 +1847,8 @@ ar::InternalVariable* FunctionImporter::add_integer_casts(
 
   // Sign convertion (bitcast)
   if (cur_type->sign() != type->sign()) {
-    auto res_type = type;
-    auto res_var = ar::InternalVariable::create(this->_body, res_type);
+    auto *res_type = type;
+    auto *res_var = ar::InternalVariable::create(this->_body, res_type);
     res_var->set_frontend(*var);
 
     auto stmt = ar::UnaryOperation::create(ar::UnaryOperation::Bitcast,
@@ -1865,7 +1865,7 @@ ar::InternalVariable* FunctionImporter::add_integer_casts(
 
 ar::Type* FunctionImporter::infer_type(llvm::Value* value) {
   // Use debug information if available
-  if (auto ar_type = this->infer_type_from_dbg(value)) {
+  if (auto *ar_type = this->infer_type_from_dbg(value)) {
     return ar_type;
   }
 
@@ -1898,10 +1898,10 @@ ar::Type* FunctionImporter::infer_type(llvm::Value* value) {
 
 ar::Type* FunctionImporter::infer_type_from_dbg(llvm::Value* value) {
   // Check for llvm.dbg.declare and llvm.dbg.addr
-  if (auto alloca = llvm::dyn_cast< llvm::AllocaInst >(value)) {
+  if (auto *alloca = llvm::dyn_cast< llvm::AllocaInst >(value)) {
     llvm::TinyPtrVector< llvm::DbgVariableIntrinsic* > dbg_addrs =
         llvm::FindDbgAddrUses(alloca);
-    auto dbg_addr =
+    auto *dbg_addr =
         std::find_if(dbg_addrs.begin(),
                      dbg_addrs.end(),
                      [](llvm::DbgVariableIntrinsic* dbg) {
@@ -1910,7 +1910,7 @@ ar::Type* FunctionImporter::infer_type_from_dbg(llvm::Value* value) {
 
     if (dbg_addr != dbg_addrs.end()) {
       llvm::DILocalVariable* di_var = (*dbg_addr)->getVariable();
-      auto di_type = llvm::cast_or_null< llvm::DIType >(di_var->getRawType());
+      auto *di_type = llvm::cast_or_null< llvm::DIType >(di_var->getRawType());
 
       if (!alloca->isArrayAllocation()) {
         try {
@@ -1939,7 +1939,7 @@ ar::Type* FunctionImporter::infer_type_from_dbg(llvm::Value* value) {
   if (!llvm::isa< llvm::Constant >(value)) {
     llvm::SmallVector< llvm::DbgValueInst*, 1 > dbg_values;
     llvm::findDbgValues(dbg_values, value);
-    auto dbg_value =
+    auto *dbg_value =
         std::find_if(dbg_values.begin(),
                      dbg_values.end(),
                      [](llvm::DbgValueInst* dbg) {
@@ -1948,7 +1948,7 @@ ar::Type* FunctionImporter::infer_type_from_dbg(llvm::Value* value) {
 
     if (dbg_value != dbg_values.end()) {
       llvm::DILocalVariable* di_var = (*dbg_value)->getVariable();
-      auto di_type = llvm::cast_or_null< llvm::DIType >(di_var->getRawType());
+      auto *di_type = llvm::cast_or_null< llvm::DIType >(di_var->getRawType());
 
       try {
         return _ctx.type_imp->translate_type(value->getType(), di_type);
@@ -1956,7 +1956,7 @@ ar::Type* FunctionImporter::infer_type_from_dbg(llvm::Value* value) {
         if (!this->_allow_debug_info_mismatch) {
           throw;
         }
-        if (auto alloca = llvm::dyn_cast< llvm::AllocaInst >(value)) {
+        if (auto *alloca = llvm::dyn_cast< llvm::AllocaInst >(value)) {
           try {
             ar::Type* pointee =
                 _ctx.type_imp->translate_type(alloca->getAllocatedType(),
@@ -1977,13 +1977,13 @@ ar::Type* FunctionImporter::infer_default_type(llvm::Value* value) {
   // Fallback to translate_type() and prefer signed integers
   ar::Signedness preferred = ar::Signed;
 
-  if (auto call = llvm::dyn_cast< llvm::CallInst >(value)) {
+  if (auto *call = llvm::dyn_cast< llvm::CallInst >(value)) {
     // Use the type of the returned value, if it's a direct call
     llvm::Value* called = unalias(call->getCalledOperand());
-    if (auto fun = llvm::dyn_cast< llvm::Function >(called)) {
+    if (auto *fun = llvm::dyn_cast< llvm::Function >(called)) {
       return _ctx.bundle_imp->translate_function(fun)->type()->return_type();
     }
-  } else if (auto cast = llvm::dyn_cast< llvm::CastInst >(value)) {
+  } else if (auto *cast = llvm::dyn_cast< llvm::CastInst >(value)) {
     preferred = (cast->getOpcode() == llvm::Instruction::ZExt ||
                  cast->getOpcode() == llvm::Instruction::FPToUI)
                     ? ar::Unsigned
@@ -1997,29 +1997,29 @@ FunctionImporter::TypeHint FunctionImporter::infer_type_hint_use(
     llvm::Use& use) {
   llvm::Value* user = use.getUser();
 
-  if (auto alloca = llvm::dyn_cast< llvm::AllocaInst >(user)) {
+  if (auto *alloca = llvm::dyn_cast< llvm::AllocaInst >(user)) {
     return this->infer_type_hint_use_alloca(use, alloca);
-  } else if (auto store = llvm::dyn_cast< llvm::StoreInst >(user)) {
+  } else if (auto *store = llvm::dyn_cast< llvm::StoreInst >(user)) {
     return this->infer_type_hint_use_store(use, store);
-  } else if (auto load = llvm::dyn_cast< llvm::LoadInst >(user)) {
+  } else if (auto *load = llvm::dyn_cast< llvm::LoadInst >(user)) {
     return this->infer_type_hint_use_load(use, load);
-  } else if (auto call = llvm::dyn_cast< llvm::CallInst >(user)) {
+  } else if (auto *call = llvm::dyn_cast< llvm::CallInst >(user)) {
     return this->infer_type_hint_use_call(use, call);
-  } else if (auto invoke = llvm::dyn_cast< llvm::InvokeInst >(user)) {
+  } else if (auto *invoke = llvm::dyn_cast< llvm::InvokeInst >(user)) {
     return this->infer_type_hint_use_invoke(use, invoke);
-  } else if (auto cast = llvm::dyn_cast< llvm::CastInst >(user)) {
+  } else if (auto *cast = llvm::dyn_cast< llvm::CastInst >(user)) {
     return this->infer_type_hint_use_cast(use, cast);
-  } else if (auto gep = llvm::dyn_cast< llvm::GetElementPtrInst >(user)) {
+  } else if (auto *gep = llvm::dyn_cast< llvm::GetElementPtrInst >(user)) {
     return this->infer_type_hint_use_getelementptr(use, gep);
-  } else if (auto binary_op = llvm::dyn_cast< llvm::BinaryOperator >(user)) {
+  } else if (auto *binary_op = llvm::dyn_cast< llvm::BinaryOperator >(user)) {
     return this->infer_type_hint_use_binary_operator(use, binary_op);
-  } else if (auto cmp = llvm::dyn_cast< llvm::CmpInst >(user)) {
+  } else if (auto *cmp = llvm::dyn_cast< llvm::CmpInst >(user)) {
     return this->infer_type_hint_use_cmp(use, cmp);
-  } else if (auto br = llvm::dyn_cast< llvm::BranchInst >(user)) {
+  } else if (auto *br = llvm::dyn_cast< llvm::BranchInst >(user)) {
     return this->infer_type_hint_use_branch(use, br);
-  } else if (auto ret = llvm::dyn_cast< llvm::ReturnInst >(user)) {
+  } else if (auto *ret = llvm::dyn_cast< llvm::ReturnInst >(user)) {
     return this->infer_type_hint_use_return(use, ret);
-  } else if (auto phi = llvm::dyn_cast< llvm::PHINode >(user)) {
+  } else if (auto *phi = llvm::dyn_cast< llvm::PHINode >(user)) {
     return this->infer_type_hint_use_phi(use, phi);
   } else if (llvm::isa< llvm::ExtractValueInst >(user)) {
     return {}; // no hint
@@ -2043,7 +2043,7 @@ FunctionImporter::TypeHint FunctionImporter::infer_type_hint_use(
   } else if (llvm::isa< llvm::SwitchInst >(user)) {
     // The preprocessor should use the -lowerswitch pass
     throw ImportError("llvm switch instructions are not supported");
-  } else if (auto inst = llvm::dyn_cast< llvm::Instruction >(user)) {
+  } else if (auto *inst = llvm::dyn_cast< llvm::Instruction >(user)) {
     std::ostringstream buf;
     buf << "unsupported llvm instruction " << inst->getOpcodeName() << " [2]";
     throw ImportError(buf.str());
@@ -2322,19 +2322,19 @@ FunctionImporter::TypeHint FunctionImporter::infer_type_hint_use_phi(
 FunctionImporter::TypeHint FunctionImporter::infer_type_hint_operand(
     llvm::Value* value) {
   // Use debug information if available
-  if (auto ar_type = this->infer_type_from_dbg(value)) {
+  if (auto *ar_type = this->infer_type_from_dbg(value)) {
     return {ar_type, 1000};
   }
 
-  if (auto gv = llvm::dyn_cast< llvm::GlobalVariable >(value)) {
+  if (auto *gv = llvm::dyn_cast< llvm::GlobalVariable >(value)) {
     return this->infer_type_hint_operand_global_variable(gv);
-  } else if (auto gv_alias = llvm::dyn_cast< llvm::GlobalAlias >(value)) {
+  } else if (auto *gv_alias = llvm::dyn_cast< llvm::GlobalAlias >(value)) {
     return this->infer_type_hint_operand(gv_alias->getAliasee());
-  } else if (auto fun = llvm::dyn_cast< llvm::Function >(value)) {
+  } else if (auto *fun = llvm::dyn_cast< llvm::Function >(value)) {
     return this->infer_type_hint_operand_function(fun);
-  } else if (auto inst = llvm::dyn_cast< llvm::Instruction >(value)) {
+  } else if (auto *inst = llvm::dyn_cast< llvm::Instruction >(value)) {
     return this->infer_type_hint_operand_instruction(inst);
-  } else if (auto arg = llvm::dyn_cast< llvm::Argument >(value)) {
+  } else if (auto *arg = llvm::dyn_cast< llvm::Argument >(value)) {
     return this->infer_type_hint_operand_argument(arg);
   } else if (llvm::isa< llvm::Constant >(value)) {
     // Cannot deduce sign information from constants
@@ -2381,9 +2381,9 @@ FunctionImporter::TypeHint FunctionImporter::
   }
 
   // Use the type of the returned value, if it's a direct call
-  if (auto call = llvm::dyn_cast< llvm::CallInst >(inst)) {
+  if (auto *call = llvm::dyn_cast< llvm::CallInst >(inst)) {
     llvm::Value* called = unalias(call->getCalledOperand());
-    if (auto fun = llvm::dyn_cast< llvm::Function >(called)) {
+    if (auto *fun = llvm::dyn_cast< llvm::Function >(called)) {
       return {_ctx.bundle_imp->translate_function(fun)->type()->return_type(),
               5};
     }
@@ -2396,7 +2396,7 @@ FunctionImporter::TypeHint FunctionImporter::
 FunctionImporter::TypeHint FunctionImporter::infer_type_hint_operand_argument(
     llvm::Argument* arg) {
   // Return the type of the ar::InternalVariable
-  auto ar_arg =
+  auto *ar_arg =
       ar::cast< ar::InternalVariable >(this->_variables.find(arg)->second);
 
   // Compute a score
@@ -2506,7 +2506,7 @@ void BasicBlockTranslation::add_comparison(
 /// \brief Create an ar::Assignment `var = value`
 static std::unique_ptr< ar::Assignment > create_bool_assignment(
     ar::Context& ctx, ar::InternalVariable* var, bool value) {
-  auto type = ar::cast< ar::IntegerType >(var->type());
+  auto *type = ar::cast< ar::IntegerType >(var->type());
   ikos_assert_msg(type->bit_width() == 1, "invalid bit-width for boolean");
 
   ar::IntegerConstant* cst = ar::IntegerConstant::get(ctx, type, value ? 1 : 0);
@@ -2518,7 +2518,7 @@ void BasicBlockTranslation::add_comparison_output_bb(
     std::unique_ptr< ar::Statement > cmp,
     ar::InternalVariable* var,
     bool value) {
-  auto frontend = cmp->frontend< llvm::Value >();
+  auto *frontend = cmp->frontend< llvm::Value >();
 
   // Create output basic block
   ar::BasicBlock* dest = this->add_output_basic_block(src);
@@ -2571,8 +2571,8 @@ void BasicBlockTranslation::add_conditional_branching(
 
     for (auto& output : this->outputs) {
       ar::BasicBlock* bb = output.block;
-      auto assign = ar::cast< ar::Assignment >(bb->back());
-      auto cst = ar::cast< ar::IntegerConstant >(assign->operand());
+      auto *assign = ar::cast< ar::Assignment >(bb->back());
+      auto *cst = ar::cast< ar::IntegerConstant >(assign->operand());
 
       if (cst->value() == 0) {
         output.succ = false_succ;
@@ -2618,7 +2618,7 @@ void BasicBlockTranslation::add_nondeterministic_branching(
 /// \brief Create an ar::Comparison `var == value`
 static std::unique_ptr< ar::Comparison > create_bool_cmp(
     ar::Context& ctx, ar::InternalVariable* var, bool value) {
-  auto type = ar::cast< ar::IntegerType >(var->type());
+  auto *type = ar::cast< ar::IntegerType >(var->type());
   ikos_assert_msg(type->bit_width() == 1, "invalid bit-width for boolean");
 
   ar::IntegerConstant* cst = ar::IntegerConstant::get(ctx, type, value ? 1 : 0);
@@ -2651,7 +2651,7 @@ void BasicBlockTranslation::add_invoke_branching(
     this->internals.push_back(bb);
     this->outputs.clear();
 
-    auto invoke = ar::cast< ar::Invoke >(bb->back());
+    auto *invoke = ar::cast< ar::Invoke >(bb->back());
     this->add_invoke_normal_output_bb(bb, invoke, normal_dest);
     this->add_invoke_exception_output_bb(bb, invoke, exception_dest);
   } else {
@@ -2663,7 +2663,7 @@ void BasicBlockTranslation::add_invoke_branching(
       ar::BasicBlock* bb = output.block;
       this->internals.push_back(bb);
 
-      auto invoke = ar::cast< ar::Invoke >(bb->back());
+      auto *invoke = ar::cast< ar::Invoke >(bb->back());
       this->add_invoke_normal_output_bb(bb, invoke, normal_dest);
       this->add_invoke_exception_output_bb(bb, invoke, exception_dest);
     }

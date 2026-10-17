@@ -66,7 +66,7 @@ AbstractDomain init_main_invariant(Context& ctx,
   }
 
   // Set argc
-  auto argc_type = cast< ar::IntegerType >(main->param(0)->type());
+  auto *argc_type = cast< ar::IntegerType >(main->param(0)->type());
   if (ctx.opts.argc) {
     // Add `argc = ctx.opts.argc`
     inv.normal().int_assign(argc.var(),

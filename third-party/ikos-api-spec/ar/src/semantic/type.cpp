@@ -87,7 +87,7 @@ uint64_t Type::primitive_bit_width() const {
     case FloatKind:
       return cast< FloatType >(this)->bit_width();
     case VectorKind: {
-      auto vector = cast< VectorType >(this);
+      const auto *vector = cast< VectorType >(this);
       return vector->num_elements().to< uint64_t >() *
              vector->element_type()->primitive_bit_width();
     }
@@ -311,14 +311,14 @@ StructType::StructType(bool packed)
     : AggregateType(StructKind), _packed(packed) {}
 
 StructType* StructType::create(Context& ctx, Layout layout, bool packed) {
-  auto t = new StructType(std::move(layout), packed);
+  auto *t = new StructType(std::move(layout), packed);
   ctx_impl(ctx).add_type(std::unique_ptr< Type >(t));
   return t;
 }
 
 StructType* StructType::create(Context& ctx, bool packed) {
   auto type = std::unique_ptr< StructType >(new StructType(packed));
-  auto ptr = type.get();
+  auto *ptr = type.get();
   ctx_impl(ctx).add_type(std::move(type));
   return ptr;
 }
@@ -408,7 +408,7 @@ OpaqueType::OpaqueType() : AggregateType(OpaqueKind) {}
 
 OpaqueType* OpaqueType::create(Context& ctx) {
   auto type = std::unique_ptr< OpaqueType >(new OpaqueType());
-  auto ptr = type.get();
+  auto *ptr = type.get();
   ctx_impl(ctx).add_type(std::move(type));
   return ptr;
 }
