@@ -27,6 +27,12 @@ set(LOTUS_COVERAGE_MINIMUM 0 CACHE STRING
     "Minimum total line coverage percentage required")
 
 # Optional analysis and verification integrations.
+option(LOTUS_ENABLE_IKOS_API_SPEC "Install the IKOS API-spec stub generation tools" OFF)
+option(LOTUS_ENABLE_IKOS "Build the IKOS analyzer and API-spec pipeline" OFF)
+option(LOTUS_IKOS_ENABLE_APRON "Enable optional APRON domains in IKOS" OFF)
+if(LOTUS_ENABLE_IKOS)
+  set(LOTUS_ENABLE_IKOS_API_SPEC ON)
+endif()
 option(LOTUS_ENABLE_CLAM "Enable CLAM abstract interpretation framework" OFF)
 option(LOTUS_ENABLE_SEAHORN "Enable SeaHorn" OFF)
 option(LOTUS_ENABLE_SMACK
@@ -214,6 +220,8 @@ function(lotus_print_build_summary)
   _lotus_summary_bool("SMTStabilizer" LOTUS_ENABLE_SMT_STABILIZER)
   _lotus_summary_bool("DynAA tools" LOTUS_ENABLE_DYNAA)
   message(STATUS "  Optional integrations:")
+  _lotus_summary_bool("IKOS API-spec tools" LOTUS_ENABLE_IKOS_API_SPEC)
+  _lotus_summary_bool("IKOS analyzer" LOTUS_ENABLE_IKOS)
   _lotus_summary_bool("CLAM" LOTUS_ENABLE_CLAM)
   _lotus_summary_bool("SeaHorn" LOTUS_ENABLE_SEAHORN)
   _lotus_summary_bool("SMACK" LOTUS_ENABLE_SMACK)
