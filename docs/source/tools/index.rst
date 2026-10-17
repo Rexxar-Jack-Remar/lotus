@@ -84,3 +84,4 @@ Scripting Tools
    :maxdepth: 1
 
    phoenix
+   ikos
