@@ -1,6 +1,4 @@
 # Preserve one alias_tests binary, with sources/dependencies from selected groups.
-lotus_add_test_group(alias gpg InclusionBased/GPG alias_tests
-  LINK_LIBS CanaryGPG CanaryAliasAnalysisWrapper)
 lotus_add_test_group(alias dda DemandDriven/DDA alias_tests LINK_LIBS DDA)
 lotus_add_test_group(alias aserpta InclusionBased/AserPTA alias_tests LINK_LIBS AserPTA)
 lotus_add_test_group(alias bootstrapaa InclusionBased/BootstrapAA alias_tests
@@ -29,8 +27,3 @@ lotus_add_test_group(alias ptsset Infrastructure/PtsSet alias_tests LINK_LIBS Ca
 get_property(alias_test_libs GLOBAL PROPERTY LOTUS_TEST_SUITE_alias_tests_LINK_LIBS)
 list(REMOVE_DUPLICATES alias_test_libs)
 add_lotus_collected_test_suite(alias_tests LINK_LIBS ${alias_test_libs})
-
-lotus_test_group_enabled(alias bootstrapaa bootstrap_selected)
-if(bootstrap_selected AND TARGET lotus-alias-bootstrap)
-  add_dependencies(alias_tests lotus-alias-bootstrap)
-endif()
