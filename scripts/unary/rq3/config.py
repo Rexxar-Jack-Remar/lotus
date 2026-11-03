@@ -1,4 +1,4 @@
-"""Configuration for the RQ3 interleaved-Dyck bounds experiment."""
+"""Configuration for the RQ3 upper-approximation comparison."""
 
 from pathlib import Path
 
@@ -14,16 +14,15 @@ BINARIES = {
     "unary": INTERLEAVED_DYCK_BINARY,
 }
 
-# RQ3 uses the C/C++ value-flow corpus.  StagedBounds defines the client-aware
-# endpoint universe; Union-Dyck supplies the lower bound and ACF tightens the
-# final StagedBounds upper bound within that universe.
+# Compare Regularization, Mutual Refinement, and ACF on the C/C++ value-flow
+# corpus. Enable taint below to include that suite as well.
 BENCHMARK_SUITES = [
     {
         "name": "taint",
         "directory": REPOSITORY_ROOT
         / "benchmarks/real-world/CFL/InterleavedDyck/taint",
         "analysis": "taint",
-        "enabled": False,
+        "enabled": True,
     },
     {
         "name": "valueflow",
@@ -37,10 +36,27 @@ DOT_GLOB = "*.dot"
 SEARCH_RECURSIVELY = True
 
 # Arguments may use {analysis}, which is replaced from BENCHMARK_SUITES.
-# artifact_kind controls the machine-readable output captured on the first
-# successful measured run.  MCFL remains configured for future experiments but
+# artifact_kind controls the output from the separate relation-capture run.
+# MCFL remains configured for future experiments but
 # is disabled because it does not yet implement the value-flow endpoint model.
 EXPERIMENTS = [
+    {
+        "name": "regularization",
+        "tool": "staged",
+        "args": ["staged-bounds", "--analysis", "{analysis}",
+                 "--method", "regularization"],
+        "artifact_kind": "upper",
+        "enabled": True,
+    },
+    {
+        "name": "mutual-refinement",
+        "tool": "staged",
+        "args": ["staged-bounds", "--analysis", "{analysis}",
+                 "--method", "mutual-refinement"],
+        "artifact_kind": "upper",
+        "enabled": True,
+    },
+    # Excluded from RQ3: standalone lower bound and the full on-demand pipeline.
     {
         "name": "union-dyck",
         "tool": "staged",
@@ -52,7 +68,7 @@ EXPERIMENTS = [
             "underapproximation",
         ],
         "artifact_kind": "union",
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "staged-on-demand",
@@ -67,7 +83,7 @@ EXPERIMENTS = [
             "2",
         ],
         "artifact_kind": "staged",
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "acf",
@@ -142,11 +158,12 @@ MEMORY_LIMIT_GIB = 128
 STOP_REPETITIONS_AFTER_FAILURE = True
 CAPTURE_RELATIONS = True
 
-OUTPUT_CSV = REPOSITORY_ROOT / "scripts/unary/rq3/rq3-runs.csv"
-BOUNDS_CSV = REPOSITORY_ROOT / "scripts/unary/rq3/rq3-bounds.csv"
-METHODS_CSV = REPOSITORY_ROOT / "scripts/unary/rq3/rq3-methods.csv"
-LOG_DIRECTORY = REPOSITORY_ROOT / "scripts/unary/rq3/log"
-ARTIFACT_DIRECTORY = REPOSITORY_ROOT / "scripts/unary/rq3/artifacts"
+DATA_DIRECTORY = Path(__file__).resolve().parent / "data"
+OUTPUT_CSV = DATA_DIRECTORY / "rq3-runs.csv"
+BOUNDS_CSV = DATA_DIRECTORY / "rq3-bounds.csv"
+METHODS_CSV = DATA_DIRECTORY / "rq3-methods.csv"
+LOG_DIRECTORY = DATA_DIRECTORY / "log"
+ARTIFACT_DIRECTORY = DATA_DIRECTORY / "artifacts"
 RESUME_EXISTING_CSV = True
 
 EXTRA_ENVIRONMENT = {}
