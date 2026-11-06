@@ -248,7 +248,9 @@ def make_command(
   ]
   if capture and config.CAPTURE_RELATIONS:
     base = artifact_base(benchmark, experiment)
-    if experiment["artifact_kind"] == "upper":
+    if experiment["tool"] == "spds":
+      command.append("--pairs")
+    elif experiment["artifact_kind"] == "upper":
       command.extend(("--print-result", "-o", str(base / "upper.txt")))
     elif experiment["artifact_kind"] in {"staged", "union", "mcfl"}:
       command.extend(("--dump-relations", str(base)))
@@ -319,6 +321,42 @@ def valid_stats(stats: dict[str, str]) -> bool:
   return elapsed is not None and elapsed >= 0 and rss is not None and rss > 0
 
 
+def valid_spds_stats(stats: dict[str, str], analysis: str) -> bool:
+  count = parse_integer(stats.get("candidate-pairs"))
+  return (
+      analysis in {"taint", "value-flow"}
+      and stats.get("engine") == "spds"
+      and stats.get("analysis") == analysis
+      and stats.get("call-stack") == stats.get("field-stack") == "empty"
+      and count is not None and count >= 0
+  )
+
+
+def capture_spds_pairs(lines: Iterable[str], path: Path, analysis: str) -> dict[str, str]:
+  """Stream SPDS's sorted pairs and verify the reported relation size."""
+  stats = {}
+  count = 0
+  previous = None
+  with path.open("w", encoding="utf-8") as output:
+    for line in lines:
+      if line.startswith("pair:"):
+        fields = line.removeprefix("pair:").split()
+        if len(fields) != 2:
+          raise ValueError(f"invalid SPDS pair: {line.strip()}")
+        pair = tuple(map(int, fields))
+        if pair[0] == pair[1] or (previous is not None and pair <= previous):
+          raise ValueError("SPDS pairs must be nonreflexive, sorted and unique")
+        output.write(f"{pair[0]} {pair[1]}\n")
+        previous = pair
+        count += 1
+      else:
+        stats.update(parse_stats(line))
+  if (not valid_spds_stats(stats, analysis)
+      or parse_integer(stats.get("candidate-pairs")) != count):
+    raise ValueError("SPDS client or candidate-pairs count mismatch")
+  return stats
+
+
 def valid_measurements(row: dict[str, str]) -> bool:
   """Require complete samples and summaries that agree with those samples."""
   try:
@@ -330,6 +368,10 @@ def valid_measurements(row: dict[str, str]) -> bool:
       return False
     stats = json.loads(row["stats_per_run"])
     if len(stats) != count or not all(valid_stats(item) for item in stats):
+      return False
+    if row.get("tool") == "spds" and not all(
+        valid_spds_stats(item, row["analysis"]) for item in stats
+    ):
       return False
     for field, minimum in (("time_ms", 0), ("peak_rss_bytes", 1),
                            ("wall_time_seconds", 0)):
@@ -381,7 +423,8 @@ def write_log(
 
 
 def run_once(
-    command: Sequence[str], log_path: Path, *, require_stats: bool = True
+    command: Sequence[str], log_path: Path, *, require_stats: bool = True,
+    stdout_stream=None,
 ) -> RunResult:
   limit = memory_limit_bytes()
 
@@ -400,7 +443,7 @@ def run_once(
   try:
     process = subprocess.Popen(
         command,
-        stdout=subprocess.PIPE,
+        stdout=stdout_stream if stdout_stream is not None else subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
@@ -435,6 +478,7 @@ def run_once(
   except (OSError, subprocess.SubprocessError) as error:
     stderr = f"failed to start process: {error}\n"
 
+  stdout = stdout or ""
   result = RunResult(
       status=status,
       exit_code=exit_code,
@@ -573,12 +617,24 @@ def prepare_csv(
 ) -> set[tuple[str, str, str]]:
   path.parent.mkdir(parents=True, exist_ok=True)
   completed: set[tuple[str, str, str]] = set()
-  if resume and path.exists() and path.stat().st_size:
+  if (resume or expected_runs is not None) and path.exists() and path.stat().st_size:
     with path.open("r", encoding="utf-8", newline="") as stream:
       reader = csv.DictReader(stream)
       if reader.fieldnames != CSV_COLUMNS:
-        raise RuntimeError(f"CSV header mismatch: {path}; use --restart")
+        raise RuntimeError(f"CSV header mismatch: {path}; use a fresh DATA_DIRECTORY")
       rows = list(reader)
+    if expected_runs:
+      versions = {(item["binary_sha256"], item["extra_environment"])
+                  for item in expected_runs.values()
+                  if "binary_sha256" in item and "extra_environment" in item}
+      preserved = rows if resume else [
+          row for row in rows
+          if (row["dataset"], row["dot_path"], row["experiment"]) not in expected_runs
+      ]
+      if versions and any((row.get("binary_sha256"), row.get("extra_environment"))
+                          not in versions for row in preserved):
+        raise RuntimeError("existing CSV uses a different binary/environment; "
+                           "use a fresh DATA_DIRECTORY or rerun all methods with --restart")
     retained: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
@@ -589,6 +645,8 @@ def prepare_csv(
       if expected_runs is not None:
         if key not in expected_runs:
           retained.append(row)
+          continue
+        if not resume:
           continue
         if any(row.get(field) != value for field, value in expected_runs[key].items()):
           raise RuntimeError(
@@ -618,7 +676,7 @@ def prepare_csv(
         os.replace(temporary_name, path)
         temporary_name = None
         print(
-            f"Retrying {len(rows) - len(retained)} incomplete or stale rows",
+            f"Scheduling {len(rows) - len(retained)} selected rows for rerun",
             flush=True,
         )
       finally:
@@ -664,6 +722,11 @@ def run_experiment(
         command,
         log_path_for(benchmark, experiment, repetition, warmup=False),
     )
+    if (result.status == "success" and experiment["tool"] == "spds"
+        and not valid_spds_stats(result.stats, benchmark.analysis)):
+      result.status = "stats-error"
+      result.stderr += "\ninvalid SPDS engine/client/stack mode or candidate count\n"
+      write_log(result.log_path, command, result.started, result)
     results.append(result)
     if result.status != "success" and config.STOP_REPETITIONS_AFTER_FAILURE:
       break
@@ -673,30 +736,40 @@ def run_experiment(
     base.mkdir(parents=True, exist_ok=True)
     command = make_command(benchmark, experiment, capture=True)
     print(f"  [capture] {shlex.join(command)}", flush=True)
-    capture_result = run_once(
-        command, log_path_for(benchmark, experiment, "capture", warmup=False),
-        require_stats=experiment["artifact_kind"] != "upper",
-    )
+    capture_log = log_path_for(benchmark, experiment, "capture", warmup=False)
+    if experiment["tool"] == "spds":
+      with (base / "upper.txt").open("w", encoding="utf-8") as stream:
+        capture_result = run_once(command, capture_log, require_stats=False,
+                                  stdout_stream=stream)
+    else:
+      capture_result = run_once(
+          command, capture_log,
+          require_stats=experiment["artifact_kind"] != "upper",
+      )
     if capture_result.status == "success":
       try:
         if experiment["artifact_kind"] == "upper":
           with (base / "upper.txt").open(encoding="utf-8") as stream:
-            capture_result.stats = capture_upper_pairs(stream, artifacts[0])
+            if experiment["tool"] == "spds":
+              capture_result.stats = capture_spds_pairs(stream, artifacts[0], benchmark.analysis)
+            else:
+              capture_result.stats = capture_upper_pairs(stream, artifacts[0])
           capture_result.stdout = "".join(
               f"{key}: {value}\n" for key, value in capture_result.stats.items()
           )
-          (base / "upper.txt").unlink()
         if not valid_stats(capture_result.stats):
           raise ValueError("missing or invalid capture time/RSS statistics")
         missing = [path for path in artifacts if not path.is_file()]
         if missing:
           raise ValueError("missing artifacts: " + ", ".join(map(str, missing)))
         # The capture must agree with the relation sizes from measured runs.
-        for key in ("regularization", "mutual-refinement upper bound", "Components"):
+        for key in ("regularization", "mutual-refinement upper bound", "Components", "candidate-pairs"):
           if key in capture_result.stats and any(
               result.stats.get(key) != capture_result.stats[key] for result in results
           ):
             raise ValueError(f"capture and measured runs disagree on {key}")
+        if experiment["artifact_kind"] == "upper":
+          (base / "upper.txt").unlink()
         captured = artifacts
       except (OSError, ValueError) as error:
         capture_result.status = "artifact-error"
@@ -811,6 +884,10 @@ def main() -> int:
         or item.dot.stem in selected_benchmarks
     ]
 
+  experiments = [item for item in experiments
+                 if any(config.supports_analysis(item, b.analysis) for b in benchmarks)]
+  if not experiments:
+    raise ValueError("no applicable experiments for the selected datasets")
   for experiment in experiments:
     binary = binary_for(experiment)
     if not arguments.dry_run and (not binary.is_file() or not os.access(binary, os.X_OK)):
@@ -818,12 +895,14 @@ def main() -> int:
 
   if arguments.dry_run:
     print(f"Benchmarks: {len(benchmarks)}")
-    print(f"Experiments per benchmark: {len(experiments)}")
+    print(f"Applicable runs: {sum(config.supports_analysis(e, b.analysis) for b in benchmarks for e in experiments)}")
     print(f"Warm-ups/measured: {config.WARMUP_REPETITIONS}/{config.MEASURED_REPETITIONS}")
     print(f"Timeout (s): {config.TIMEOUT_SECONDS}")
     print(f"Memory limit (GiB): {config.MEMORY_LIMIT_GIB}")
     for benchmark in benchmarks:
       for experiment in experiments:
+        if not config.supports_analysis(experiment, benchmark.analysis):
+          continue
         print("measure: " + shlex.join(make_command(benchmark, experiment, capture=False)))
         print("capture: " + shlex.join(make_command(benchmark, experiment, capture=True)))
     return 0
@@ -846,16 +925,19 @@ def main() -> int:
           }),
       }
       for benchmark in benchmarks for experiment in experiments
+      if config.supports_analysis(experiment, benchmark.analysis)
   }
   completed = prepare_csv(
       csv_path, config.RESUME_EXISTING_CSV and not arguments.restart, identities
   )
-  total = len(benchmarks) * len(experiments)
+  total = len(identities)
   current = 0
   failed = False
   for benchmark in benchmarks:
     relative_dot = str(benchmark.dot.relative_to(config.REPOSITORY_ROOT))
     for experiment in experiments:
+      if not config.supports_analysis(experiment, benchmark.analysis):
+        continue
       current += 1
       key = (benchmark.dataset, relative_dot, experiment["name"])
       if key in completed:

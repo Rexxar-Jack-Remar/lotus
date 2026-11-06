@@ -200,7 +200,7 @@ def configuration_matches(
 
 
 def validate_run_identities(rows: list[dict[str, str]]) -> None:
-  """RQ3's three configurations use one binary and fixed inputs/environment."""
+  """RQ3 configurations use one binary and fixed inputs/environment."""
   identities: dict[tuple[str, str], tuple[str, str]] = {}
   for row in rows:
     for field in ("input_sha256", "binary_sha256"):
@@ -239,7 +239,7 @@ def main() -> int:
     experiment_rows[row["experiment"]] = row
     experiment = experiment_by_name.get(row["experiment"])
     status = method_status(row)
-    if experiment is None:
+    if experiment is None or not config.supports_analysis(experiment, row["analysis"]):
       status = "unexpected"
       unexpected_methods += 1
     elif not configuration_matches(row, experiment):
@@ -264,19 +264,19 @@ def main() -> int:
         }
     )
 
-  expected_names = {str(item["name"]) for item in enabled}
-  required_names = {
-      str(item["name"]) for item in enabled if item.get("required", True)
-  }
-  core_names = {"regularization", "mutual-refinement", "acf"}
-  if expected_names != core_names:
-    raise ValueError(
-        "RQ3 requires exactly regularization, mutual-refinement, and acf"
-    )
+  if "acf" not in experiment_by_name or any(
+      item["artifact_kind"] not in {"upper", "components"} for item in enabled
+  ):
+    raise ValueError("RQ3 requires ACF and typed upper-bound methods")
   missing_methods = 0
   failed_methods = 0
   bounds_rows: list[dict[str, Any]] = []
   for (dataset, dot_path), rows in sorted(index.items()):
+    representative = next(iter(rows.values()))
+    applicable = [item for item in enabled
+                  if config.supports_analysis(item, representative["analysis"])]
+    expected_names = {item["name"] for item in applicable}
+    required_names = {item["name"] for item in applicable if item.get("required", True)}
     missing = sorted(expected_names - rows.keys())
     if missing:
       missing_methods += len(missing)
@@ -300,8 +300,7 @@ def main() -> int:
     components = {}
     if acf_ready:
       components = load_components(relation_path(acf, "components.map"))
-    representative = next(iter(rows.values()))
-    for name in ("regularization", "mutual-refinement"):
+    for name in (item["name"] for item in applicable if item["artifact_kind"] == "upper"):
       typed = rows.get(name)
       typed_ready = (
           typed is not None and successful(typed)

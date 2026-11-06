@@ -2,12 +2,16 @@
 #include "CFL/InterleavedDyck/SPDS/ValueFlow.h"
 
 #include <charconv>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/resource.h>
+#endif
 
 namespace dyck = lotus::cfl::interleaved_dyck;
 namespace spds = dyck::spds;
@@ -24,7 +28,7 @@ template <class T> T number(std::string_view text) {
 void usage() {
   std::cout
       << "Usage: lotus-cfl-interleaved-dyck spds [options] graph.dot\n"
-         "  --analysis NAME         dyck (default) or value-flow\n"
+         "  --analysis NAME         dyck (default), taint, or value-flow\n"
          "  --all-pairs             analyze every source/target pair\n"
          "  --query SOURCE TARGET   one balanced reachability query\n"
          "  --source V              candidate successors of V (post*)\n"
@@ -46,8 +50,12 @@ void usage() {
          "  --max-updates N         weight-update limit per projection\n"
          "  --help                  show this help\n"
          "A query scope is required. Results are a sound upper bound.\n"
-         "value-flow requires bracket-ended balanced paths, excludes self-pairs,\n"
-         "and rejects prefix flags. --direction also applies to its all-pairs scope.\n"
+         "taint uses balanced projections and excludes self-pairs.\n"
+         "taint and value-flow reject prefix flags.\n"
+         "value-flow requires bracket-ended balanced paths, excludes "
+         "self-pairs,\n"
+         "and rejects prefix flags. --direction also applies to its all-pairs "
+         "scope.\n"
          "Exit codes: 0 = complete; 2 = input error; 3 = resource limit (no "
          "result).\n";
 }
@@ -133,9 +141,9 @@ int runInterleavedDyckSPDS(int argc, char **argv) {
       }
       if (!positional && arg == "--analysis") {
         client = argument(i);
-        if (client != "dyck" && client != "value-flow")
+        if (client != "dyck" && client != "taint" && client != "value-flow")
           throw std::invalid_argument(
-              "invalid --analysis; use dyck or value-flow");
+              "invalid --analysis; use dyck, taint, or value-flow");
       } else if (!positional && arg == "--all-pairs") {
         if (all_pairs || source || target || !queries_path.empty())
           throw std::invalid_argument("multiple query scopes");
@@ -194,6 +202,10 @@ int runInterleavedDyckSPDS(int argc, char **argv) {
     }
     if (path.empty())
       throw std::invalid_argument("missing graph.dot; use --help");
+    if (client == "taint" &&
+        (options.parentheses != spds::StackAcceptance::Empty ||
+         options.brackets != spds::StackAcceptance::Empty))
+      throw std::invalid_argument("taint requires empty endpoint stacks");
     if (!all_pairs && !source && !target && queries_path.empty())
       throw std::invalid_argument(
           "missing query scope; use --all-pairs, --query, --source, "
@@ -224,24 +236,66 @@ int runInterleavedDyckSPDS(int argc, char **argv) {
         (target && !graph.containsVertex(*target)))
       throw std::invalid_argument(
           "query vertex is not in graph; use --vertex for isolated vertices");
-    if (client == "value-flow") {
-      spds::ValueFlowAnalysis analysis(graph, options);
+    if (client != "dyck") {
+      const auto started = std::chrono::steady_clock::now();
+      // Keep the prepared analysis alive through RSS sampling in both clients.
+      std::optional<spds::ValueFlowAnalysis> value_flow;
+      std::optional<spds::PreparedAnalysis> taint;
       spds::Result result;
       std::vector<dyck::Pair> demands;
-      if (!queries_path.empty()) {
+      if (!queries_path.empty())
         demands = readDemands(queries_path);
-        result = analysis.analyzeDemands(demands, demand_direction);
-      } else if (single_query)
-        result =
-            analysis.analyzeDemands({{*source, *target}}, demand_direction);
-      else if (source)
-        result = analysis.analyzeFrom(*source);
-      else if (target)
-        result = analysis.analyzeTo(*target);
-      else
-        result = analysis.analyzeAll(demand_direction);
-      std::cout << "engine: spds\nanalysis: value-flow\n"
-                   "semantics: sound upper bound\ncall-stack: "
+      const auto evaluate = [&](const auto &analysis, const auto &all) {
+        if (!queries_path.empty())
+          return analysis.analyzeDemands(demands, demand_direction);
+        if (single_query)
+          return analysis.analyzeDemands({{*source, *target}},
+                                         demand_direction);
+        if (source)
+          return analysis.analyzeFrom(*source);
+        if (target)
+          return analysis.analyzeTo(*target);
+        return all();
+      };
+      if (client == "value-flow") {
+        value_flow.emplace(graph, options);
+        result = evaluate(*value_flow, [&] {
+          return value_flow->analyzeAll(demand_direction);
+        });
+      } else {
+        taint.emplace(spds::Solver(options).prepare(graph));
+        result = evaluate(*taint, [&] {
+          return demand_direction == spds::DemandDirection::Pre
+                     ? taint->analyzeBetween(graph.vertices(), graph.vertices(),
+                                             demand_direction)
+                     : taint->analyzeAll();
+        });
+        // RQ3's taint relation excludes the diagonal. Do this only at readout:
+        // epsilon/self reachability remains available inside PDS saturation.
+        for (auto *relation : {&result.upper_bound, &result.parenthesis_pairs,
+                               &result.bracket_pairs})
+          for (auto it = relation->begin(); it != relation->end();)
+            if (it->source == it->target)
+              it = relation->erase(it);
+            else
+              ++it;
+      }
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - started);
+      // Sample before printing/exporting the relation, like staged-bounds.
+      std::optional<std::uint64_t> peak_rss;
+#if defined(__unix__) || defined(__APPLE__)
+      struct rusage usage {};
+      if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        peak_rss = static_cast<std::uint64_t>(usage.ru_maxrss);
+#if !defined(__APPLE__)
+        *peak_rss *= 1024;
+#endif
+      }
+#endif
+      std::cout << "engine: spds\nanalysis: " << client << '\n'
+                << "semantics: sound upper bound\ncall-stack: "
                    "empty\nfield-stack: empty\n";
       if (!queries_path.empty())
         std::cout << "requested-pairs: " << demands.size() << '\n';
@@ -258,6 +312,9 @@ int runInterleavedDyckSPDS(int argc, char **argv) {
       }
       std::cout << "candidate-pairs: " << result.upper_bound.size() << '\n';
       printStats(result.statistics, timings);
+      std::cout << "Time (ms): " << elapsed.count() << '\n';
+      if (peak_rss)
+        std::cout << "process peak RSS (bytes): " << *peak_rss << '\n';
       if (pairs)
         printPairs(result.upper_bound);
       return 0;

@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import random
+import re
 import signal
 import subprocess
 import sys
@@ -25,6 +28,185 @@ def json_cell(value: object) -> str:
 
 
 class RQ3Test(unittest.TestCase):
+  def test_spds_scope_and_capture_command(self) -> None:
+    experiment = next(e for e in config.EXPERIMENTS if e["name"] == "spds")
+    self.assertTrue(config.supports_analysis(experiment, "value-flow"))
+    self.assertTrue(config.supports_analysis(experiment, "taint"))
+    benchmark = run_rq3.Benchmark("valueflow", "value-flow", config.REPOSITORY_ROOT,
+                                 config.REPOSITORY_ROOT / "input.dot")
+    measured = run_rq3.make_command(benchmark, experiment, capture=False)
+    captured = run_rq3.make_command(benchmark, experiment, capture=True)
+    self.assertNotIn("--pairs", measured)
+    self.assertIn("--all-pairs", measured)
+    self.assertIn("--pairs", captured)
+    self.assertNotIn("--print-result", captured)
+
+  def test_spds_stream_checks(self) -> None:
+    summary = ("engine: spds\nanalysis: value-flow\ncall-stack: empty\nfield-stack: empty\n"
+               "candidate-pairs: 2\nTime (ms): 3\nprocess peak RSS (bytes): 100\n")
+    with tempfile.TemporaryDirectory() as directory:
+      path = Path(directory) / "upper.pairs"
+      stats = run_rq3.capture_spds_pairs((summary + "pair: -1 2\npair: 2 3\n").splitlines(), path, "value-flow")
+      self.assertTrue(run_rq3.valid_stats(stats))
+      self.assertEqual(path.read_text(), "-1 2\n2 3\n")
+      for pairs in ("pair: 1 2\n", "pair: 1 2\npair: 1 2\n",
+                    "pair: 2 3\npair: 1 2\n", "pair: 1 1\npair: 2 3\n"):
+        with self.subTest(pairs=pairs), self.assertRaises(ValueError):
+          run_rq3.capture_spds_pairs((summary + pairs).splitlines(), path, "value-flow")
+      with self.assertRaisesRegex(ValueError, "client"):
+        run_rq3.capture_spds_pairs((summary + "pair: -1 2\npair: 2 3\n").splitlines(), path, "taint")
+      stats = run_rq3.capture_spds_pairs(
+          (summary.replace("value-flow", "taint") + "pair: -1 2\npair: 2 3\n").splitlines(),
+          path, "taint")
+      self.assertEqual(stats["analysis"], "taint")
+
+  def test_spds_rejects_wrong_measured_client(self) -> None:
+    experiment = next(e for e in config.EXPERIMENTS if e["name"] == "spds")
+    benchmark = run_rq3.Benchmark("taint", "taint", config.REPOSITORY_ROOT,
+                                 config.REPOSITORY_ROOT / "input.dot")
+    stats = {"engine": "spds", "analysis": "value-flow", "call-stack": "empty",
+             "field-stack": "empty", "candidate-pairs": "0",
+             "Time (ms)": "1", "process peak RSS (bytes)": "100"}
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      result = run_rq3.RunResult("success", 0, 0.1, "", "", stats, root / "run.log")
+      with (mock.patch.object(config, "ARTIFACT_DIRECTORY", root / "artifacts"),
+            mock.patch.object(run_rq3, "run_once", return_value=result)):
+        runs, files, capture = run_rq3.run_experiment(benchmark, experiment)
+      self.assertEqual(runs[0].status, "stats-error")
+      self.assertEqual(files, [])
+      self.assertIsNone(capture)
+      self.assertIn("Status: stats-error", result.log_path.read_text())
+      for key, value in (("engine", "wrong"), ("call-stack", "any"),
+                         ("field-stack", "any"), ("candidate-pairs", "-1")):
+        invalid = {**stats, "analysis": "taint", key: value}
+        self.assertFalse(run_rq3.valid_spds_stats(invalid, "taint"))
+
+  def test_restart_preserves_unselected_rows_and_checks_versions(self) -> None:
+    selected = self.make_row({"name": "spds", "tool": "spds"}, [])
+    other = {**selected, "dot_path": "other.dot", "dot_name": "other.dot"}
+    key = ("test", "input.dot", "spds")
+    other_key = ("test", "other.dot", "spds")
+    identity = {"binary_sha256": "2" * 64, "extra_environment": "{}"}
+    with tempfile.TemporaryDirectory() as directory:
+      path = Path(directory) / "runs.csv"
+      aggregate_rq3.write_rows(path, run_rq3.CSV_COLUMNS, [selected, other])
+      self.assertEqual(run_rq3.prepare_csv(path, False, {key: identity}), set())
+      with path.open(newline="") as stream:
+        self.assertEqual(list(csv.DictReader(stream)), [other])
+      new_identity = {**identity, "binary_sha256": "3" * 64}
+      before = path.read_bytes()
+      with self.assertRaisesRegex(RuntimeError, "different binary"):
+        run_rq3.prepare_csv(path, False, {key: new_identity})
+      self.assertEqual(path.read_bytes(), before)
+      self.assertEqual(run_rq3.prepare_csv(path, False,
+                       {key: new_identity, other_key: new_identity}), set())
+      with path.open(newline="") as stream:
+        self.assertEqual(list(csv.DictReader(stream)), [])
+
+  def test_new_method_cannot_append_to_old_binary_results(self) -> None:
+    row = self.make_row({"name": "acf", "tool": "unary"}, [])
+    with tempfile.TemporaryDirectory() as directory:
+      path = Path(directory) / "runs.csv"
+      aggregate_rq3.write_rows(path, run_rq3.CSV_COLUMNS, [row])
+      before = path.read_bytes()
+      with self.assertRaisesRegex(RuntimeError, "different binary"):
+        run_rq3.prepare_csv(path, True, {("test", "input.dot", "spds"): {
+            "binary_sha256": "3" * 64, "extra_environment": "{}"}})
+      self.assertEqual(path.read_bytes(), before)
+
+  @unittest.skipUnless(os.environ.get("RQ3_INTEGRATION_TESTS") == "1",
+                       "set RQ3_INTEGRATION_TESTS=1 after building the tool")
+  def test_live_measure_capture_and_aggregate(self) -> None:
+    """Exercise the real binary, logs, artifacts and both suite schemas."""
+    fixture = config.REPOSITORY_ROOT / "tests/regress/CFL/InterleavedDyck/SPDS/value-flow.dot"
+    binary_hash = run_rq3.sha256(config.INTERLEAVED_DYCK_BINARY)
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      with (
+          mock.patch.object(config, "MEASURED_REPETITIONS", 2),
+          mock.patch.object(config, "ARTIFACT_DIRECTORY", root / "artifacts"),
+          mock.patch.object(config, "LOG_DIRECTORY", root / "log"),
+      ):
+        rows = []
+        for dataset, analysis in (("taint", "taint"), ("valueflow", "value-flow")):
+          benchmark = run_rq3.Benchmark(dataset, analysis, fixture.parent, fixture)
+          for experiment in run_rq3.validate_configuration():
+            if not config.supports_analysis(experiment, analysis):
+              continue
+            runs, artifacts, capture = run_rq3.run_experiment(benchmark, experiment)
+            self.assertEqual([r.status for r in runs], ["success", "success"])
+            self.assertEqual(capture.status, "success", capture.stderr)
+            row = run_rq3.create_row(benchmark, experiment, runs, artifacts, capture, {
+                "input_sha256": run_rq3.sha256(fixture), "binary_sha256": binary_hash,
+                "extra_environment": "{}"})
+            rows.append(row)
+            if experiment["name"] == "spds":
+              expected = ("-9 8\n" if analysis == "value-flow" else
+                          "-9 8\n-9 11\n1 3\n8 11\n10 -9\n10 8\n10 11\n")
+              count = "1" if analysis == "value-flow" else "7"
+              self.assertEqual(artifacts[0].read_text(), expected)
+              self.assertEqual(capture.stats["candidate-pairs"], count)
+              self.assertEqual(capture.stats["analysis"], analysis)
+              for run in runs:
+                self.assertEqual(run.stats["candidate-pairs"], count)
+                self.assertNotIn("pair:", run.stdout)
+                self.assertIn("process peak RSS (bytes):", run.log_path.read_text())
+        csv_path = root / "runs.csv"
+        aggregate_rq3.write_rows(csv_path, run_rq3.CSV_COLUMNS, rows)
+        args = mock.Mock(runs=csv_path, methods=root / "methods.csv", bounds=root / "bounds.csv")
+        with mock.patch.object(aggregate_rq3, "parse_arguments", return_value=args):
+          self.assertEqual(aggregate_rq3.main(), 0)
+        with args.methods.open() as stream:
+          methods = list(csv.DictReader(stream))
+        with args.bounds.open() as stream:
+          bounds = list(csv.DictReader(stream))
+        self.assertEqual(len(methods), 8)
+        self.assertEqual(len(bounds), 6)
+        for spds in (row for row in bounds if row["experiment"] == "spds"):
+          count = "1" if spds["dataset"] == "valueflow" else "7"
+          self.assertEqual(spds["typed_upper_size"], count)
+          self.assertEqual(spds["intersection_size"], count)
+          self.assertEqual(spds["newly_excluded_size"], "0")
+        # SPDS is now required for both suites.
+        aggregate_rq3.write_rows(csv_path, run_rq3.CSV_COLUMNS,
+                                 [row for row in rows if row["experiment"] != "spds"])
+        with mock.patch.object(aggregate_rq3, "parse_arguments", return_value=args):
+          self.assertEqual(aggregate_rq3.main(), 1)
+
+  @unittest.skipUnless(os.environ.get("RQ3_INTEGRATION_TESTS") == "1",
+                       "set RQ3_INTEGRATION_TESTS=1 after building the tool")
+  def test_taint_matches_dyck_and_cfl_intersection(self) -> None:
+    binary = str(config.INTERLEAVED_DYCK_BINARY)
+
+    def pairs(path, args, prefix):
+      completed = subprocess.run([binary, *args, str(path)], check=True,
+                                 capture_output=True, text=True, timeout=30)
+      return {tuple(map(int, pair)) for pair in re.findall(
+          rf"^{prefix}(-?\d+) (-?\d+)$", completed.stdout, re.MULTILINE)}
+
+    rng = random.Random(20261105)
+    labels = ["normal"] + [f"{kind}--{i}" for kind in ("op", "cp", "ob", "cb") for i in (0, 1)]
+    with tempfile.TemporaryDirectory() as directory:
+      graphs = []
+      for number in range(80):
+        path = Path(directory) / f"{number}.dot"
+        lines = [f'{rng.randrange(-3, 4)} -> {rng.randrange(-3, 4)} [label="{rng.choice(labels)}"];'
+                 for _ in range(15)]
+        path.write_text("digraph G {\n" + "\n".join(lines) + "\n}\n")
+        graphs.append(path)
+      graphs += [config.REPOSITORY_ROOT / "benchmarks/real-world/CFL/InterleavedDyck/taint" / f"{name}.dot"
+                 for name in ("loozfon", "faketaobao")]
+      for graph in graphs:
+        with self.subTest(graph=graph.name):
+          dyck = pairs(graph, ["spds", "--analysis", "dyck", "--all-pairs", "--pairs"], "pair: ")
+          expected = {p for p in dyck if p[0] != p[1]}
+          cfl = pairs(graph, ["staged-bounds", "--analysis", "taint", "--method", "intersection", "--print-result"], "")
+          self.assertEqual(expected, cfl)
+          for direction in ("post", "pre"):
+            actual = pairs(graph, ["spds", "--analysis", "taint", "--all-pairs", "--direction", direction, "--pairs"], "pair: ")
+            self.assertEqual(actual, expected)
+
   def make_row(
       self,
       experiment: dict[str, object],

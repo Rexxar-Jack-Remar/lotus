@@ -12,10 +12,11 @@ BINARIES = {
     "staged": INTERLEAVED_DYCK_BINARY,
     "mcfl": INTERLEAVED_DYCK_BINARY,
     "unary": INTERLEAVED_DYCK_BINARY,
+    "spds": INTERLEAVED_DYCK_BINARY,
 }
 
-# Compare Regularization, Mutual Refinement, and ACF on the C/C++ value-flow
-# corpus. Enable taint below to include that suite as well.
+# Compare Regularization, Mutual Refinement, and ACF on both suites.
+# SPDS uses the corresponding taint/value-flow client on both suites.
 BENCHMARK_SUITES = [
     {
         "name": "taint",
@@ -40,6 +41,14 @@ SEARCH_RECURSIVELY = True
 # MCFL remains configured for future experiments but
 # is disabled because it does not yet implement the value-flow endpoint model.
 EXPERIMENTS = [
+    {
+        "name": "spds",
+        "tool": "spds",
+        "args": ["spds", "--analysis", "{analysis}", "--all-pairs"],
+        "analyses": ["taint", "value-flow"],
+        "artifact_kind": "upper",
+        "enabled": True,
+    },
     {
         "name": "regularization",
         "tool": "staged",
@@ -167,3 +176,7 @@ ARTIFACT_DIRECTORY = DATA_DIRECTORY / "artifacts"
 RESUME_EXISTING_CSV = True
 
 EXTRA_ENVIRONMENT = {}
+
+
+def supports_analysis(experiment, analysis):
+    return analysis in experiment.get("analyses", ["taint", "value-flow"])
