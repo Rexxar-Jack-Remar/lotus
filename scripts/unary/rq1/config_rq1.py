@@ -20,5 +20,5 @@ EXPERIMENTS = [
 STOP_REPETITIONS_AFTER_FAILURE = False
 
 DATA_DIRECTORY = Path(__file__).resolve().parent / "rq1-data"
-OUTPUT_CSV = DATA_DIRECTORY / "unary-results.csv"
+OUTPUT_CSV = DATA_DIRECTORY / "rq1-results.csv"
 LOG_DIRECTORY = DATA_DIRECTORY / "log"

@@ -8,7 +8,7 @@ run.sh                    # Runs RQ1, RQ2, RQ3 and the RQ3 aggregator
 rq1/
   config_rq1.py
   run_rq1.py
-  rq1-data/               # unary-results.csv and log/
+  rq1-data/               # rq1-results.csv and log/
 rq2/
   config_rq2.py
   run_rq2.py
