@@ -2,15 +2,16 @@
 
 RQ3 compares Regularization, Mutual Refinement, SPDS, and ACF on both suites.
 SPDS uses `--analysis {analysis} --all-pairs`. The default configuration runs
-25 inputs × 4 methods = 100 jobs, each with five measured repetitions and
-one separate capture if all measurements succeed. Its taint client intersects the
+25 inputs × 4 methods = 100 result rows. ACF reuses RQ1's five adaptive
+measurements; the other three methods run five measurements each. Every method
+runs one separate capture if all measurements succeed. Its taint client intersects the
 two balanced projection relations on the original directed graph; its
 value-flow client additionally constrains each witness to start/end with
 opening/closing brackets. Both return nonreflexive upper-bound pairs and
 reject prefix acceptance. The taint relation matches the classic CFL
 intersection baseline, not necessarily Regularization or Mutual Refinement.
-Dataset, solver, repetition, timeout, memory, and output
-settings live in `config.py`.
+Shared binary, dataset, repetition, timeout, and memory settings live in
+`../config.py`. Method and output settings live in `config_rq3.py`.
 
 Select suites with `enabled` in `BENCHMARK_SUITES`. Standalone Union-Dyck,
 the full on-demand pipeline, and MCFL are
@@ -20,7 +21,8 @@ including the internal lower-bound computation; its total cost includes them.
 Run with the requested Python environment:
 
 ```sh
-cmake --build build --target lotus-cfl-interleaved-dyck -j4
+bash scripts/unary/build.sh
+conda run -n py311 python scripts/unary/rq1/run_rq1.py
 conda run -n py311 python scripts/unary/rq3/run_rq3.py --dry-run
 conda run -n py311 python scripts/unary/rq3/run_rq3.py
 conda run -n py311 python scripts/unary/rq3/aggregate_rq3.py
@@ -34,11 +36,12 @@ must not be mixed with SPDS results from the new executable. Set a fresh
 `DATA_DIRECTORY` and rerun all methods, or explicitly use `--restart` for a full
 rerun. A selected SPDS-only run does not produce a complete comparison by itself.
 
-All generated results default to `scripts/unary/rq3/data/`, controlled by
-`DATA_DIRECTORY` in `config.py`:
+All generated results default to `rq3-data/` beside this script, controlled by
+`DATA_DIRECTORY` in `config_rq3.py`. Existing `data/`, `data.bak/`, and
+`data.under/` directories are left untouched and are not resumed automatically.
 
 ```text
-data/
+rq3-data/
 ├── rq3-runs.csv                 # Raw measurements and capture metadata
 ├── rq3-methods.csv              # Performance summary
 ├── rq3-bounds.csv               # Precision summary
@@ -47,7 +50,7 @@ data/
 └── rq3-performance-heatmaps.pdf # Performance plot
 ```
 
-Output directories are created automatically and `data/` is ignored by Git.
+Output directories are created automatically and `rq3-data/` is ignored by Git.
 Aggregation and plotting read the configured run CSV by default.
 
 Use `--dataset`, `--benchmark`, `--experiment`, and `--restart` for pilot runs.  The runner
@@ -65,6 +68,16 @@ and `EXTRA_ENVIRONMENT`. Resume rejects a changed identity; aggregation and
 plotting reject mixed executable/environment versions or different input/client
 identities for the same benchmark. Hashing happens outside measured intervals.
 Keep inputs, the executable, and the execution environment fixed during a run.
+
+`RQ1_OUTPUT_CSV` points to RQ1's CSV. Reuse requires complete successful
+adaptive samples with matching input, executable, command, environment,
+repetitions, warm-ups and resource limits. Source rows and measured logs must
+pass checksum validation. Missing or incompatible sources stop the runner
+before any measurements or CSV changes; ACF does not fall back to remeasurement.
+Reused rows retain RQ1 log paths, the source CSV path and its row checksum.
+Keep those files with the RQ3 results. Restart dependent RQ3 rows after rerunning
+RQ1; this still only reruns ACF's capture. Resume and aggregation verify log
+hashes, and aggregation also checks reused samples against their RQ1 source.
 
 All five measured repetitions omit relation export. Once they succeed, a
 separate capture run writes `upper.pairs` for typed methods or `components.map`
@@ -120,8 +133,23 @@ bound, certification ratio, or exactness claim is reported. ACF's standalone
 relation size covers the whole relaxed graph and should not be compared
 directly with client-filtered typed relation sizes.
 
-The heatmap reads `rq3-runs.csv` directly (override with `--runs PATH`) and shows
-the four methods for the benchmarks present in that file, including SPDS
+For the paper's precision table, run this from the RQ3 directory:
+
+```sh
+python summarize_rq3_precision.py
+```
+
+This reads `rq3-bounds.csv` (override with `--bounds PATH`) and prints only
+Mutual Refinement and SPDS comparisons. It reports completed and improved input
+counts, total removed pairs, macro/micro/maximum reduction percentages, and
+every input with additional pruning. Failed comparisons are excluded; empty
+upper bounds are excluded from the macro average because their ratio is
+undefined. The micro average divides total removed pairs by total candidates.
+No files are written and no experiments are rerun.
+
+The demonstration heatmap reads `rq3-runs.csv` directly (override with `--runs PATH`)
+and shows all four methods: Regularization, Mutual Refinement, SPDS, and ACF,
+including SPDS
 on both taint and value-flow. Successful cells
 and solved counts require all configured performance repetitions; resource
 failures are shown as TO/MO. Relation-capture failure does not erase valid

@@ -12,8 +12,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import config
-from run_rq3 import valid_measurements
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from rq3 import config_rq3 as config
+from rq3.run_rq3 import valid_measurements, validate_logs, validate_performance_source
 
 
 Pair = tuple[int, int]
@@ -223,6 +224,10 @@ def main() -> int:
   if not run_rows:
     raise RuntimeError(f"no run rows in {arguments.runs}")
   validate_run_identities(run_rows)
+  for row in run_rows:
+    if "log_sha256" in row:
+      validate_logs(row)
+      validate_performance_source(row)
 
   enabled = [item for item in config.EXPERIMENTS if item.get("enabled", True)]
   experiment_by_name = {str(item["name"]): item for item in enabled}

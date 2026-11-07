@@ -30,7 +30,7 @@ from typing import Iterable, Sequence
 
 UNARY_DIRECTORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(UNARY_DIRECTORY))
-import config  # noqa: E402
+from rq1 import config_rq1 as config  # noqa: E402
 
 
 @dataclass(frozen=True)

@@ -2,39 +2,20 @@
 
 from pathlib import Path
 
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-
-INTERLEAVED_DYCK_BINARY = (
-    REPOSITORY_ROOT / "build/bin/lotus-cfl-interleaved-dyck"
+from config import (
+    BENCHMARK_SUITES, BINARY_PATH, DOT_GLOB, EXTRA_ENVIRONMENT,
+    MEASURED_REPETITIONS, MEMORY_LIMIT_GIB, REPOSITORY_ROOT,
+    RESUME_EXISTING_CSV, SEARCH_RECURSIVELY, TIMEOUT_SECONDS, WARMUP_REPETITIONS,
 )
+from rq1.config_rq1 import OUTPUT_CSV as RQ1_OUTPUT_CSV
+
+INTERLEAVED_DYCK_BINARY = BINARY_PATH
 BINARIES = {
     "staged": INTERLEAVED_DYCK_BINARY,
     "mcfl": INTERLEAVED_DYCK_BINARY,
     "unary": INTERLEAVED_DYCK_BINARY,
     "spds": INTERLEAVED_DYCK_BINARY,
 }
-
-# Compare Regularization, Mutual Refinement, and ACF on both suites.
-# SPDS uses the corresponding taint/value-flow client on both suites.
-BENCHMARK_SUITES = [
-    {
-        "name": "taint",
-        "directory": REPOSITORY_ROOT
-        / "benchmarks/real-world/CFL/InterleavedDyck/taint",
-        "analysis": "taint",
-        "enabled": True,
-    },
-    {
-        "name": "valueflow",
-        "directory": REPOSITORY_ROOT
-        / "benchmarks/real-world/CFL/InterleavedDyck/valueflow",
-        "analysis": "value-flow",
-        "enabled": True,
-    },
-]
-DOT_GLOB = "*.dot"
-SEARCH_RECURSIVELY = True
 
 # Arguments may use {analysis}, which is replaced from BENCHMARK_SUITES.
 # artifact_kind controls the output from the separate relation-capture run.
@@ -159,23 +140,15 @@ EXPERIMENTS = [
     },
 ]
 
-WARMUP_REPETITIONS = 0
-MEASURED_REPETITIONS = 5
-TIMEOUT_SECONDS = 3600
-# RLIMIT_AS per process on Linux/macOS.  Set to None to disable it.
-MEMORY_LIMIT_GIB = 128
 STOP_REPETITIONS_AFTER_FAILURE = True
 CAPTURE_RELATIONS = True
 
-DATA_DIRECTORY = Path(__file__).resolve().parent / "data"
+DATA_DIRECTORY = Path(__file__).resolve().parent / "rq3-data"
 OUTPUT_CSV = DATA_DIRECTORY / "rq3-runs.csv"
 BOUNDS_CSV = DATA_DIRECTORY / "rq3-bounds.csv"
 METHODS_CSV = DATA_DIRECTORY / "rq3-methods.csv"
 LOG_DIRECTORY = DATA_DIRECTORY / "log"
 ARTIFACT_DIRECTORY = DATA_DIRECTORY / "artifacts"
-RESUME_EXISTING_CSV = True
-
-EXTRA_ENVIRONMENT = {}
 
 
 def supports_analysis(experiment, analysis):

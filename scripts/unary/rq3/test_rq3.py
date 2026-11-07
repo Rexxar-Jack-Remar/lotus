@@ -16,11 +16,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import aggregate_rq3
-import config
-import run_rq3
+from rq3 import aggregate_rq3
+from rq3 import config_rq3 as config
+from rq3 import run_rq3
 
 
 def json_cell(value: object) -> str:
@@ -134,7 +134,16 @@ class RQ3Test(unittest.TestCase):
           for experiment in run_rq3.validate_configuration():
             if not config.supports_analysis(experiment, analysis):
               continue
-            runs, artifacts, capture = run_rq3.run_experiment(benchmark, experiment)
+            reused = None
+            if experiment["name"] == "acf":
+              from rq1 import run_rq1
+              reused = []
+              for index in range(config.MEASURED_REPETITIONS):
+                result = run_rq1.run_once(run_rq3.make_command(benchmark, experiment, capture=False),
+                                          root / f"rq1-{dataset}-{index}.log", settings=config)
+                reused.append(run_rq3.RunResult(result.status, result.exit_code, result.wall_time_seconds,
+                                               result.stdout, result.stderr, result.stats, result.log_path))
+            runs, artifacts, capture = run_rq3.run_experiment(benchmark, experiment, reused_results=reused)
             self.assertEqual([r.status for r in runs], ["success", "success"])
             self.assertEqual(capture.status, "success", capture.stderr)
             row = run_rq3.create_row(benchmark, experiment, runs, artifacts, capture, {
@@ -262,6 +271,15 @@ class RQ3Test(unittest.TestCase):
             "capture_status": "success" if files else "not-run",
         }
     )
+    directory = tempfile.TemporaryDirectory()
+    self.addCleanup(directory.cleanup)
+    logs = []
+    for index in range(len(statuses)):
+      path = Path(directory.name) / f"{index}.log"
+      path.write_text("fixture log")
+      logs.append(str(path))
+    row["log_files"] = json_cell(logs)
+    row["log_sha256"] = json_cell({name: run_rq3.sha256(Path(name)) for name in logs})
     return row
 
   def test_success_requires_every_configured_repetition(self) -> None:
@@ -466,7 +484,10 @@ class RQ3Test(unittest.TestCase):
                          Path("/tmp/success.log")),
         run_rq3.RunResult("timeout", -9, 30.0, "", "", {}, Path("/tmp/timeout.log")),
     ]
-    with mock.patch.object(config, "MEASURED_REPETITIONS", 2):
+    with tempfile.TemporaryDirectory() as directory, mock.patch.object(config, "MEASURED_REPETITIONS", 2):
+      for index, result in enumerate(results):
+        result.log_path = Path(directory) / f"{index}.log"
+        result.log_path.write_text("fixture log")
       row = run_rq3.create_row(benchmark, experiment, results, [], None, {})
     self.assertEqual(json.loads(row["wall_time_seconds"]), [0.1, 30.0])
     self.assertEqual(json.loads(row["time_ms"]), [1, None])
@@ -494,6 +515,8 @@ class RQ3Test(unittest.TestCase):
               output = output.replace("regularization: 1", "regularization: 2")
             Path(command[command.index("-o") + 1]).write_text(output)
             stdout = ""
+          log_path.parent.mkdir(parents=True, exist_ok=True)
+          log_path.write_text(stdout)
           return run_rq3.RunResult(
               "success", 0, 0.1, stdout, "", run_rq3.parse_stats(stdout), log_path
           )
