@@ -36,7 +36,7 @@ EXPERIMENTS = [
         "args": ["staged-bounds", "--analysis", "{analysis}",
                  "--method", "regularization"],
         "artifact_kind": "upper",
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "mutual-refinement",
@@ -140,6 +140,7 @@ EXPERIMENTS = [
     },
 ]
 
+# Timeouts continue; memory limits always stop. This flag covers other failures.
 STOP_REPETITIONS_AFTER_FAILURE = True
 CAPTURE_RELATIONS = True
 

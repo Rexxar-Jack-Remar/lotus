@@ -170,8 +170,8 @@ class RQ3Test(unittest.TestCase):
           methods = list(csv.DictReader(stream))
         with args.bounds.open() as stream:
           bounds = list(csv.DictReader(stream))
-        self.assertEqual(len(methods), 8)
-        self.assertEqual(len(bounds), 6)
+        self.assertEqual(len(methods), len(rows))
+        self.assertEqual(len(bounds), sum(row["experiment"] != "acf" for row in rows))
         for spds in (row for row in bounds if row["experiment"] == "spds"):
           count = "1" if spds["dataset"] == "valueflow" else "7"
           self.assertEqual(spds["typed_upper_size"], count)
@@ -582,6 +582,31 @@ class RQ3Test(unittest.TestCase):
                          ("analysis", "taint"), ("extra_environment", '{"X":"1"}')):
       with self.subTest(field=field), self.assertRaisesRegex(ValueError, "mix"):
         aggregate_rq3.validate_run_identities([row, {**other, field: value}])
+
+  def test_timeout_continues_repetitions_but_memory_limit_stops(self) -> None:
+    experiment = next(e for e in config.EXPERIMENTS if e["name"] == "mutual-refinement")
+    benchmark = run_rq3.Benchmark("test", "taint", config.REPOSITORY_ROOT,
+                                 config.REPOSITORY_ROOT / "input.dot")
+    for statuses, expected_count in (
+        (["timeout"] * 5, 5),
+        (["timeout"] + ["success"] * 4, 5),
+        (["memory-limit"] + ["success"] * 4, 1),
+        (["timeout", "memory-limit"] + ["success"] * 3, 2),
+    ):
+      with self.subTest(statuses=statuses), tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        samples = [run_rq3.RunResult(status, 0 if status == "success" else -9,
+                                     0.1, "", "", {}, root / f"{i}.log")
+                   for i, status in enumerate(statuses)]
+        with (mock.patch.object(config, "MEASURED_REPETITIONS", 5),
+              mock.patch.object(config, "WARMUP_REPETITIONS", 0),
+              mock.patch.object(config, "ARTIFACT_DIRECTORY", root / "artifacts"),
+              mock.patch.object(run_rq3, "run_once", side_effect=samples) as run):
+          results, artifacts, capture = run_rq3.run_experiment(benchmark, experiment)
+        self.assertEqual(run.call_count, expected_count)
+        self.assertEqual([r.status for r in results], statuses[:expected_count])
+        self.assertEqual(artifacts, [])
+        self.assertIsNone(capture)
 
   def test_timeout_budget_includes_process_launch(self) -> None:
     process = mock.Mock()

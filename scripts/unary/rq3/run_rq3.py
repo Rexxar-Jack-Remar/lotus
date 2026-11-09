@@ -811,7 +811,11 @@ def run_experiment(
         result.stderr += "\ninvalid SPDS engine/client/stack mode or candidate count\n"
         write_log(result.log_path, command, result.started, result)
       results.append(result)
-      if result.status != "success" and config.STOP_REPETITIONS_AFTER_FAILURE:
+      # A timeout does not cancel the remaining measurements (as in RQ1/RQ2).
+      if result.status == "memory-limit" or (
+          result.status not in {"success", "timeout"}
+          and config.STOP_REPETITIONS_AFTER_FAILURE
+      ):
         break
   capture_result = None
   if results and all(result.status == "success" for result in results):

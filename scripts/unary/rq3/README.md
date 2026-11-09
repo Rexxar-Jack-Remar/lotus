@@ -56,7 +56,10 @@ Aggregation and plotting read the configured run CSV by default.
 Use `--dataset`, `--benchmark`, `--experiment`, and `--restart` for pilot runs.  The runner
 sets `RLIMIT_AS` from `MEMORY_LIMIT_GIB`, kills the complete process group on a
 timeout, appends and fsyncs each completed CSV row, and resumes existing rows
-by default.
+by default. A timed-out measurement does not cancel the remaining repetitions;
+a memory-limit failure stops the remaining repetitions for that input/method.
+Other failures follow `STOP_REPETITIONS_AFTER_FAILURE`. Relation capture still
+requires every measured repetition to succeed.
 
 Selected reruns, including `--restart`, preserve CSV rows for unselected
 inputs/methods. Without filters, `--restart` reruns all enabled inputs/methods.
