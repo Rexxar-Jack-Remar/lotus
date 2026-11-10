@@ -40,8 +40,9 @@ ApproximationResult Solver::analyze(const Graph &input, BenchmarkKind benchmark,
     return result;
   }
 
-  graph = detail::retainMatchedLabels(
-      detail::removeNotOnCandidatePaths(graph, result.intersection));
+  // Pruning by intersection candidates before MR changes its refinement
+  // result. Keep those paths available to the classic MR stage.
+  graph = detail::retainMatchedLabels(graph);
   Graph under_graph = graph;
   if (benchmark == BenchmarkKind::ValueFlow) {
     under_graph = detail::valueFlowTransform(under_graph);

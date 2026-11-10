@@ -256,15 +256,10 @@ runGrammar(EncodedGrammar encoded, bool trace, bool factorized_tracing = false,
       raw_result = engine.runCFLReachabilityCompact(encoded.grammar);
     }
 
-    raw_result.erase(std::remove_if(raw_result.begin(), raw_result.end(),
-                                    [](const mr::Edge &edge) {
-                                      return std::get<0>(edge) ==
-                                             std::get<2>(edge);
-                                    }),
-                     raw_result.end());
     if (trace) {
-      // Reuse the start relation as the all-pairs roots. A targeted trace
-      // needs only a singleton; do not copy the entire relation for either.
+      // Keep reflexive start pairs as all-pairs tracing roots. Excluding them
+      // here would change the contributing edges and the refinement result.
+      // A targeted trace needs only a singleton; avoid copying the relation.
       std::vector<mr::Edge> target_roots;
       if (trace_pair) {
         const auto source = encoded.vertex_to_dense.find(trace_pair->source);
@@ -286,6 +281,13 @@ runGrammar(EncodedGrammar encoded, bool trace, bool factorized_tracing = false,
                                              unary_record, binary_record);
     }
   }
+
+  // Exclude reflexive pairs from the returned relation only after tracing.
+  raw_result.erase(std::remove_if(raw_result.begin(), raw_result.end(),
+                                 [](const mr::Edge &edge) {
+                                   return std::get<0>(edge) == std::get<2>(edge);
+                                 }),
+                   raw_result.end());
 
   ReachabilityRun result;
   for (const mr::Edge &edge : raw_result) {
