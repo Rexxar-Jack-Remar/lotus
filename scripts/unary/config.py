@@ -19,7 +19,7 @@ BENCHMARK_SUITES = [
         "name": "valueflow",
         "directory": REPOSITORY_ROOT / "benchmarks/real-world/CFL/InterleavedDyck/valueflow",
         "analysis": "value-flow",
-        "enabled": True,
+        "enabled": False,
     },
 ]
 TESTSET_DIRECTORIES = [
