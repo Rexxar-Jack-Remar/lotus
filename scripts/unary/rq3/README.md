@@ -1,7 +1,9 @@
 # RQ3 experiment driver
 
 RQ3 compares Regularization, Mutual Refinement, SPDS, and ACF on both suites.
-SPDS uses `--analysis {analysis} --all-pairs`. The default configuration runs
+SPDS uses `--analysis nonreflexive-taint --all-pairs` for the taint suite and
+`--analysis value-flow --all-pairs` for the value-flow suite. The default
+configuration runs
 25 inputs × 4 methods = 100 result rows. ACF reuses RQ1's five adaptive
 measurements; the other three methods run five measurements each. Every method
 runs one separate capture if all measurements succeed. Its taint client intersects the
@@ -66,8 +68,9 @@ inputs/methods. Without filters, `--restart` reruns all enabled inputs/methods.
 If preserved rows use a different executable/environment, the runner stops
 before changing the CSV; use a fresh data directory or a complete rerun.
 Each row records
-SHA-256 hashes of the input and executable, the actual command/client analysis,
-and `EXTRA_ENVIRONMENT`. Resume rejects a changed identity; aggregation and
+SHA-256 hashes of the input and executable, the benchmark analysis, the actual
+command, and `EXTRA_ENVIRONMENT`. `engine_analyses` records mappings such as
+`taint -> nonreflexive-taint`. Resume rejects a changed identity; aggregation and
 plotting reject mixed executable/environment versions or different input/client
 identities for the same benchmark. Hashing happens outside measured intervals.
 Keep inputs, the executable, and the execution environment fixed during a run.
@@ -102,7 +105,7 @@ high-water mark reported by the tool at the end of solving, including parsing;
 it is not ACF's construction-payload estimate. The heatmap uses wall time and
 RSS. Each median is computed independently across the five measured runs.
 For SPDS, the internal total includes PDS preparation, saturation and final
-readout (including removal of self-pairs for taint). Value-flow additionally
+readout. `nonreflexive-taint` retains self reachability during saturation and
 includes client pruning, product construction and original-ID mapping.
 Its phase-level `*-us` counters are not summed to estimate this total.
 The timeout uses the same wall-clock start, including process launch. Killing

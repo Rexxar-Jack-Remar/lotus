@@ -17,7 +17,8 @@ BINARIES = {
     "spds": INTERLEAVED_DYCK_BINARY,
 }
 
-# Arguments may use {analysis}, which is replaced from BENCHMARK_SUITES.
+# Arguments may use {analysis}, which is replaced from BENCHMARK_SUITES and
+# then mapped through engine_analyses for the selected tool.
 # artifact_kind controls the output from the separate relation-capture run.
 # MCFL remains configured for future experiments but
 # is disabled because it does not yet implement the value-flow endpoint model.
@@ -28,6 +29,10 @@ EXPERIMENTS = [
         "args": ["spds", "--analysis", "{analysis}", "--all-pairs",
                  "--bidirect"],
         "analyses": ["taint", "value-flow"],
+        "engine_analyses": {
+            "taint": "nonreflexive-taint",
+            "value-flow": "value-flow",
+        },
         "artifact_kind": "upper",
         "enabled": True,
     },

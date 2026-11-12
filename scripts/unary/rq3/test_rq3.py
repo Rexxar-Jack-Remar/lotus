@@ -32,14 +32,24 @@ class RQ3Test(unittest.TestCase):
     experiment = next(e for e in config.EXPERIMENTS if e["name"] == "spds")
     self.assertTrue(config.supports_analysis(experiment, "value-flow"))
     self.assertTrue(config.supports_analysis(experiment, "taint"))
-    benchmark = run_rq3.Benchmark("valueflow", "value-flow", config.REPOSITORY_ROOT,
-                                 config.REPOSITORY_ROOT / "input.dot")
-    measured = run_rq3.make_command(benchmark, experiment, capture=False)
-    captured = run_rq3.make_command(benchmark, experiment, capture=True)
-    self.assertNotIn("--pairs", measured)
-    self.assertIn("--all-pairs", measured)
-    self.assertIn("--pairs", captured)
-    self.assertNotIn("--print-result", captured)
+    for analysis, engine_analysis in (
+        ("taint", "nonreflexive-taint"),
+        ("value-flow", "value-flow"),
+    ):
+      with self.subTest(analysis=analysis):
+        benchmark = run_rq3.Benchmark(
+            analysis, analysis, config.REPOSITORY_ROOT,
+            config.REPOSITORY_ROOT / "input.dot",
+        )
+        measured = run_rq3.make_command(benchmark, experiment, capture=False)
+        captured = run_rq3.make_command(benchmark, experiment, capture=True)
+        self.assertEqual(
+            measured[measured.index("--analysis") + 1], engine_analysis
+        )
+        self.assertNotIn("--pairs", measured)
+        self.assertIn("--all-pairs", measured)
+        self.assertIn("--pairs", captured)
+        self.assertNotIn("--print-result", captured)
 
   def test_spds_stream_checks(self) -> None:
     summary = ("engine: spds\nanalysis: value-flow\ncall-stack: empty\nfield-stack: empty\n"
@@ -54,11 +64,15 @@ class RQ3Test(unittest.TestCase):
         with self.subTest(pairs=pairs), self.assertRaises(ValueError):
           run_rq3.capture_spds_pairs((summary + pairs).splitlines(), path, "value-flow")
       with self.assertRaisesRegex(ValueError, "client"):
-        run_rq3.capture_spds_pairs((summary + "pair: -1 2\npair: 2 3\n").splitlines(), path, "taint")
+        run_rq3.capture_spds_pairs(
+            (summary + "pair: -1 2\npair: 2 3\n").splitlines(),
+            path, "nonreflexive-taint",
+        )
       stats = run_rq3.capture_spds_pairs(
-          (summary.replace("value-flow", "taint") + "pair: -1 2\npair: 2 3\n").splitlines(),
-          path, "taint")
-      self.assertEqual(stats["analysis"], "taint")
+          (summary.replace("value-flow", "nonreflexive-taint")
+           + "pair: -1 2\npair: 2 3\n").splitlines(),
+          path, "nonreflexive-taint")
+      self.assertEqual(stats["analysis"], "nonreflexive-taint")
 
   def test_spds_rejects_wrong_measured_client(self) -> None:
     experiment = next(e for e in config.EXPERIMENTS if e["name"] == "spds")
@@ -79,8 +93,12 @@ class RQ3Test(unittest.TestCase):
       self.assertIn("Status: stats-error", result.log_path.read_text())
       for key, value in (("engine", "wrong"), ("call-stack", "any"),
                          ("field-stack", "any"), ("candidate-pairs", "-1")):
-        invalid = {**stats, "analysis": "taint", key: value}
-        self.assertFalse(run_rq3.valid_spds_stats(invalid, "taint"))
+        invalid = {**stats, "analysis": "nonreflexive-taint", key: value}
+        self.assertFalse(
+            run_rq3.valid_spds_stats(invalid, "nonreflexive-taint")
+        )
+      legacy = {**stats, "analysis": "taint"}
+      self.assertFalse(run_rq3.valid_spds_stats(legacy, "taint"))
 
   def test_restart_preserves_unselected_rows_and_checks_versions(self) -> None:
     selected = self.make_row({"name": "spds", "tool": "spds"}, [])
@@ -151,12 +169,17 @@ class RQ3Test(unittest.TestCase):
                 "extra_environment": "{}"})
             rows.append(row)
             if experiment["name"] == "spds":
-              expected = ("-9 8\n" if analysis == "value-flow" else
-                          "-9 8\n-9 11\n1 3\n8 11\n10 -9\n10 8\n10 11\n")
-              count = "1" if analysis == "value-flow" else "7"
+              expected = ("-9 8\n8 -9\n" if analysis == "value-flow" else
+                          "-9 8\n-9 10\n-9 11\n1 3\n3 1\n8 -9\n8 10\n"
+                          "8 11\n10 -9\n10 8\n10 11\n11 -9\n11 8\n11 10\n")
+              count = "2" if analysis == "value-flow" else "14"
               self.assertEqual(artifacts[0].read_text(), expected)
               self.assertEqual(capture.stats["candidate-pairs"], count)
-              self.assertEqual(capture.stats["analysis"], analysis)
+              engine_analysis = (
+                  "value-flow" if analysis == "value-flow"
+                  else "nonreflexive-taint"
+              )
+              self.assertEqual(capture.stats["analysis"], engine_analysis)
               for run in runs:
                 self.assertEqual(run.stats["candidate-pairs"], count)
                 self.assertNotIn("pair:", run.stdout)
@@ -173,7 +196,7 @@ class RQ3Test(unittest.TestCase):
         self.assertEqual(len(methods), len(rows))
         self.assertEqual(len(bounds), sum(row["experiment"] != "acf" for row in rows))
         for spds in (row for row in bounds if row["experiment"] == "spds"):
-          count = "1" if spds["dataset"] == "valueflow" else "7"
+          count = "2" if spds["dataset"] == "valueflow" else "14"
           self.assertEqual(spds["typed_upper_size"], count)
           self.assertEqual(spds["intersection_size"], count)
           self.assertEqual(spds["newly_excluded_size"], "0")
@@ -185,7 +208,7 @@ class RQ3Test(unittest.TestCase):
 
   @unittest.skipUnless(os.environ.get("RQ3_INTEGRATION_TESTS") == "1",
                        "set RQ3_INTEGRATION_TESTS=1 after building the tool")
-  def test_taint_matches_dyck_and_cfl_intersection(self) -> None:
+  def test_nonreflexive_taint_matches_cfl_intersection(self) -> None:
     binary = str(config.INTERLEAVED_DYCK_BINARY)
 
     def pairs(path, args, prefix):
@@ -208,12 +231,22 @@ class RQ3Test(unittest.TestCase):
                  for name in ("loozfon", "faketaobao")]
       for graph in graphs:
         with self.subTest(graph=graph.name):
-          dyck = pairs(graph, ["spds", "--analysis", "dyck", "--all-pairs", "--pairs"], "pair: ")
-          expected = {p for p in dyck if p[0] != p[1]}
+          expected = pairs(
+              graph,
+              ["spds", "--analysis", "nonreflexive-taint",
+               "--all-pairs", "--pairs"],
+              "pair: ",
+          )
+          self.assertFalse(any(source == target for source, target in expected))
           cfl = pairs(graph, ["staged-bounds", "--analysis", "taint", "--method", "intersection", "--print-result"], "")
           self.assertEqual(expected, cfl)
           for direction in ("post", "pre"):
-            actual = pairs(graph, ["spds", "--analysis", "taint", "--all-pairs", "--direction", direction, "--pairs"], "pair: ")
+            actual = pairs(
+                graph,
+                ["spds", "--analysis", "nonreflexive-taint",
+                 "--all-pairs", "--direction", direction, "--pairs"],
+                "pair: ",
+            )
             self.assertEqual(actual, expected)
 
   def make_row(
@@ -497,7 +530,10 @@ class RQ3Test(unittest.TestCase):
     self.assertEqual(row["capture_status"], "not-run")
 
   def test_capture_is_separate_and_artifact_errors_are_logged(self) -> None:
-    experiment = next(item for item in config.EXPERIMENTS if item["name"] == "regularization")
+    experiment = next(
+        item for item in config.EXPERIMENTS
+        if item["name"] == "mutual-refinement"
+    )
     benchmark = run_rq3.Benchmark(
         "test", "taint", config.REPOSITORY_ROOT, config.REPOSITORY_ROOT / "input.dot"
     )
@@ -508,11 +544,17 @@ class RQ3Test(unittest.TestCase):
 
         def fake_run(command, log_path, **kwargs):
           calls.append(command)
-          stdout = "regularization: 1\nTime (ms): 1\nprocess peak RSS (bytes): 100\n"
+          stdout = (
+              "mutual-refinement upper bound: 1\n"
+              "Time (ms): 1\nprocess peak RSS (bytes): 100\n"
+          )
           if "--print-result" in command:
             output = stdout.replace("Time (ms)", "1 2\nTime (ms)")
             if truncated:
-              output = output.replace("regularization: 1", "regularization: 2")
+              output = output.replace(
+                  "mutual-refinement upper bound: 1",
+                  "mutual-refinement upper bound: 2",
+              )
             Path(command[command.index("-o") + 1]).write_text(output)
             stdout = ""
           log_path.parent.mkdir(parents=True, exist_ok=True)

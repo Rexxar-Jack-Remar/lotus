@@ -172,6 +172,18 @@ def validate_configuration() -> list[dict[str, Any]]:
     names.add(experiment["name"])
     if experiment["tool"] not in config.BINARIES:
       raise ValueError(f"unknown tool: {experiment['tool']}")
+    engine_analyses = experiment.get("engine_analyses", {})
+    if not isinstance(engine_analyses, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in engine_analyses.items()
+    ):
+      raise ValueError(f"invalid engine analysis mapping: {experiment}")
+    supported = set(experiment.get("analyses", ["taint", "value-flow"]))
+    unknown = set(engine_analyses) - supported
+    if unknown:
+      raise ValueError(
+          f"engine analysis mapping has unsupported datasets: {sorted(unknown)}"
+      )
     if experiment["artifact_kind"] == "mcfl":
       if experiment.get("family") not in {"plus", "circ"}:
         raise ValueError(f"invalid MCFL family: {experiment}")
@@ -209,8 +221,14 @@ def discover_benchmarks(selected: set[str]) -> list[Benchmark]:
   return benchmarks
 
 
-def substitute_args(arguments: Sequence[Any], benchmark: Benchmark) -> list[str]:
-  return [str(value).replace("{analysis}", benchmark.analysis) for value in arguments]
+def engine_analysis(experiment: dict[str, Any], analysis: str) -> str:
+  """Translate a dataset analysis name to the selected tool's client name."""
+  mapping = experiment.get("engine_analyses", {})
+  return str(mapping.get(analysis, analysis))
+
+
+def substitute_args(arguments: Sequence[Any], analysis: str) -> list[str]:
+  return [str(value).replace("{analysis}", analysis) for value in arguments]
 
 
 def binary_for(experiment: dict[str, Any]) -> Path:
@@ -250,7 +268,9 @@ def make_command(
 ) -> list[str]:
   command = [
       str(binary_for(experiment)),
-      *substitute_args(experiment["args"], benchmark),
+      *substitute_args(
+          experiment["args"], engine_analysis(experiment, benchmark.analysis)
+      ),
   ]
   if capture and config.CAPTURE_RELATIONS:
     base = artifact_base(benchmark, experiment)
@@ -330,7 +350,7 @@ def valid_stats(stats: dict[str, str]) -> bool:
 def valid_spds_stats(stats: dict[str, str], analysis: str) -> bool:
   count = parse_integer(stats.get("candidate-pairs"))
   return (
-      analysis in {"taint", "value-flow"}
+      analysis in {"nonreflexive-taint", "value-flow"}
       and stats.get("engine") == "spds"
       and stats.get("analysis") == analysis
       and stats.get("call-stack") == stats.get("field-stack") == "empty"
@@ -339,7 +359,7 @@ def valid_spds_stats(stats: dict[str, str], analysis: str) -> bool:
 
 
 def capture_spds_pairs(lines: Iterable[str], path: Path, analysis: str) -> dict[str, str]:
-  """Stream SPDS's sorted pairs and verify the reported relation size."""
+  """Stream SPDS's nonreflexive sorted pairs and verify the reported size."""
   stats = {}
   count = 0
   previous = None
@@ -437,10 +457,11 @@ def valid_measurements(row: dict[str, str]) -> bool:
     stats = json.loads(row["stats_per_run"])
     if len(stats) != count or not all(valid_stats(item) for item in stats):
       return False
-    if row.get("tool") == "spds" and not all(
-        valid_spds_stats(item, row["analysis"]) for item in stats
-    ):
-      return False
+    if row.get("tool") == "spds":
+      configuration = json.loads(row["configuration"])
+      analysis = engine_analysis(configuration, row["analysis"])
+      if not all(valid_spds_stats(item, analysis) for item in stats):
+        return False
     for field, minimum in (("time_ms", 0), ("peak_rss_bytes", 1),
                            ("wall_time_seconds", 0)):
       values = json.loads(row[field])
@@ -777,6 +798,7 @@ def run_experiment(
 ) -> tuple[list[RunResult], list[Path], RunResult | None]:
   if experiment["name"] == "acf" and not reused_results:
     raise ValueError("ACF requires validated RQ1 measurements; run RQ1 first")
+  spds_analysis = engine_analysis(experiment, benchmark.analysis)
   artifacts = expected_artifacts(benchmark, experiment)
   remove_stale_artifacts(artifacts)
   captured: list[Path] = []
@@ -806,7 +828,7 @@ def run_experiment(
           log_path_for(benchmark, experiment, repetition, warmup=False),
       )
       if (result.status == "success" and experiment["tool"] == "spds"
-          and not valid_spds_stats(result.stats, benchmark.analysis)):
+          and not valid_spds_stats(result.stats, spds_analysis)):
         result.status = "stats-error"
         result.stderr += "\ninvalid SPDS engine/client/stack mode or candidate count\n"
         write_log(result.log_path, command, result.started, result)
@@ -838,7 +860,9 @@ def run_experiment(
         if experiment["artifact_kind"] == "upper":
           with (base / "upper.txt").open(encoding="utf-8") as stream:
             if experiment["tool"] == "spds":
-              capture_result.stats = capture_spds_pairs(stream, artifacts[0], benchmark.analysis)
+              capture_result.stats = capture_spds_pairs(
+                  stream, artifacts[0], spds_analysis
+              )
             else:
               capture_result.stats = capture_upper_pairs(stream, artifacts[0])
           capture_result.stdout = "".join(

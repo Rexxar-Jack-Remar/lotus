@@ -6,9 +6,14 @@ if(TARGET lotus-cfl-interleaved-dyck)
           vf_all vf_pre vf_query vf_source vf_target vf_batch vf_mismatch
           vf_endpoint vf_empty vf_prefix vf_prefix_missing_file vf_limit
           vf_invalid_client vf_missing
-          taint_all taint_pre taint_query taint_source taint_target taint_batch
-          taint_self taint_neutral taint_mismatch taint_empty taint_prefix
-          taint_field_prefix taint_limit taint_stats taint_cycle)
+          nonreflexive_taint_all nonreflexive_taint_all_bidirect
+          nonreflexive_taint_pre nonreflexive_taint_query
+          nonreflexive_taint_source nonreflexive_taint_target
+          nonreflexive_taint_batch nonreflexive_taint_self
+          nonreflexive_taint_neutral nonreflexive_taint_mismatch
+          nonreflexive_taint_empty nonreflexive_taint_prefix
+          nonreflexive_taint_field_prefix nonreflexive_taint_limit
+          nonreflexive_taint_stats nonreflexive_taint_cycle)
     add_test(NAME interleaved_dyck_spds_cli_${case}
       COMMAND ${CMAKE_COMMAND}
         -DPROGRAM=$<TARGET_FILE:lotus-cfl-interleaved-dyck>
