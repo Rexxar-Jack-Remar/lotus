@@ -4,7 +4,8 @@ if(TARGET lotus-cfl-interleaved-dyck)
           missing_vertex invalid_label bad_number invalid_option resource_limit
           help timings missing_file missing_scope invalid_backwards_prefix
           vf_all vf_pre vf_query vf_source vf_target vf_batch vf_mismatch
-          vf_endpoint vf_empty vf_prefix vf_limit vf_invalid_client vf_missing
+          vf_endpoint vf_empty vf_prefix vf_prefix_missing_file vf_limit
+          vf_invalid_client vf_missing
           taint_all taint_pre taint_query taint_source taint_target taint_batch
           taint_self taint_neutral taint_mismatch taint_empty taint_prefix
           taint_field_prefix taint_limit taint_stats taint_cycle)

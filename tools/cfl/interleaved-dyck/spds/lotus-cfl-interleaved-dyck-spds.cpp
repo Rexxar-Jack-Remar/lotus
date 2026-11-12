@@ -200,10 +200,11 @@ int runInterleavedDyckSPDS(int argc, char **argv) {
     }
     if (path.empty())
       throw std::invalid_argument("missing graph.dot; use --help");
-    if (client == "taint" &&
+    if ((client == "taint" || client == "value-flow") &&
         (options.parentheses != spds::StackAcceptance::Empty ||
          options.brackets != spds::StackAcceptance::Empty))
-      throw std::invalid_argument("taint requires empty endpoint stacks");
+      throw std::invalid_argument(
+          client + " requires empty endpoint stacks");
     if (!all_pairs && !source && !target && queries_path.empty())
       throw std::invalid_argument(
           "missing query scope; use --all-pairs, --query, --source, "
@@ -313,44 +314,6 @@ int runInterleavedDyckSPDS(int argc, char **argv) {
       std::cout << "Time (ms): " << elapsed.count() << '\n';
       if (peak_rss)
         std::cout << "process peak RSS (bytes): " << *peak_rss << '\n';
-      if (pairs)
-        printPairs(result.upper_bound);
-      return 0;
-    }
-    if (client == "value-flow") {
-      spds::ValueFlowAnalysis analysis(graph, options);
-      spds::Result result;
-      std::vector<dyck::Pair> demands;
-      if (!queries_path.empty()) {
-        demands = readDemands(queries_path);
-        result = analysis.analyzeDemands(demands, demand_direction);
-      } else if (single_query)
-        result =
-            analysis.analyzeDemands({{*source, *target}}, demand_direction);
-      else if (source)
-        result = analysis.analyzeFrom(*source);
-      else if (target)
-        result = analysis.analyzeTo(*target);
-      else
-        result = analysis.analyzeAll(demand_direction);
-      std::cout << "engine: spds\nanalysis: value-flow\n"
-                   "semantics: sound upper bound\ncall-stack: "
-                   "empty\nfield-stack: empty\n";
-      if (!queries_path.empty())
-        std::cout << "requested-pairs: " << demands.size() << '\n';
-      if (single_query) {
-        const dyck::Pair p{*source, *target};
-        std::cout << "query: "
-                  << (result.mayReach(*source, *target) ? "may-reach"
-                                                        : "unreachable")
-                  << "\ncall-projection: "
-                  << (result.parenthesis_pairs.count(p) ? "accept" : "reject")
-                  << "\nfield-projection: "
-                  << (result.bracket_pairs.count(p) ? "accept" : "reject")
-                  << '\n';
-      }
-      std::cout << "candidate-pairs: " << result.upper_bound.size() << '\n';
-      printStats(result.statistics, timings);
       if (pairs)
         printPairs(result.upper_bound);
       return 0;
