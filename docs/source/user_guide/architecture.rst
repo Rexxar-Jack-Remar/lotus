@@ -51,7 +51,7 @@ The ``lib/`` directory is divided into 16 CMake subdirectories, each of which co
      - ``DyckAA``, ``AserPTA``, ``SparrowAA``, ``SeaDsaAnalysis``, ``LotusAA``, ``AllocAA``, ``UnderApproxAA``, ``TPA``, ``DemandDriven``, ``InclusionBased``
      - Pointer and alias analysis engines
    * - ``lib/IR/``
-     - ``ICFG``, ``PDG``, ``SVFG`` (MemorySSA), ``ShadowMemSSA``, ``GSA``, ``SSI``, ``vSSA``, ``UFG``, ``UseTraceSSA``
+     - ``GVFG``, ``ICFG``, ``PDG``, ``SVFG`` (MemorySSA), ``ShadowMemSSA``, ``GSA``, ``SSI``, ``vSSA``, ``UFG``, ``UseTraceSSA``
      - Graph-based intermediate representations
    * - ``lib/Dataflow/``
      - ``IFDSSolver``, ``IDESolver``, ``IntraMonoSolver``, ``InterMonoSolver``, ``WPDS engine``, ``NPA``
@@ -63,19 +63,19 @@ The ``lib/`` directory is divided into 16 CMake subdirectories, each of which co
      - ``Framework``, ``AE``, ``KINT``, ``Pulse``, ``Saber``, ``Concurrency``, ``GSAF``, ``FiTx``, ``TypeQualifier``, ``Tooling``
      - Bug detection engines and linters
    * - ``lib/Solvers/``
-     - Z3 SMT wrapper, CUDD BDD wrapper, WPDS weights
+     - ``Datalog``, ``EGraph``, ``SMT`` (LIBSMT, TUNA, STAUB, SymAbs, SMTStabilizer, SMTSampler, QuantSimp)
      - Constraint and reachability solvers
    * - ``lib/Verification/``
-     - ``SymAbsAI``, ``Sifa``, ``Mosaic``, CLAM abstract interpreter, SeaHorn
+     - ``SymAbsAI``, ``Sifa``, ``Mosaic``, ``TraceAbstraction``, ``Automata``, ``PathProgram``, backend adapters (IKOS)
      - Formal verification backends
    * - ``lib/CFL/``
-     - CFL-reachability graph engines (CSR)
+     - ``Classical``, ``DynamicDyck``, ``InterleavedDyck``, and ``CSIndex`` (CSR/FLARE indexing) engines
      - Core CFL and pushdown logic
    * - ``lib/Transform/``
      - LLVM IR transformation passes
      - Code canonicalization and lowering
    * - ``lib/Optimization/``
-     - ``IPDeadStoreElimination``, SW prefetching
+     - ``IPO``, ``PartialEvaluation``, ``PassOrdering``, ``Prefetch``, ``Scalar``
      - Optimization implementations
    * - ``lib/Concurrency/``
      - ``MHP``, ``LockSet``, ``ValueFlow``, ``Thread``, ``OpenMP``, ``MPI``, ``CUDA``, ``LinuxKernel``
@@ -116,7 +116,7 @@ Each subdirectory under ``tools/`` contains the ``main()`` entry points that lin
    * - ``tools/optimization/``
      - ``lotus-opt-ipo``, ``lotus-opt-prefetch``, ``lotus-opt-purity``
    * - ``tools/verifier/``
-     - ``lotus-verify-symabs-ai``, ``lotus-verify-sifa``, ``lotus-verify-mosaic``, ``clam`` (``clam``, ``clam-pp``, ``clam-diff``), ``seahorn`` (``seahorn``, ``seapp``, ``seainspect``), ``llvm2bpl`` and ``extern-statics`` (SMACK)
+     - ``lotus-verify-symabs-ai``, ``lotus-verify-sifa``, ``lotus-verify-mosaic``, ``clam`` (``clam``, ``clam-pp``, ``clam-diff``), ``seahorn`` (``seahorn``, ``seapp``, ``seainspect``), ``llvm2bpl`` and ``extern-statics`` (SMACK); optional ``lotus-bool-parse`` and ``lotus-bool-normalize``
    * - ``tools/ir/``
      - ``lotus-ir-pdg-query``, ``lotus-ir-control-dependence``, ``lotus-ir-usetracessa``, ``lotus-ir-ufg``
    * - ``tools/solver/``

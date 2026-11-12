@@ -447,6 +447,8 @@ int main(int argc, char **argv) {
                                    const Function *target) {
     const std::vector<const Function *> allowed =
         graphBuilder->getIndirectCallTargets(callSite);
+    if (allowed.empty())
+      return true;
     return std::find(allowed.begin(), allowed.end(), target) != allowed.end();
   };
   auto connectIndirectCall = [&](const CallBase *callSite,

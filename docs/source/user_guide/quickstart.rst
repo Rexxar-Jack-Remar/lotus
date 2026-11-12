@@ -19,7 +19,7 @@ Lotus has been tested on **x86/ARM Linux** and **ARM macOS**. The following depe
      - 14.x
      - Must match exactly; the build system searches for it automatically.
    * - Z3
-     - 4.11
+     - 4.8.1+ (4.11 tested)
      - SMT solver; found via ``cmake/FindZ3.cmake``.
    * - CMake
      - 3.18+
@@ -30,9 +30,10 @@ Lotus has been tested on **x86/ARM Linux** and **ARM macOS**. The following depe
    * - Boost
      - 1.65+ (optional)
      - Only required when ``LOTUS_ENABLE_SEAHORN``, ``LOTUS_ENABLE_CLAM``,
-       ``LOTUS_ENABLE_SMACK``, ``LOTUS_ENABLE_CCLYZER``, or
-       ``LOTUS_ENABLE_PDAAAL`` are enabled.
-       CLAM additionally requires Boost.JSON 1.80+.
+       ``LOTUS_ENABLE_SMACK``, ``LOTUS_ENABLE_CCLYZER``,
+       ``LOTUS_ENABLE_PDAAAL``, or ``LOTUS_ENABLE_FPSOLVE`` are enabled.
+       CLAM additionally requires Boost.JSON 1.80+. FPsolve uses an installed
+       Boost and GMP instead of the auto-download path.
 
 Build Instructions
 ------------------
@@ -69,13 +70,17 @@ Quick-Start Example
 
 The standard workflow for running a Lotus checker on C/C++ code is:
 
-1. Compile the target program to LLVM bitcode using ``clang`` with ``-emit-llvm``.
+1. Compile the target program to LLVM bitcode using Clang 14 with ``-emit-llvm``.
 2. Run a Lotus checker tool (from ``build/bin/``) on the ``.bc`` file.
+
+Use a Clang release compatible with the LLVM version used to build Lotus.
+For the supported LLVM 14 build, use Clang 14 (for example, ``clang-14`` on
+systems that install versioned compiler binaries).
 
 .. code-block:: bash
 
    # 1. Compile C code to LLVM bitcode
-   clang -g -emit-llvm -c example.c -o example.bc
+   clang-14 -g -emit-llvm -c example.c -o example.bc
 
    # 2. Run an alias analysis pass
    ./build/bin/lotus-alias-sparrow-aa example.bc

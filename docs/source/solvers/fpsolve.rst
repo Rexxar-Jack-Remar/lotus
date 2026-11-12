@@ -10,7 +10,7 @@ over a variety of semiring domains, supporting both Kleene iteration
 
 **Build toggle**: ``-DLOTUS_ENABLE_FPSOLVE=ON``
 
-**Dependencies**: Boost (auto-downloaded if not found)
+**Dependencies**: Boost (filesystem, program_options, system) and GMP (installed, not auto-downloaded)
 
 Overview
 --------
@@ -29,13 +29,13 @@ The library provides a wide range of built-in semirings:
 
 .. code-block:: text
 
-   BooleanSemiring         — standard Boolean (∧, ∨)
+   BoolSemiring            — standard Boolean (∧, ∨)
    TropicalSemiring        — min-plus (tropical) semiring
    ViterbiSemiring         — max-probability semiring
    FloatSemiring           — floating-point semiring
    FreeSemiring            — formal language (free monoid)
    CommutativeRExp         — commutative regular expressions
-   PreciseRationalSemiring — exact rational arithmetic
+   PrecRatSemiring         — exact rational arithmetic
    MaxMinSemiring          — max-min fuzzy logic semiring
    LossySemiring           — lossy channel automaton semiring
    LossyFiniteAutomaton    — lossy finite automaton domain

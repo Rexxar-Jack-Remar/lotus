@@ -51,7 +51,7 @@ enables that engine's own checks.
      - Typical use
    * - Use-after-free
      - ``pulse``
-     - ``ae``, ``fitx``, ``symex``, ``gsaf``
+     - ``ae``, ``fitx``, ``symex``, ``gsaf``, ``saber``
      - Witness-oriented investigation
    * - Null-pointer dereference
      - ``pulse`` or ``ae``
@@ -326,7 +326,12 @@ All checkers integrate with the centralized ``BugReportMgr``:
    // Access centralized reports emitted by checker frontends
    BugReportMgr& mgr = BugReportMgr::get_instance();
    mgr.print_summary(outs());
-   mgr.generate_json_report(jsonFile, BugReportMgr::ReportFilter{});
+
+   // generate_json_report writes to an llvm::raw_ostream.
+   std::error_code EC;
+   llvm::raw_fd_ostream JSON("report.json", EC);
+   if (!EC)
+     mgr.generate_json_report(JSON, BugReportMgr::ReportFilter{});
 
 Bug Types
 ---------
@@ -338,7 +343,8 @@ The framework detects the following bug categories:
 * **Reachability**: Unreachable (dead) branches, reported alongside the numerical checks
 * **Concurrency**: Data races, deadlocks, atomicity violations, lock mismatches, condition-variable misuse, OpenMP runtime misuse, MPI protocol/RMA bugs
 * **Security**: Taint errors (untrusted data flows), use-after-free, null dereferences
-* **Performance**: Unnecessary copies, const-refable parameters (planned)
+* **Performance**: Unnecessary copies (Pulse), const-refable parameters
+  (tracked by Pulse; not yet emitted as a diagnostic)
 
 All bug types are classified by importance (LOW, MEDIUM, HIGH) and category (SECURITY, ERROR, WARNING, PERFORMANCE) with CWE mappings.
 
