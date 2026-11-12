@@ -2,9 +2,10 @@
 """Plot the RQ2 quotient-sparsification ablation from the experiment CSVs.
 
 The two comparison panels use medians of successful repetitions from
-``rq1-results.csv``.  The preprocessing panel uses paired phase timings from
-``rq2-breakdown.csv``.  Direct runs that exhausted memory are placed in a
-separate strip because their x coordinate is unknown.
+``rq1-results.csv``.  Direct runs that exhausted memory are placed in a
+separate strip because their x coordinate is unknown.  The current experiment
+covers the taint suite only.  The preprocessing panel is kept in the code but
+disabled because the figure now contains only the first two panels.
 """
 
 from __future__ import annotations
@@ -18,6 +19,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+import matplotlib
+
+matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
@@ -37,24 +42,26 @@ RESULTS_CSV = config.ABLATION_CSV
 BREAKDOWN_CSV = config.OUTPUT_CSV
 OUTPUT_PDF = SCRIPT_DIR / "rq2-sparsification.pdf"
 
-FIGURE_SIZE_IN = (7.35, 2.72)
-# The paper includes only taint; keep its panels compact without cropping the
-# larger value-flow measurements when plotting both suites.
-TAINT_FIGURE_SIZE_IN = (6.3, 2.72)
+# Two comparison panels are plotted.  The former three-panel size was
+# FIGURE_SIZE_IN = (7.35, 2.72) and TAINT_FIGURE_SIZE_IN = (6.3, 2.72).
+FIGURE_SIZE_IN = (4.65, 2.72)
+TAINT_FIGURE_SIZE_IN = (4.65, 2.72)
 FIGURE_DPI = 200
-PANEL_WIDTH_RATIOS = (1.0, 1.0, 0.72)
+# The former third ratio (0.72) belongs to the disabled preprocessing panel.
+# PANEL_WIDTH_RATIOS = (1.0, 1.0, 0.72)
+PANEL_WIDTH_RATIOS = (1.0, 1.0)
 MO_STRIP_WIDTH_RATIO = 0.105
 OUTER_WSPACE = 0.40
 MO_STRIP_WSPACE = 0.045
-MARGINS = dict(left=0.075, right=0.992, bottom=0.285, top=0.855)
+MARGINS = dict(left=0.075, right=0.992, bottom=0.195, top=0.855)
 
 FONT_FAMILY = "Times New Roman"
-FONT_SIZE = 8.6
-TITLE_SIZE = 10.0
-LABEL_SIZE = 9.0
-TICK_SIZE = 8.0
-ANNOTATION_SIZE = 7.4
-LEGEND_SIZE = 8.0
+FONT_SIZE = 10.0
+TITLE_SIZE = 11.5
+LABEL_SIZE = 10.5
+TICK_SIZE = 9.5
+ANNOTATION_SIZE = 8.8
+LEGEND_SIZE = 9.5
 
 SUITE_STYLE = {
     "taint": {"label": "Taint", "color": "#2878B5", "marker": "o"},
@@ -94,7 +101,7 @@ ANNOTATION_OFFSETS = {
 
 PDF_METADATA = {
     "Title": "RQ2 quotient-sparsification ablation",
-    "Subject": "Direct versus sparsified ACF runtime, memory, and preprocessing cost",
+    "Subject": "Direct versus sparsified ACF runtime and memory (taint)",
     "Creator": "scripts/unary/plot_rq2_sparsification.py",
 }
 
@@ -202,8 +209,8 @@ def load_measurements() -> list[Measurement]:
             )
         )
 
-    if len(measurements) != 25:
-        raise ValueError(f"expected 25 benchmark subjects, found {len(measurements)}")
+    if not measurements:
+        raise ValueError("no benchmark subjects found")
     return measurements
 
 
@@ -268,7 +275,8 @@ def add_speedup_guides(ax, limits: tuple[float, float], speedups=SPEEDUP_GUIDES)
             dashes=GUIDE_DASHES,
             zorder=1,
         )
-        label_x = upper / 1.28
+        # Keep the larger guide labels clear of the top and right spines.
+        label_x = upper / 1.45
         label_y = label_x / speedup
         if lower * 1.15 < label_y < upper / 1.15:
             label = "equal" if speedup == 1 else f"{speedup}×"
@@ -398,7 +406,9 @@ def make_figure(rows: list[Measurement]):
     rss_limits = TAINT_RSS_LIMITS if taint_only else RSS_LIMITS
     speedups = (1, 10, 100) if taint_only else SPEEDUP_GUIDES
     figure = plt.figure(figsize=figure_size, dpi=FIGURE_DPI)
-    outer = figure.add_gridspec(1, 3, width_ratios=PANEL_WIDTH_RATIOS, wspace=OUTER_WSPACE)
+    # Third (preprocessing) panel disabled: keep only the two comparison panels.
+    # outer = figure.add_gridspec(1, 3, width_ratios=PANEL_WIDTH_RATIOS, wspace=OUTER_WSPACE)
+    outer = figure.add_gridspec(1, 2, width_ratios=PANEL_WIDTH_RATIOS, wspace=OUTER_WSPACE)
 
     time_grid = outer[0].subgridspec(
         1, 2, width_ratios=(1, MO_STRIP_WIDTH_RATIO), wspace=MO_STRIP_WSPACE
@@ -410,7 +420,7 @@ def make_figure(rows: list[Measurement]):
     time_mo_ax = figure.add_subplot(time_grid[1], sharey=time_ax)
     rss_ax = figure.add_subplot(rss_grid[0])
     rss_mo_ax = figure.add_subplot(rss_grid[1], sharey=rss_ax)
-    pre_ax = figure.add_subplot(outer[2])
+    # pre_ax = figure.add_subplot(outer[2])
 
     completed = [row for row in rows if not row.direct_mo]
     mo_count = sum(row.direct_mo for row in rows)
@@ -435,32 +445,33 @@ def make_figure(rows: list[Measurement]):
     style_mo_axis(rss_mo_ax, rss_limits, mo_count)
     add_mo_points(rss_mo_ax, rows, "acf_rss_gib")
 
-    plot_preprocessing_ecdf(pre_ax, rows)
+    # plot_preprocessing_ecdf(pre_ax, rows)
 
-    legend_handles = [
-        Line2D(
-            [0],
-            [0],
-            marker=style["marker"],
-            linestyle="none",
-            markerfacecolor=style["color"],
-            markeredgecolor=POINT_EDGE_COLOR,
-            markeredgewidth=POINT_EDGE_WIDTH,
-            markersize=5.2,
-            label=style["label"],
-        )
-        for suite, style in SUITE_STYLE.items()
-        if any(row.suite == suite for row in rows)
-    ]
-    figure.legend(
-        handles=legend_handles,
-        loc="lower center",
-        bbox_to_anchor=(0.5, 0.004),
-        ncol=len(legend_handles),
-        frameon=False,
-        handletextpad=0.45,
-        columnspacing=1.4,
-    )
+    # Taint-only experiment: the bottom suite legend is no longer needed.
+    # legend_handles = [
+    #     Line2D(
+    #         [0],
+    #         [0],
+    #         marker=style["marker"],
+    #         linestyle="none",
+    #         markerfacecolor=style["color"],
+    #         markeredgecolor=POINT_EDGE_COLOR,
+    #         markeredgewidth=POINT_EDGE_WIDTH,
+    #         markersize=5.2,
+    #         label=style["label"],
+    #     )
+    #     for suite, style in SUITE_STYLE.items()
+    #     if any(row.suite == suite for row in rows)
+    # ]
+    # figure.legend(
+    #     handles=legend_handles,
+    #     loc="lower center",
+    #     bbox_to_anchor=(0.5, 0.004),
+    #     ncol=len(legend_handles),
+    #     frameon=False,
+    #     handletextpad=0.45,
+    #     columnspacing=1.4,
+    # )
     figure.subplots_adjust(**MARGINS)
     return figure
 
