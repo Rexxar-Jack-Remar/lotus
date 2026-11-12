@@ -7,10 +7,10 @@ completed successfully.  Each selected configuration is rerun once with
 canonicalizes every component to its smallest vertex before comparing maps.
 
 Examples:
-  python scripts/unary/tool/compare_equivalence.py
-  python scripts/unary/tool/compare_equivalence.py \
+  python3 scripts/unary/audit/compare_equivalence.py --dry-run
+  python3 scripts/unary/audit/compare_equivalence.py \
       --comparison acf-direct-acf
-  python scripts/unary/tool/compare_equivalence.py \
+  python3 scripts/unary/audit/compare_equivalence.py \
       --comparison kp22-acf --output-dir /tmp/kp22-acf-equivalence
 """
 
