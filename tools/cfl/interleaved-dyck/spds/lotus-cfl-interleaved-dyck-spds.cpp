@@ -22,12 +22,12 @@ namespace spds = dyck::spds;
 
 namespace {
 
-enum class BenchmarkKind { Dyck, Taint, ValueFlow };
+enum class BenchmarkKind { Taint, NonreflexiveTaint, ValueFlow };
 
 struct CommandLine {
   std::string path;
   std::string queries_path;
-  BenchmarkKind analysis = BenchmarkKind::Dyck;
+  BenchmarkKind analysis = BenchmarkKind::Taint;
   spds::Options options;
   spds::DemandDirection demand_direction = spds::DemandDirection::Auto;
   std::optional<dyck::Vertex> source;
@@ -51,22 +51,22 @@ template <class T> T number(std::string_view text) {
 }
 
 BenchmarkKind parseAnalysis(std::string_view text) {
-  if (text == "dyck")
-    return BenchmarkKind::Dyck;
   if (text == "taint")
     return BenchmarkKind::Taint;
+  if (text == "nonreflexive-taint")
+    return BenchmarkKind::NonreflexiveTaint;
   if (text == "value-flow")
     return BenchmarkKind::ValueFlow;
   throw std::invalid_argument(
-      "invalid --analysis; use dyck, taint, or value-flow");
+      "invalid --analysis; use taint, nonreflexive-taint, or value-flow");
 }
 
 std::string_view analysisName(BenchmarkKind analysis) {
   switch (analysis) {
-  case BenchmarkKind::Dyck:
-    return "dyck";
   case BenchmarkKind::Taint:
     return "taint";
+  case BenchmarkKind::NonreflexiveTaint:
+    return "nonreflexive-taint";
   case BenchmarkKind::ValueFlow:
     return "value-flow";
   }
@@ -76,7 +76,8 @@ std::string_view analysisName(BenchmarkKind analysis) {
 void usage() {
   std::cout
       << "Usage: lotus-cfl-interleaved-dyck spds [options] graph.dot\n"
-         "  --analysis NAME         dyck (default), taint, or value-flow\n"
+         "  --analysis NAME         client analysis: taint (default),\n"
+         "                          nonreflexive-taint, or value-flow\n"
          "  --all-pairs             analyze every source/target pair\n"
          "  --query SOURCE TARGET   one balanced reachability query\n"
          "  --source V              candidate successors of V (post*)\n"
@@ -99,8 +100,9 @@ void usage() {
          "  --max-updates N         weight-update limit per projection\n"
          "  --help                  show this help\n"
          "A query scope is required. Results are a sound upper bound.\n"
-         "taint uses balanced projections and excludes self-pairs.\n"
-         "taint and value-flow reject prefix flags.\n"
+         "nonreflexive-taint uses balanced projections and excludes "
+         "self-pairs.\n"
+         "nonreflexive-taint and value-flow reject prefix flags.\n"
          "value-flow requires bracket-ended balanced paths, excludes "
          "self-pairs,\n"
          "and rejects prefix flags. --direction also applies to its all-pairs "
@@ -253,7 +255,7 @@ CommandLine parseCommandLine(int argc, char **argv) {
 
   if (cmd.path.empty())
     throw std::invalid_argument("missing graph.dot; use --help");
-  if ((cmd.analysis == BenchmarkKind::Taint ||
+  if ((cmd.analysis == BenchmarkKind::NonreflexiveTaint ||
        cmd.analysis == BenchmarkKind::ValueFlow) &&
       (cmd.options.parentheses != spds::StackAcceptance::Empty ||
        cmd.options.brackets != spds::StackAcceptance::Empty))
@@ -263,7 +265,7 @@ CommandLine parseCommandLine(int argc, char **argv) {
     throw std::invalid_argument(
         "missing query scope; use --all-pairs, --query, --source, "
         "--target, or --queries");
-  if (cmd.all_pairs && cmd.analysis == BenchmarkKind::Dyck &&
+  if (cmd.all_pairs && cmd.analysis == BenchmarkKind::Taint &&
       cmd.demand_direction != spds::DemandDirection::Auto)
     throw std::invalid_argument("--direction is only valid for demand queries");
   if (cmd.source && !cmd.target &&
@@ -345,7 +347,7 @@ void printClientResult(const CommandLine &cmd, const spds::Result &result,
     printPairs(result.upper_bound);
 }
 
-int runDyck(const CommandLine &cmd, const dyck::Graph &graph) {
+int runTaint(const CommandLine &cmd, const dyck::Graph &graph) {
   spds::Solver solver(cmd.options);
   auto analysis = solver.prepare(graph);
   const bool reverse =
@@ -433,7 +435,7 @@ int runDyck(const CommandLine &cmd, const dyck::Graph &graph) {
   return 0;
 }
 
-int runTaint(const CommandLine &cmd, const dyck::Graph &graph) {
+int runNonreflexiveTaint(const CommandLine &cmd, const dyck::Graph &graph) {
   const auto started = std::chrono::steady_clock::now();
   const auto demands = cmd.queries_path.empty() ? std::vector<dyck::Pair>{}
                                                 : readDemands(cmd.queries_path);
@@ -445,7 +447,8 @@ int runTaint(const CommandLine &cmd, const dyck::Graph &graph) {
                : analysis.analyzeAll();
   });
 
-  // RQ3's taint relation excludes the diagonal. Do this only at readout:
+  // RQ3's nonreflexive-taint relation excludes the diagonal. Do this only at
+  // readout:
   // epsilon/self reachability remains available inside PDS saturation.
   for (auto *relation :
        {&result.upper_bound, &result.parenthesis_pairs, &result.bracket_pairs})
@@ -487,10 +490,10 @@ int runInterleavedDyckSPDS(int argc, char **argv) {
           "query vertex is not in graph; use --vertex for isolated vertices");
 
     switch (cmd.analysis) {
-    case BenchmarkKind::Dyck:
-      return runDyck(cmd, graph);
     case BenchmarkKind::Taint:
       return runTaint(cmd, graph);
+    case BenchmarkKind::NonreflexiveTaint:
+      return runNonreflexiveTaint(cmd, graph);
     case BenchmarkKind::ValueFlow:
       return runValueFlow(cmd, graph);
     }
