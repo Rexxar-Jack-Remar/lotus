@@ -42,3 +42,11 @@ RESUME_EXISTING_CSV = True
 # Extra environment variables for the benchmark process, e.g. thread controls.
 # Existing environment variables are retained.
 EXTRA_ENVIRONMENT = {}
+
+# When True, resumed/reused CSV rows must match the current executable's
+# SHA-256 before they are trusted. Set to False to allow resuming or reusing
+# rows after the binary has been rebuilt with semantically equivalent changes.
+# The binary hash is still recorded in every row for provenance; only the
+# identity comparison is relaxed. Input files, commands, and the execution
+# environment remain strictly checked.
+REQUIRE_BINARY_IDENTITY = False

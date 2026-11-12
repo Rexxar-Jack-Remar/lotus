@@ -201,7 +201,7 @@ def configuration_matches(
 
 
 def validate_run_identities(rows: list[dict[str, str]]) -> None:
-  """RQ3 configurations use one binary and fixed inputs/environment."""
+  """Check fixed inputs/environment and, when enabled, one binary."""
   identities: dict[tuple[str, str], tuple[str, str]] = {}
   for row in rows:
     for field in ("input_sha256", "binary_sha256"):
@@ -213,8 +213,10 @@ def validate_run_identities(rows: list[dict[str, str]]) -> None:
     if key in identities and identities[key] != identity:
       raise ValueError(f"mixed input contents or client analyses: {key}")
     identities[key] = identity
-  if len({(row["binary_sha256"], row["extra_environment"]) for row in rows}) > 1:
-    raise ValueError("RQ3 rows mix different binaries or EXTRA_ENVIRONMENT settings")
+  if len({row["extra_environment"] for row in rows}) > 1:
+    raise ValueError("RQ3 rows mix different EXTRA_ENVIRONMENT settings")
+  if config.REQUIRE_BINARY_IDENTITY and len({row["binary_sha256"] for row in rows}) > 1:
+    raise ValueError("RQ3 rows mix different binaries")
 
 
 def main() -> int:

@@ -113,10 +113,14 @@ class RQ3Test(unittest.TestCase):
       with path.open(newline="") as stream:
         self.assertEqual(list(csv.DictReader(stream)), [other])
       new_identity = {**identity, "binary_sha256": "3" * 64}
-      before = path.read_bytes()
-      with self.assertRaisesRegex(RuntimeError, "different binary"):
-        run_rq3.prepare_csv(path, False, {key: new_identity})
-      self.assertEqual(path.read_bytes(), before)
+      self.assertEqual(run_rq3.prepare_csv(path, False, {key: new_identity}), set())
+      with path.open(newline="") as stream:
+        self.assertEqual(list(csv.DictReader(stream)), [other])
+      with mock.patch.object(config, "REQUIRE_BINARY_IDENTITY", True):
+        before = path.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, "different binary"):
+          run_rq3.prepare_csv(path, False, {key: new_identity})
+        self.assertEqual(path.read_bytes(), before)
       self.assertEqual(run_rq3.prepare_csv(path, False,
                        {key: new_identity, other_key: new_identity}), set())
       with path.open(newline="") as stream:
@@ -127,11 +131,14 @@ class RQ3Test(unittest.TestCase):
     with tempfile.TemporaryDirectory() as directory:
       path = Path(directory) / "runs.csv"
       aggregate_rq3.write_rows(path, run_rq3.CSV_COLUMNS, [row])
-      before = path.read_bytes()
-      with self.assertRaisesRegex(RuntimeError, "different binary"):
-        run_rq3.prepare_csv(path, True, {("test", "input.dot", "spds"): {
-            "binary_sha256": "3" * 64, "extra_environment": "{}"}})
-      self.assertEqual(path.read_bytes(), before)
+      expected = {("test", "input.dot", "spds"): {
+          "binary_sha256": "3" * 64, "extra_environment": "{}"}}
+      self.assertEqual(run_rq3.prepare_csv(path, True, expected), set())
+      with mock.patch.object(config, "REQUIRE_BINARY_IDENTITY", True):
+        before = path.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, "different binary"):
+          run_rq3.prepare_csv(path, True, expected)
+        self.assertEqual(path.read_bytes(), before)
 
   @unittest.skipUnless(os.environ.get("RQ3_INTEGRATION_TESTS") == "1",
                        "set RQ3_INTEGRATION_TESTS=1 after building the tool")
@@ -612,28 +619,41 @@ class RQ3Test(unittest.TestCase):
     with tempfile.TemporaryDirectory() as directory:
       path = Path(directory) / "runs.csv"
       aggregate_rq3.write_rows(path, run_rq3.CSV_COLUMNS, [row])
-      for field in ("input_sha256", "binary_sha256", "analysis", "command", "extra_environment"):
-        with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, "changed"):
+      for field in ("input_sha256", "analysis", "command", "extra_environment"):
+        with self.subTest(field=field), self.assertRaisesRegex(
+            RuntimeError, "changed|environment"
+        ):
           run_rq3.prepare_csv(path, True, {key: {field: "changed"}})
+      self.assertEqual(run_rq3.prepare_csv(
+          path, True, {key: {"binary_sha256": "3" * 64}}), set())
 
   def test_aggregation_rejects_mixed_inputs_binaries_and_clients(self) -> None:
     row = self.make_row({"name": "regularization", "tool": "staged"}, [])
     other = {**row, "experiment": "acf"}
     aggregate_rq3.validate_run_identities([row, other])
-    for field, value in (("input_sha256", "3" * 64), ("binary_sha256", "3" * 64),
+    aggregate_rq3.validate_run_identities(
+        [row, {**other, "binary_sha256": "3" * 64}]
+    )
+    for field, value in (("input_sha256", "3" * 64),
                          ("analysis", "taint"), ("extra_environment", '{"X":"1"}')):
       with self.subTest(field=field), self.assertRaisesRegex(ValueError, "mix"):
         aggregate_rq3.validate_run_identities([row, {**other, field: value}])
+    with mock.patch.object(config, "REQUIRE_BINARY_IDENTITY", True), self.assertRaisesRegex(
+        ValueError, "mix"
+    ):
+      aggregate_rq3.validate_run_identities(
+          [row, {**other, "binary_sha256": "3" * 64}]
+      )
 
-  def test_timeout_continues_repetitions_but_memory_limit_stops(self) -> None:
+  def test_timeout_stops_repetitions_and_memory_limit_always_stops(self) -> None:
     experiment = next(e for e in config.EXPERIMENTS if e["name"] == "mutual-refinement")
     benchmark = run_rq3.Benchmark("test", "taint", config.REPOSITORY_ROOT,
                                  config.REPOSITORY_ROOT / "input.dot")
     for statuses, expected_count in (
-        (["timeout"] * 5, 5),
-        (["timeout"] + ["success"] * 4, 5),
+        (["timeout"] * 5, 1),
+        (["timeout"] + ["success"] * 4, 1),
         (["memory-limit"] + ["success"] * 4, 1),
-        (["timeout", "memory-limit"] + ["success"] * 3, 2),
+        (["timeout", "memory-limit"] + ["success"] * 3, 1),
     ):
       with self.subTest(statuses=statuses), tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -642,6 +662,7 @@ class RQ3Test(unittest.TestCase):
                    for i, status in enumerate(statuses)]
         with (mock.patch.object(config, "MEASURED_REPETITIONS", 5),
               mock.patch.object(config, "WARMUP_REPETITIONS", 0),
+              mock.patch.object(config, "SKIP_BENCHMARK_AFTER_TIMEOUT", True),
               mock.patch.object(config, "ARTIFACT_DIRECTORY", root / "artifacts"),
               mock.patch.object(run_rq3, "run_once", side_effect=samples) as run):
           results, artifacts, capture = run_rq3.run_experiment(benchmark, experiment)
@@ -649,6 +670,64 @@ class RQ3Test(unittest.TestCase):
         self.assertEqual([r.status for r in results], statuses[:expected_count])
         self.assertEqual(artifacts, [])
         self.assertIsNone(capture)
+
+    samples = [run_rq3.RunResult("timeout", -9, 0.1, "", "", {}, Path("/tmp/timeout.log"))
+               for _ in range(5)]
+    with (mock.patch.object(config, "MEASURED_REPETITIONS", 5),
+          mock.patch.object(config, "WARMUP_REPETITIONS", 0),
+          mock.patch.object(config, "SKIP_BENCHMARK_AFTER_TIMEOUT", False),
+          mock.patch.object(run_rq3, "run_once", side_effect=samples) as run):
+      results, _, _ = run_rq3.run_experiment(benchmark, experiment)
+    self.assertEqual(run.call_count, 5)
+    self.assertEqual([result.status for result in results], ["timeout"] * 5)
+
+  def test_timeout_skips_remaining_methods_for_same_benchmark(self) -> None:
+    experiments = [
+        next(item for item in config.EXPERIMENTS if item["name"] == name)
+        for name in ("spds", "mutual-refinement")
+    ]
+    timeout = run_rq3.RunResult("timeout", -9, 0.1, "", "", {}, Path("/tmp/timeout.log"))
+    success = run_rq3.RunResult("success", 0, 0.1, "", "", {}, Path("/tmp/success.log"))
+    calls = []
+
+    def fake_run_experiment(benchmark, experiment, *, reused_results=None):
+      calls.append((benchmark.dot.name, experiment["name"]))
+      result = timeout if benchmark.dot.name == "a.dot" else success
+      return [result], [], None
+
+    args = mock.Mock(dry_run=False, restart=False, dataset=None,
+                     benchmark=None, experiment=None)
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      binary = root / "solver"
+      binary.write_text("fixture")
+      binary.chmod(0o755)
+      benchmarks = []
+      for name in ("a.dot", "b.dot"):
+        dot = root / name
+        dot.write_text("fixture")
+        benchmarks.append(run_rq3.Benchmark("test", "taint", root, dot))
+      with (
+          mock.patch.object(config, "REPOSITORY_ROOT", root),
+          mock.patch.object(config, "OUTPUT_CSV", root / "runs.csv"),
+          mock.patch.object(config, "SKIP_BENCHMARK_AFTER_TIMEOUT", True),
+          mock.patch.object(run_rq3, "parse_arguments", return_value=args),
+          mock.patch.object(run_rq3, "validate_configuration", return_value=experiments),
+          mock.patch.object(run_rq3, "discover_benchmarks", return_value=benchmarks),
+          mock.patch.object(run_rq3, "binary_for", return_value=binary),
+          mock.patch.object(run_rq3, "sha256", return_value="0" * 64),
+          mock.patch.object(run_rq3, "prepare_csv", return_value=set()),
+          mock.patch.object(run_rq3, "create_row", return_value={}),
+          mock.patch.object(run_rq3, "append_row"),
+          mock.patch.object(run_rq3.provenance, "check_files"),
+          mock.patch.object(run_rq3, "run_experiment", side_effect=fake_run_experiment),
+      ):
+        self.assertEqual(run_rq3.main(), 1)
+    self.assertEqual(calls, [
+        ("a.dot", "spds"),
+        ("b.dot", "spds"),
+        ("b.dot", "mutual-refinement"),
+    ])
 
   def test_timeout_budget_includes_process_launch(self) -> None:
     process = mock.Mock()

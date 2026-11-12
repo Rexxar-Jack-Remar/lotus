@@ -7,7 +7,7 @@ import math
 import shlex
 from pathlib import Path
 
-from config import REPOSITORY_ROOT
+from config import REPOSITORY_ROOT, REQUIRE_BINARY_IDENTITY
 
 COLUMNS = ["warmup_repetitions", "input_sha256", "binary_sha256",
            "extra_environment", "timeout_seconds", "memory_limit_bytes",
@@ -77,7 +77,11 @@ def validate(row, expected=None, require_success=False):
     if row.get("row_sha256") != row_digest(row):
       raise ValueError("row SHA256 mismatch (or missing provenance)")
     if expected:
-      changed = [key for key, value in expected.items() if str(row.get(key)) != str(value)]
+      changed = [
+          key for key, value in expected.items()
+          if str(row.get(key)) != str(value)
+          and not (key == "binary_sha256" and not REQUIRE_BINARY_IDENTITY)
+      ]
       if changed:
         raise ValueError("run conditions changed: " + ", ".join(changed))
     validate_logs(row)
@@ -116,8 +120,10 @@ def validate(row, expected=None, require_success=False):
 
 
 def check_files(dot, binary, expected):
-  if sha256(dot) != expected["input_sha256"] or sha256(binary) != expected["binary_sha256"]:
-    raise RuntimeError("input or binary changed during this invocation; use a fresh DATA_DIRECTORY")
+  if sha256(dot) != expected["input_sha256"]:
+    raise RuntimeError("input changed during this invocation; use a fresh DATA_DIRECTORY")
+  if REQUIRE_BINARY_IDENTITY and sha256(binary) != expected["binary_sha256"]:
+    raise RuntimeError("binary changed during this invocation; use a fresh DATA_DIRECTORY")
 
 
 def resume_rows(path, columns, key_fields, expected):
@@ -128,12 +134,15 @@ def resume_rows(path, columns, key_fields, expected):
     rows = list(reader)
   completed = set()
   versions = {(item["binary_sha256"], item["extra_environment"]) for item in expected.values()}
+  environments = {item["extra_environment"] for item in expected.values()}
   for row in rows:
     key = tuple(row[field] for field in key_fields)
     if key in completed:
       raise RuntimeError(f"duplicate CSV row: {key}")
     validate(row, expected.get(key))
-    if (row["binary_sha256"], row["extra_environment"]) not in versions:
+    env_matches = row["extra_environment"] in environments
+    binary_matches = (row["binary_sha256"], row["extra_environment"]) in versions
+    if not env_matches or (REQUIRE_BINARY_IDENTITY and not binary_matches):
       raise RuntimeError("CSV mixes binaries/environments; use a fresh DATA_DIRECTORY or --restart")
     if sha256(stored_path(row["dot_path"])) != row["input_sha256"]:
       raise RuntimeError(f"input SHA256 mismatch: {row['dot_path']}")

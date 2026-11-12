@@ -96,13 +96,17 @@ class ProvenanceTest(unittest.TestCase):
 
   def test_reuse_rejects_changed_conditions_and_csv_cells(self):
     row = self.source()
-    for field, value in [('binary_sha256', '0'*64), ('extra_environment', '{"X":"1"}'),
-                         ('configured_repetitions', '3'), ('warmup_repetitions', '1'),
-                         ('timeout_seconds', '1'), ('memory_limit_bytes', '1'), ('command', 'wrong')]:
-      expected = self.expected()
-      next(iter(expected.values()))[field] = value
-      with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, field):
-        rq3.load_rq1_adaptive_results(rq1.config.OUTPUT_CSV, expected)
+    with mock.patch.object(provenance, 'REQUIRE_BINARY_IDENTITY', True):
+      for field, value in [('binary_sha256', '0'*64), ('extra_environment', '{"X":"1"}'),
+                           ('configured_repetitions', '3'), ('warmup_repetitions', '1'),
+                           ('timeout_seconds', '1'), ('memory_limit_bytes', '1'), ('command', 'wrong')]:
+        expected = self.expected()
+        next(iter(expected.values()))[field] = value
+        with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, field):
+          rq3.load_rq1_adaptive_results(rq1.config.OUTPUT_CSV, expected)
+    expected = self.expected()
+    next(iter(expected.values()))['binary_sha256'] = '0' * 64
+    rq3.load_rq1_adaptive_results(rq1.config.OUTPUT_CSV, expected)
     row['time_ms'] = '[1,2]'
     with self.assertRaisesRegex(RuntimeError, 'row SHA256'):
       provenance.validate(row)

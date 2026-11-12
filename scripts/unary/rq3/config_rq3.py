@@ -5,7 +5,8 @@ from pathlib import Path
 from config import (
     BENCHMARK_SUITES, BINARY_PATH, DOT_GLOB, EXTRA_ENVIRONMENT,
     MEASURED_REPETITIONS, MEMORY_LIMIT_GIB, REPOSITORY_ROOT,
-    RESUME_EXISTING_CSV, SEARCH_RECURSIVELY, TIMEOUT_SECONDS, WARMUP_REPETITIONS,
+    REQUIRE_BINARY_IDENTITY, RESUME_EXISTING_CSV, SEARCH_RECURSIVELY,
+    TIMEOUT_SECONDS, WARMUP_REPETITIONS,
 )
 from rq1.config_rq1 import OUTPUT_CSV as RQ1_OUTPUT_CSV
 
@@ -53,7 +54,9 @@ EXPERIMENTS = [
     },
 ]
 
-# Timeouts continue; memory limits always stop. This flag covers other failures.
+# Stop after the first timeout and move on to the next benchmark.
+SKIP_BENCHMARK_AFTER_TIMEOUT = True
+# Memory limits always stop repetitions. This flag covers other failures.
 STOP_REPETITIONS_AFTER_FAILURE = True
 CAPTURE_RELATIONS = True
 

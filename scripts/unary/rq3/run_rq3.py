@@ -713,6 +713,11 @@ def prepare_csv(
         raise RuntimeError(f"CSV header mismatch: {path}; use a fresh DATA_DIRECTORY")
       rows = list(reader)
     if expected_runs:
+      environments = {
+          item["extra_environment"]
+          for item in expected_runs.values()
+          if "extra_environment" in item
+      }
       versions = {(item["binary_sha256"], item["extra_environment"])
                   for item in expected_runs.values()
                   if "binary_sha256" in item and "extra_environment" in item}
@@ -720,8 +725,14 @@ def prepare_csv(
           row for row in rows
           if (row["dataset"], row["dot_path"], row["experiment"]) not in expected_runs
       ]
-      if versions and any((row.get("binary_sha256"), row.get("extra_environment"))
-                          not in versions for row in preserved):
+      environment_changed = environments and any(
+          row.get("extra_environment") not in environments for row in preserved
+      )
+      binary_changed = config.REQUIRE_BINARY_IDENTITY and versions and any(
+          (row.get("binary_sha256"), row.get("extra_environment")) not in versions
+          for row in preserved
+      )
+      if environment_changed or binary_changed:
         raise RuntimeError("existing CSV uses a different binary/environment; "
                            "use a fresh DATA_DIRECTORY or rerun all methods with --restart")
     retained: list[dict[str, str]] = []
@@ -739,7 +750,13 @@ def prepare_csv(
           continue
         if not resume:
           continue
-        if any(row.get(field) != value for field, value in expected_runs[key].items()):
+        changed = any(
+            row.get(field) != value
+            and not (field == "binary_sha256"
+                     and not config.REQUIRE_BINARY_IDENTITY)
+            for field, value in expected_runs[key].items()
+        )
+        if changed:
           raise RuntimeError(
               f"input, binary, analysis, command or environment changed for {key}; "
               "use a fresh output CSV or --restart"
@@ -833,8 +850,9 @@ def run_experiment(
         result.stderr += "\ninvalid SPDS engine/client/stack mode or candidate count\n"
         write_log(result.log_path, command, result.started, result)
       results.append(result)
-      # A timeout does not cancel the remaining measurements (as in RQ1/RQ2).
       if result.status == "memory-limit" or (
+          result.status == "timeout" and config.SKIP_BENCHMARK_AFTER_TIMEOUT
+      ) or (
           result.status not in {"success", "timeout"}
           and config.STOP_REPETITIONS_AFTER_FAILURE
       ):
@@ -1014,6 +1032,7 @@ def main() -> int:
     print(f"Warm-ups/measured: {config.WARMUP_REPETITIONS}/{config.MEASURED_REPETITIONS}")
     print(f"Timeout (s): {config.TIMEOUT_SECONDS}")
     print(f"Memory limit (GiB): {config.MEMORY_LIMIT_GIB}")
+    print(f"Skip benchmark after timeout: {config.SKIP_BENCHMARK_AFTER_TIMEOUT}")
     for benchmark in benchmarks:
       for experiment in experiments:
         if not config.supports_analysis(experiment, benchmark.analysis):
@@ -1097,6 +1116,16 @@ def main() -> int:
       if (any(result.status != "success" for result in results)
           or capture_result is None or capture_result.status != "success"):
         failed = True
+      timed_out = (
+          any(result.status == "timeout" for result in results)
+          or (capture_result is not None and capture_result.status == "timeout")
+      )
+      if timed_out and config.SKIP_BENCHMARK_AFTER_TIMEOUT:
+        print(
+            f"  timeout; skipping remaining experiments for {benchmark.dot.name}",
+            flush=True,
+        )
+        break
   print(f"Finished. Results: {csv_path}")
   return 1 if failed else 0
 
